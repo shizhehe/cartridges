@@ -10,7 +10,7 @@ import torch.nn as nn
 
 from typing import Any, Optional
 
-from cartridges.structs import Context
+from cartridges.context import StructuredContext
 from transformers import DynamicCache
 
 
@@ -294,7 +294,7 @@ class KVCacheFactory(abc.ABC):
 
     @abc.abstractmethod
     def initalize_kv_cache(
-        self, context: Context, tokenizer, model, attn_config: AttnConfig
+        self, context: StructuredContext, tokenizer, model, attn_config: AttnConfig
     ) -> TrainableCache:
         raise NotImplementedError()
 
@@ -311,7 +311,7 @@ class KVCacheFactoryWithStateSaving(abc.ABC):
     @abc.abstractmethod
     def initalize_kv_cache_impl(
         self,
-        context: Context,
+        context: StructuredContext,
         tokenizer,
         model,
         attn_config: AttnConfig,
@@ -346,7 +346,7 @@ class KVCacheFactoryWithStateSaving(abc.ABC):
         raise NotImplementedError("Need to add saving to wanb")
 
     def initalize_kv_cache(
-        self, context: Context, tokenizer, model, attn_config: AttnConfig
+        self, context: StructuredContext, tokenizer, model, attn_config: AttnConfig
     ) -> TrainableCache:
         maybe_cache = self.maybe_load_cached()
         if maybe_cache is not None:

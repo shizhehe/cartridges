@@ -9,7 +9,7 @@ from cartridges.initialization.first_n_tokens import KVCacheInitFromFirstNTokens
 from cartridges.models.llama import LlamaForCausalLM
 from cartridges.tasks.longhealth import LongHealthEvalDataset, LongHealthMultipleChoiceGenerateDataset
 from cartridges.tasks.longhealth.context import LongHealthStructuredContextConfig
-from cartridges.tasks.mmlu import MMLUEvalDataset, MMLUGenerateDataset
+from cartridges.tasks.mmlu import MMLUGenerateDataset
 from cartridges.train import EvalDatasetConfig, GenerateDatasetConfig, TrainConfig
 from cartridges.models.config import HFModelConfig
 from cartridges.datasets import CartridgeTrainDataset
@@ -24,7 +24,7 @@ patients_str = f"p{NUM_PATIENTS}"
 patient_ids = [f"patient_{idx:02d}" for idx in patient_idxs]
 
 data_sources = [
-    "/data/sabri/cartridges/2025-06-03-11-35-08-longhealth_synthesize/longhealth_synthesize_p10_n1024-0/artifact/dataset.pkl",
+    "/data/sabri/cartridges/2025-06-03-13-00-41-longhealth_synthesize/longhealth_synthesize_p10_n1024-0/artifact/dataset.pkl",
 ]
 
 config = TrainConfig(

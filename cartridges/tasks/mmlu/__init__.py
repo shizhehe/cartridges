@@ -1,57 +1,14 @@
-from dataclasses import field
 import random
-from typing import Literal
 import datasets
 import torch
 from cartridges.datasets import (
-    CartridgeTrainDataset,
     CartridgeGenerateDataset,
     CartridgeGenerateDatasetElement,
 )
 from transformers import PreTrainedTokenizerFast
-from pydantic import Field
 
-from cartridges.structs import ContextConvo, Message
-from cartridges.tasks.mmlu.generate_hf_dataset import DATASET_NAME
 from cartridges.train import GenerateDatasetConfig
 
-
-class MMLUEvalDataset(CartridgeTrainDataset):
-    class Config(CartridgeTrainDataset.Config):
-        num_samples: int
-        seed: int = 42
-        label_type: Literal["tokens", "logits"] = "tokens"
-        data_sources: list[tuple[str, int | None],] = Field(  # path, limit
-            default_factory=list
-        )
-
-    def __init__(self, config: Config, tokenizer: PreTrainedTokenizerFast):
-        self.config = config
-        self.tokenizer = tokenizer
-
-        data = [
-            ContextConvo(
-                id=None,
-                messages=[
-                    Message(
-                        content=row["prompt"],
-                        role="user",
-                    ),
-                    Message(
-                        content=row["answer"],
-                        role="assistant",
-                    ),
-                ],
-                type="mmlu",
-                metadata={},
-            )
-            for row in datasets.load_dataset(DATASET_NAME)["test"]
-        ]
-
-        random.seed(config.seed)
-        random.shuffle(data)
-
-        self.data = data[: self.config.num_samples]
 
 
 def parse_chat_messages(text):

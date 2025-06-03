@@ -560,26 +560,6 @@ def creative_seed_prompt(**kwargs):
     ]
     return random.choice(prompt)
 
-
-def kalamang_ke(**kwargs):
-    prompt = [
-        (
-            "Please generate a question asking the user to translate a Kalamang sentence of your choosing to English. "
-            "Answer only with the question, do not include any other text."
-        )
-    ]
-    return prompt[0]
-def kalamang_ek(**kwargs):
-    prompt = [
-        (
-            "Please generate a question asking the user to translate a Kalamang sentence of your choosing to English. "
-            "Answer only with the question, do not include any other text."
-        )
-    ]
-    return prompt[0]
-
-
-
 def generic_seed_prompt(**kwargs):
     return (
         f"Please generate a single chat message to begin a conversation about the information in the corpus. Ask a question about the corpus or make a request."
