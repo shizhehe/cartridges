@@ -3,14 +3,13 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "capsules"
+name = "cartridges"
 version = "0.0.1"
-description = "Lookup over kvs"
+description = "Lightweight and general-purpose long-context representations"
 requires-python = ">=3.12"
 dependencies = [
     "torch",
     "openai",
-    "mwparserfromhell",
     "datasets",
     "transformers==4.49.0",
     "numpy",
@@ -19,7 +18,6 @@ dependencies = [
     "wandb",
     "ipykernel",
     "pydrantic",
-    "pyright",
     "tiktoken",
     "together",
     "peft",
@@ -28,15 +26,13 @@ dependencies = [
     "pymupdf4llm",
     "anthropic",
     "evaluate",
-    "sacrebleu",
-    "seaborn",
 ]
 
 [project.scripts]
 pdr = "pdr.cli:main"
 
 [tool.pyright]
-include = ["capsules"]
+include = ["cartridges"]
 
 [tool.setuptools]
-packages = ["capsules"]
+packages = ["cartridges"]

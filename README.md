@@ -20,62 +20,64 @@
 
 </div>
 
+## What is this?
+
+Blah...
+
+<div align="center">
+    <img src="assets/tradeoff-plots.png" height=70 alt="Cartridges logo"/>
+</div>
+
+**Table of contents**
+- [Setup](#setup)
+- [Generating Training Data with Self-Study](#generating-training-data-with-self-study)
+- [Training a capsule](#training-a-capsule)
+- [Analysis](#analysis)
+
+
 ## Setup
 
-### Installation
-Create a conda environment
-```bash
-conda create -n capsules12 python=3.12
-conda activate capsules12
-pip install uv
-```
+**Step 1:** Clone the repository and install the Python package.
 
-Install torch: https://pytorch.org/get-started/locally/ 
-Then install the dependencies:
 ```bash
+git clone https://github.com/HazyResearch/cartridges && cd cartridges
+pip install uv
 uv pip install -e . 
 ```
-Note there *might* be some missing dependencies -- I haven't checked recently. 
+Note: there *might* be some missing dependencies -- I haven't checked recently. 
 If you run into missing dependencies, just add them to the `pyproject.toml` file and/or pip install them individually. 
 
-### Environment Variables
+**Step 2:** Set some environment variables
 
-The codebase relies on your setting the following variables. We recommend adding them to your `~/.bashrc` or `~/.zshrc` file on each machine you use.
+The codebase relies on your setting the following variables. We recommend adding them to your `~/.bashrc`, `~/.zshrc`, `DockerFile`, etc.
 
 ```bash
 # path to your the directory where you cloned this repo
-export CAPSULES_DIR=/path/to/capsules
+export CARTRIDGES_DIR=/path/to/cartridges/repo
 
 # path to a directory where you want to store outputs like models checkpoints and such
-export CAPSULES_OUTPUT_DIR=/data/sabri/capsules/outputs
+export CARTRIDGES_OUTPUT_DIR=/path/to/cartridges/outputs
 
 # OPTIONAL: Your API keys for any cloud providers you want to use (don't need to set all)
 export TOGETHER_API_KEY=...
 export OPENAI_API_KEY=...
-
-# OPTIONAL: Set your wandb storage directories to be on a disk where you have space https://docs.wandb.ai/guides/artifacts/storage/
-export WANDB_DIR="/data/sabri/wandb/logs"
-export WANDB_CACHE_DIR="/data/sabri/wandb/cache"
-export WANDB_CONFIG_DIR="/data/sabri/wandb/config"
-export WANDB_DATA_DIR="/data/sabri/wandb/data"
-export WANDB_ARTIFACT_DIR="/data/sabri/wandb/artifacts"
 ```
 
 
-## Generating Training Data
+## Generating Training Data with Self-Study
 
 For configuration of experiments, we use [Pydantic](https://docs.pydantic.dev/latest/) models.
 Pydantic models are useful for defining the schema of the config and quickly ensuring that the config is valid at the beginning of the script. We also rely on `pydrantic`, which provides a few utilities for working with configs. 
 
-To generate training data for a document, you can create a config file under `capsules/configs/{your_name}/generate/` that looks like this (see `capsules/configs/sabri/generate/m03d17_generate_longhealth_p01.py` for an example): 
+To generate training data for a document, you can create a config file under `cartridges/configs/{your_name}/generate/` that looks like this (see `cartridges/configs/sabri/generate/m03d17_generate_longhealth_p01.py` for an example): 
 
 ```python 
 import os
 from pathlib import Path
 import pydrantic
 
-from capsules.clients.together import TogetherClient
-from capsules.generate.generate_basic import GenerateDatasetConfig, GenerateSettings
+from cartridges.clients.together import TogetherClient
+from cartridges.generate.generate_basic import GenerateDatasetConfig, GenerateSettings
 
 # Make sure you have a valid API key for Together in your environment (e.g. put it in your ~/.bashrc)
 client_config = TogetherClient.Config(
@@ -102,13 +104,13 @@ config = GenerateConfig(
     ),
     document_title="Large Language Monkeys: Scaling Inference Compute with Repeated Sampling",
     document_path_or_url=str(MONKEYS.absolute()),
-    output_dir=os.environ.get("CAPSULES_OUTPUT_DIR", "."),
+    output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),
     # generate config
     num_samples=8192,
     batch_size=128,
     max_num_batches_in_parallel=20,
     wandb=WandBConfig(
-        project="capsules",
+        project="cartridges",
         entity="hazy-research",
     ),
 )
@@ -120,13 +122,13 @@ if __name__ == "__main__":
 
 Important parameters to set: 
 - `document_path_or_url`: this should point to a url or a local file that contains the document for which you want to generate training data. Add any good documents you find to the `data/example_docs` directory.
-- `question_client` and `answer_client`: update this config to change the models and model arguments (e.g. temperature) used for the question and answer clients. See `capsules/clients` for all the available clients.
+- `question_client` and `answer_client`: update this config to change the models and model arguments (e.g. temperature) used for the question and answer clients. See `cartridges/clients` for all the available clients.
 
-See all the parameters that control the generation in `capsules.generate.generate_basic.GenerateDatasetConfig`.
+See all the parameters that control the generation in `cartridges.generate.generate_basic.GenerateDatasetConfig`.
 
 Once you've created the file run it with: 
 ```bash
-python capsules/configs/generate/your_file_name.py
+python cartridges/configs/generate/your_file_name.py
 ```
 
 Once the run is complete it will write the results to a [feather file](https://pandas.pydata.org/docs/reference/api/pandas.read_feather.html) and print the path to the file to the terminal. The output will look like:
@@ -148,10 +150,10 @@ df = pd.read_feather("/path/to/output/dir/2025-03-02-14-29-27-m03d01_generate_be
 ### Implementing a new data generation method
 To implement a new data generation method:
 
-1. Create a new file in the `capsules/generate/{your_name}` directory (e.g., `generate_my_method.py`)
-2. Subclass `BaseGenerateConfig` from `capsules.generate.base` 
+1. Create a new file in the `cartridges/generate/{your_name}` directory (e.g., `generate_my_method.py`)
+2. Subclass `BaseGenerateConfig` from `cartridges.generate.base` 
 3. Implement the `_make_dataset` method that returns a `QADataset`
-4. Create a config file in `capsules/configs/{your_name}/generate/` that uses your new class and run it in the same way as above.
+4. Create a config file in `cartridges/configs/{your_name}/generate/` that uses your new class and run it in the same way as above.
 
 ### Using Tokasaurus for data generation
 We do most of our data generation with [Tokasaurus](https://github.com/jordan-benjamin/tokasaurus/tree/add-top-logprobs). 
@@ -190,14 +192,14 @@ client_config = TokasaurusClient.Config(
 
 
 ### Finding the generated dataset in WandB
-The data will also be saved to WandB as a feather file artifact. To find it go to the WandB artifact, go to the `capsules` project in the UI and click on the "Artifacts" tab. 
+The data will also be saved to WandB as a feather file artifact. To find it go to the WandB artifact, go to the `cartridges` project in the UI and click on the "Artifacts" tab. 
 You should see an entry on the left with the same name as you provided in the config. Click on it and select the version. (If you run the script multiple times, you'll see multiple versions.) 
 
 To grab the path to the artifact, copy the value in the "Full Name" field shown below.
 
 ![image](static/dataset-artifact.png)
 
-For example, here the full path is `hazy-research/capsules/m03d17_generate_longhealth_p01:v0`. You'll need this path to train a capsule on the generated data. 
+For example, here the full path is `hazy-research/cartridges/m03d17_generate_longhealth_p01:v0`. You'll need this path to train a capsule on the generated data. 
 
 
 
@@ -205,10 +207,10 @@ For example, here the full path is `hazy-research/capsules/m03d17_generate_longh
 
 To try launching a first experiment, you can try running on   
 ```
-python capsules/configs/sabri/train/m03d17_train_longhealth_p01.py
+python cartridges/configs/sabri/train/m03d17_train_longhealth_p01.py
 ```
 
-See `capsules.train.TrainConfig` for the schema of the main config we use for training. 
+See `cartridges.train.TrainConfig` for the schema of the main config we use for training. 
 
 Here is an example of a config file: 
 
@@ -218,12 +220,12 @@ from pathlib import Path
 
 import pydrantic
 
-from capsules.kv_initialization.strategies.first_n_tokens import KVCacheInitFromFirstNTokensOfContext
-from capsules.train import EvalDatasetConfig, GenerateDatasetConfig, TrainConfig
-from capsules.config import HFModelConfig
-from capsules.datasets import CapsuleDataset
-from capsules.tasks.longhealth import LongHealthEvalDataset, LongHealthMultipleChoiceGenerateDataset
-from capsules.utils import WandBConfig
+from cartridges.kv_initialization.strategies.first_n_tokens import KVCacheInitFromFirstNTokensOfContext
+from cartridges.train import EvalDatasetConfig, GenerateDatasetConfig, TrainConfig
+from cartridges.config import HFModelConfig
+from cartridges.datasets import CapsuleDataset
+from cartridges.tasks.longhealth import LongHealthEvalDataset, LongHealthMultipleChoiceGenerateDataset
+from cartridges.utils import WandBConfig
 
 file_name = Path(__file__).stem
 config = TrainConfig(
@@ -234,7 +236,7 @@ config = TrainConfig(
     dataset=CapsuleDataset.Config(
         data_sources=[
             # This is the path to the generated dataset we created above
-            ("hazy-research/capsules/m03d17_generate_longhealth_p01:v0", None),
+            ("hazy-research/cartridges/m03d17_generate_longhealth_p01:v0", None),
         ],  
         is_wandb=True,
         label_type="logits",
@@ -260,7 +262,7 @@ config = TrainConfig(
                 data_sources=[
                     # This is the path to another test dataset we created with gpt4o using
                     # the approach as above
-                    ("hazy-research/capsules/m03d12_longhealth_p01_basic_qa_test:v0", None),
+                    ("hazy-research/cartridges/m03d12_longhealth_p01_basic_qa_test:v0", None),
                 ],
                 is_wandb=True,
                 label_type="tokens",
@@ -276,11 +278,11 @@ config = TrainConfig(
     epochs=1,
     lr=5e-3,
     wandb=WandBConfig(
-        project="capsules",
+        project="cartridges",
         tags=["cache_tuning", "development"],
         entity="hazy-research",
     ),
-    output_dir=os.environ["CAPSULES_OUTPUT_DIR"],
+    output_dir=os.environ["CARTRIDGES_OUTPUT_DIR"],
     train_batch_size=6,
 )
 
@@ -292,7 +294,7 @@ if __name__ == "__main__":
 To launch a data parallel training run, you can run:
 
 ```bash
-torchrun --standalone --nproc_per_node=2 capsules/configs/train/m03d09_train_memorization_and_qa_no_sum.py
+torchrun --standalone --nproc_per_node=2 cartridges/configs/train/m03d09_train_memorization_and_qa_no_sum.py
 ```
 
 ## Analysis
@@ -301,7 +303,7 @@ torchrun --standalone --nproc_per_node=2 capsules/configs/train/m03d09_train_mem
 
 If you have access to some idle GPUs on a cluster you can SSH into, just launch a streamlit app and make sure the port is forwarded to your local: 
 ```bash
-streamlit run capsules/analysis/dashboards/chat_w_cache.py
+streamlit run cartridges/analysis/dashboards/chat_w_cache.py
 ```
 Our training scripts log the cache to WandB and the streamlit app just pulls it from there. So, no need  to run the app on the same machine you trained the model.
 
