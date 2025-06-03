@@ -31,7 +31,7 @@ Blah...
 **Table of contents**
 - [Setup](#setup)
 - [Generating Training Data with Self-Study](#generating-training-data-with-self-study)
-- [Training a capsule](#training-a-capsule)
+- [Training a Cartridge](#training-a-Cartridge)
 - [Analysis](#analysis)
 
 
@@ -199,11 +199,11 @@ To grab the path to the artifact, copy the value in the "Full Name" field shown 
 
 ![image](static/dataset-artifact.png)
 
-For example, here the full path is `hazy-research/cartridges/m03d17_generate_longhealth_p01:v0`. You'll need this path to train a capsule on the generated data. 
+For example, here the full path is `hazy-research/cartridges/m03d17_generate_longhealth_p01:v0`. You'll need this path to train a Cartridge on the generated data. 
 
 
 
-## Training a capsule 
+## Training a Cartridge 
 
 To try launching a first experiment, you can try running on   
 ```
@@ -223,7 +223,7 @@ import pydrantic
 from cartridges.kv_initialization.strategies.first_n_tokens import KVCacheInitFromFirstNTokensOfContext
 from cartridges.train import EvalDatasetConfig, GenerateDatasetConfig, TrainConfig
 from cartridges.config import HFModelConfig
-from cartridges.datasets import CapsuleDataset
+from cartridges.datasets import CartridgeDataset
 from cartridges.tasks.longhealth import LongHealthEvalDataset, LongHealthMultipleChoiceGenerateDataset
 from cartridges.utils import WandBConfig
 
@@ -233,7 +233,7 @@ config = TrainConfig(
     model=HFModelConfig(
         pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct"
     ),
-    dataset=CapsuleDataset.Config(
+    dataset=CartridgeDataset.Config(
         data_sources=[
             # This is the path to the generated dataset we created above
             ("hazy-research/cartridges/m03d17_generate_longhealth_p01:v0", None),
@@ -258,7 +258,7 @@ config = TrainConfig(
         EvalDatasetConfig(
             name_for_wandb="generated_questions",
             batch_size=16,
-            dataset=CapsuleDataset.Config(
+            dataset=CartridgeDataset.Config(
                 data_sources=[
                     # This is the path to another test dataset we created with gpt4o using
                     # the approach as above
@@ -299,7 +299,7 @@ torchrun --standalone --nproc_per_node=2 cartridges/configs/train/m03d09_train_m
 
 ## Analysis
 
-### Chatting with a capsule 
+### Chatting with a Cartridge 
 
 If you have access to some idle GPUs on a cluster you can SSH into, just launch a streamlit app and make sure the port is forwarded to your local: 
 ```bash

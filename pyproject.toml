@@ -35,4 +35,4 @@ pdr = "pdr.cli:main"
 include = ["cartridges"]
 
 [tool.setuptools]
-packages = ["cartridges"]
+packages = ["cartridges", "scripts"]
