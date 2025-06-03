@@ -9,7 +9,7 @@ import torch.distributed as dist
 import wandb
 
 from cartridges.structs import Context
-from cartridges.kv_initialization.base import AttnConfig, KVCacheFactory, TrainableCache
+from cartridges.cache import AttnConfig, KVCacheFactory, TrainableCache
 from cartridges.utils import get_logger
 
 logger = get_logger(__name__)

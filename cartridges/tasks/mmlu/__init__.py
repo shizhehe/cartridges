@@ -4,7 +4,7 @@ from typing import Literal
 import datasets
 import torch
 from cartridges.datasets import (
-    CartridgeDataset,
+    CartridgeTrainDataset,
     CartridgeGenerateDataset,
     CartridgeGenerateDatasetElement,
 )
@@ -16,8 +16,8 @@ from cartridges.tasks.mmlu.generate_hf_dataset import DATASET_NAME
 from cartridges.train import GenerateDatasetConfig
 
 
-class MMLUEvalDataset(CartridgeDataset):
-    class Config(CartridgeDataset.Config):
+class MMLUEvalDataset(CartridgeTrainDataset):
+    class Config(CartridgeTrainDataset.Config):
         num_samples: int
         seed: int = 42
         label_type: Literal["tokens", "logits"] = "tokens"

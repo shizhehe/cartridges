@@ -5,7 +5,7 @@ from cartridges.data.mtob import (
     load_train_examples,
 )  # Added load_train_examples
 from cartridges.datasets import (
-    CartridgeDataset,
+    CartridgeTrainDataset,
     CartridgeGenerateDataset,
     TEMPLATE,
     CartridgeGenerateDatasetElement,
@@ -68,8 +68,8 @@ def extract_answer_from_cot(text: str) -> str:
         return text.strip()
 
 
-class MtobEnglishToKalamangEvalDataset(CartridgeDataset):
-    class Config(CartridgeDataset.Config):
+class MtobEnglishToKalamangEvalDataset(CartridgeTrainDataset):
+    class Config(CartridgeTrainDataset.Config):
         _pass_as_config = True
         label_type: str = "tokens"
         data_sources: list = []
@@ -89,8 +89,8 @@ class MtobEnglishToKalamangEvalDataset(CartridgeDataset):
         self.tokenizer = tokenizer
 
 
-class MtobKalamangToEnglishEvalDataset(CartridgeDataset):
-    class Config(CartridgeDataset.Config):
+class MtobKalamangToEnglishEvalDataset(CartridgeTrainDataset):
+    class Config(CartridgeTrainDataset.Config):
         _pass_as_config = True
         label_type: str = "tokens"
         data_sources: list = []
@@ -110,8 +110,8 @@ class MtobKalamangToEnglishEvalDataset(CartridgeDataset):
         self.tokenizer = tokenizer
 
 
-class MtobKalamangToEnglishTrainDataset(CartridgeDataset):
-    class Config(CartridgeDataset.Config):
+class MtobKalamangToEnglishTrainDataset(CartridgeTrainDataset):
+    class Config(CartridgeTrainDataset.Config):
         _pass_as_config = True
         label_type: str = "tokens"
         data_sources: list = []
@@ -131,8 +131,8 @@ class MtobKalamangToEnglishTrainDataset(CartridgeDataset):
         self.tokenizer = tokenizer
 
 
-class MtobEnglishToKalamangTrainDataset(CartridgeDataset):
-    class Config(CartridgeDataset.Config):
+class MtobEnglishToKalamangTrainDataset(CartridgeTrainDataset):
+    class Config(CartridgeTrainDataset.Config):
         _pass_as_config = True
         label_type: str = "tokens"
         data_sources: list = []

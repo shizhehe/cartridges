@@ -4,7 +4,7 @@ from textwrap import dedent
 from typing import Literal
 import torch
 
-from cartridges.datasets import CartridgeDataset, TokenCounts
+from cartridges.datasets import CartridgeTrainDataset, TokenCounts
 from cartridges.tasks.codehop.code_hop_synth import (
     CodeHopSynthConfig,
     make_code_hop,
@@ -37,8 +37,8 @@ class CartridgeDatasetCodeHopBatch:
         assert self.input_ids.shape[0] == self.context_start_end
 
 
-class CodeHopDataset(CartridgeDataset):
-    class Config(CartridgeDataset.Config):
+class CodeHopDataset(CartridgeTrainDataset):
+    class Config(CartridgeTrainDataset.Config):
         _pass_as_config = True
 
         code_hop_config: CodeHopSynthConfig

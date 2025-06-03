@@ -5,7 +5,7 @@ import socket
 import pydrantic
 from pydrantic.variables import FormatStringVariable
 
-from cartridges.kv_initialization.strategies.random import KVFromRandomVectors
+from cartridges.initialization.strategies.random import KVFromRandomVectors
 from cartridges.models.llama import LlamaForCausalLM
 from cartridges.optim import CosWithWarmup
 from cartridges.tasks.longhealth import LongHealthEvalDataset, LongHealthMultipleChoiceGenerateDataset

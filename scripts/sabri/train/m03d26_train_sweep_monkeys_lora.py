@@ -4,7 +4,7 @@ from pathlib import Path
 import pydrantic
 
 
-from cartridges.kv_initialization.strategies.first_n_tokens import (
+from cartridges.initialization.strategies.first_n_tokens import (
     KVCacheInitFromFirstNTokensOfContext,
 )
 from cartridges.tasks.mmlu import MMLUEvalDataset

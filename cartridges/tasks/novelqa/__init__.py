@@ -14,7 +14,7 @@ from pydrantic import ObjectConfig
 import pandas as pd
 
 from cartridges.structs import Context, ContextConvo, Document, Message, Section
-from cartridges.datasets import CartridgeDataset, CartridgeDatasetElementTokenLabels, CartridgeGenerateDataset, CartridgeGenerateDatasetElement, TEMPLATE
+from cartridges.datasets import CartridgeTrainDataset, CartridgeDatasetElementTokenLabels, CartridgeGenerateDataset, CartridgeGenerateDatasetElement, TEMPLATE
 from cartridges.context import BaseContextConfig
 from cartridges.utils import get_logger
 
@@ -332,9 +332,9 @@ class NovelMultipleChoiceGenerateDataset(CartridgeGenerateDataset):
         return score, details
 
 
-class NovelEvalDataset(CartridgeDataset):
+class NovelEvalDataset(CartridgeTrainDataset):
     
-    class Config(CartridgeDataset.Config):
+    class Config(CartridgeTrainDataset.Config):
         _pass_as_config = True
         book_id: str = None
         max_questions: Optional[int] = None

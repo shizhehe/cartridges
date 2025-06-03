@@ -4,7 +4,7 @@ from pathlib import Path
 import pydrantic
 from pydrantic.variables import FormatStringVariable
 
-from cartridges.kv_initialization.strategies.first_n_tokens import KVCacheInitFromFirstNTokensOfContext
+from cartridges.initialization.strategies.first_n_tokens import KVCacheInitFromFirstNTokensOfContext
 from cartridges.train import EvalDatasetConfig, GenerateDatasetConfig, TrainConfig
 from cartridges.models.config import HFModelConfig
 from cartridges.datasets import CartridgeDataset

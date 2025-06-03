@@ -8,7 +8,7 @@ from cartridges.tasks.codehop.code_hop_synth import CodeHopSynthConfig
 from cartridges.tasks.codehop.generate_dataset import CodeHopGenerateDataset
 from cartridges.train import GenerateDatasetConfig, TrainConfig
 from cartridges.models.config import HFModelConfig
-from cartridges.kv_initialization.strategies.random import KVFromRandomText
+from cartridges.initialization.strategies.random import KVFromRandomText
 
 from cartridges.utils import WandBConfig
 

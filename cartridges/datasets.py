@@ -134,7 +134,7 @@ class TokenData:
     apply_loss: bool
 
 
-class CartridgeDataset(Dataset):
+class CartridgeTrainDataset(Dataset):
     class Config(ObjectConfig):
         _pass_as_config = True
         data_sources: list[tuple[str, int | None],]  # path, limit
@@ -395,125 +395,6 @@ class CartridgeDataset(Dataset):
             token_counts=token_counts,
         )
 
-
-class CartridgeDatasetLatest(CartridgeDataset):
-    class Config(CartridgeDataset.Config):
-        _pass_as_config = True
-        data_sources: list[tuple[str, int | None]]  # type: ignore
-        max_sequence_length: int | None = None
-
-    def __init__(self, config: Config, tokenizer: PreTrainedTokenizerFast):
-
-        self.config = config
-
-        self.data = []
-        self.datasets = []
-        context = None
-
-        for source, limit in config.data_sources:
-            if source.endswith(".pkl"):
-                pkl_path = source
-                if not Path(pkl_path).exists():
-                    modal_pkl_path = os.path.join("/root/Cartridges-datasets", os.path.relpath(source, "/"))
-                    if not Path(modal_pkl_path).exists():
-                        raise FileNotFoundError(f"File {source} not found either locally or in modal")
-                    pkl_path = modal_pkl_path
-
-            else:
-                dataset_dir = (
-                    wandb.get_artifact_dir(source) / "dataset"
-                    if config.is_wandb
-                    else Path(source)
-                )
-
-                if not dataset_dir.exists():
-                    wandb.download_artifact(source)
-                pkl_path = dataset_dir / "dataset.pkl"
-
-            with open(pkl_path, "rb") as f:
-                data_dict = pickle.load(f)
-            assert data_dict.keys() == {"rows", "context"}
-
-            self.data += data_dict["rows"][:limit]
-            if context is None:
-                context = data_dict["context"]
-
-        assert context is not None
-        self.context = context
-
-        self.tokenizer = tokenizer
-    
-    def _getitem_tokens(
-        self,
-        index: int,
-        row: TrainingExample,
-    ) -> CartridgeDatasetElementTokenLabels:
-        token_ids = torch.tensor(row.token_ids)
-        input_ids = token_ids
-        token_labels = token_ids
-
-        mask = torch.ones_like(input_ids, dtype=torch.bool)
-        # SE(04/03): need to ensure that this is a boolean mask
-        assert mask.dtype == torch.bool
-
-        token_counts = TokenCounts(
-            num_system_and_user_tokens=(~mask).sum(),
-            num_assistant_tokens=mask.sum(),
-        )
-        return CartridgeDatasetElementTokenLabels(
-            input_ids=input_ids,
-            labels=token_labels,
-            metadata=[],
-            token_counts=token_counts,
-            mask=mask,
-        )
-
-    def __getitem__(self, index: int) -> CartridgeDatasetElementLogitLabels:
-        row = self.data[index]
-        if self.config.label_type == "tokens":
-            return self._getitem_tokens(index, row)
-
-        assert isinstance(row, TrainingExample)
-        
-        # truncate the input ids
-        if (
-            self.config.max_sequence_length is not None
-            and len(row.token_ids) > self.config.max_sequence_length
-        ):
-            row.token_ids = row.token_ids[:self.config.max_sequence_length + 1]
-            row.top_logprob_ids = row.top_logprob_ids[:self.config.max_sequence_length]
-            row.top_logprob_logprobs = row.top_logprob_logprobs[:self.config.max_sequence_length]
-
-        element = CartridgeDatasetElementLogitLabels(
-            input_ids=torch.from_numpy(row.token_ids[:-1]),
-            topk_tokens=torch.from_numpy(row.top_logprob_ids),
-            topk_logprobs=torch.from_numpy(row.top_logprob_logprobs),
-            mask=torch.full_like(torch.from_numpy(row.token_ids[:-1]), True),
-            metadata=[],
-            
-            # FIXME: this is broken in the case that we truncate the input ids
-            token_counts=TokenCounts(
-                # -1 because we last token is jut output (not input)
-                num_assistant_tokens=row.num_output_tokens - 1,
-                num_system_and_user_tokens=len(row.token_ids)
-                - row.num_output_tokens
-                - 1,
-            ),
-        )
-
-        assert len(element.topk_logprobs.shape) == 2
-        assert element.topk_logprobs.shape == element.topk_tokens.shape
-        assert element.topk_logprobs.shape[1] == self.config.top_k_logits
-
-        assert len(element.input_ids.shape) == 1
-        assert element.input_ids.shape == element.mask.shape
-
-        assert element.topk_logprobs.shape[0] == element.input_ids.shape[0]
-
-        return element
-
-
-
 @dataclass
 class CartridgeGenerateDatasetElement:
     input_ids: torch.Tensor
@@ -527,7 +408,7 @@ class CartridgeGenerateDatasetElement:
     # are structured as prior messages
     prompt_messages: Optional[List[Dict[str,str]]] = None
 
-class CartridgeGenerateDataset(CartridgeDataset):
+class CartridgeGenerateDataset(CartridgeTrainDataset):
     class Config(ObjectConfig):
         _pass_as_config = True
         data_sources: list[tuple[str, int | None],]  # path, limit
@@ -567,93 +448,11 @@ class CartridgeGenerateDataset(CartridgeDataset):
         )
 
 
-class MultipleChoiceGenerateDataset(Dataset):
-    class Config(ObjectConfig):
-        _pass_as_config = True
-
-        # path to the json file
-        path: str
-
-    def __init__(self, config: Config, tokenizer: PreTrainedTokenizerFast):
-        self.config = config
-
-        self.data = pd.read_json(config.path).to_dict(orient="records")
-
-        self.tokenizer = tokenizer
-        logger.info("Datasets loaded")
-
-    def __getitem__(self, index: int) -> CartridgeGenerateDatasetElement:
-        convo: ContextConvo = self.data[index]
-
-        prompt = convo.messages[0].content
-
-        input_ids = self.tokenizer.apply_chat_template(
-            [{"role": "user", "content": prompt}],
-            add_generation_prompt=True,
-            return_tensors="pt",
-            chat_template=TEMPLATE,
-        )
-
-        return CartridgeGenerateDatasetElement(
-            input_ids=input_ids,
-            prompt=prompt,
-            answer=convo.messages[1].content,
-            convo_id=convo.id,
-            metadata={
-                "idx": index,
-            },
-        )
-
-    def score():
-        pass
-
-
-class RefDist:
-    # todo: maybe switch these away from data classes?
-    @dataclass
-    class Logprob:
-        token_id: int
-        logprob: float
-
-    @dataclass
-    class Token:
-        input_token_id: int
-        top_logprobs: list["RefDist.Logprob"]
-
-    @dataclass
-    class TrainingExample:
-        original_dataset_index: int
-        tokens: list["RefDist.Token"]
-
-    @dataclass
-    class LazyTrainingExample:
-        def __init__(self, table: pa.Table, index: int):
-            self._table = table
-            self._index = index
-
-            # self._row = None
-            assert set(table.schema.names) == {"original_dataset_index", "tokens"}
-
-        def __getitem__(self, name):
-            assert name in {"original_dataset_index", "tokens"}
-            return self._table.column(name)[self._index].as_py()
-
-        # def materialize(self):
-        #     if self._row is None:
-        #         self._row = {
-        #             name: self._table.column(j)[self._index].as_py()
-        #             for j, name in enumerate(self._table.schema.names)
-        #         }
-
-        #     return self._row
-
-
-
 class CartridgeDatasetBatchSampler(BatchSampler):
     def __init__(
         self, 
         sampler: Sampler,
-        dataset: CartridgeDatasetLatest,
+        dataset: CartridgeTrainDataset,
         batch_size: int, 
         shuffle: bool = True,
     ):

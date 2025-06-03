@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING, Optional
 import torch
 from cartridges.data.gradient import gradient_wiki_content
 from cartridges.structs import Context
-from cartridges.kv_initialization.base import AttnConfig, KVCacheFactory, TrainableCache
-from cartridges.kv_initialization.tokenization_utils import tokenize_data_into_system_prompt
+from cartridges.cache import AttnConfig, KVCacheFactory, TrainableCache
+from cartridges.initialization.tokenization_utils import tokenize_data_into_system_prompt
 from transformers import DynamicCache
 
 class KVFromRandomVectors(KVCacheFactory):

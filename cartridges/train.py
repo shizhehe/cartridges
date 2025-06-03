@@ -5,6 +5,7 @@ import itertools
 import math
 from math import cos, pi
 from pathlib import Path
+from abc import ABCMeta, abstractmethod
 import time
 from typing import Literal, Optional
 import re
@@ -26,10 +27,9 @@ from tqdm.auto import tqdm
 from pydrantic import ObjectConfig, BaseConfig, RunConfig
 
 from cartridges.datasets import (
-    CartridgeDataset,
+    CartridgeTrainDataset,
     CartridgeDatasetBatchLogitLabels,
     CartridgeDatasetBatchSampler,
-    CartridgeDatasetOnlineBatch,
     CartridgeGenerateDataset,
     CartridgeGenerateDatasetElement,
     CartridgeDatasetBatchTokenLabels,
@@ -56,7 +56,7 @@ class EvalDatasetConfig(BaseConfig):
 
 @dataclass
 class EvalDataset:
-    dataset: CartridgeDataset
+    dataset: CartridgeTrainDataset
     batch_size: int
     name: str
     only_eval_rank_0: bool = False
@@ -90,7 +90,7 @@ class TrainConfig(RunConfig):
     name: str = "default"  # A name for the run for wandb
     model: ModelConfig
     wandb: Optional[WandBConfig] = None
-    dataset: CartridgeDataset.Config
+    dataset: CartridgeTrainDataset.Config
     context: BaseContextConfig
 
     # dataset for evaluating perplexity on other generations
@@ -150,7 +150,7 @@ class TrainConfig(RunConfig):
 
 
 def get_dataset_names(
-    config: CartridgeDataset.Config | CartridgeGenerateDataset.Config,
+    config: CartridgeTrainDataset.Config | CartridgeGenerateDataset.Config,
 ) -> list[str]:
     return (
         [artifact_name for (artifact_name, _) in config.data_sources]
@@ -167,7 +167,7 @@ def download_wandb_artifacts(config: TrainConfig):
     ):
         if isinstance(
             eval_or_gen_ds.dataset,
-            (CartridgeDataset.Config, CartridgeGenerateDataset.Config),
+            (CartridgeTrainDataset.Config, CartridgeGenerateDataset.Config),
         ):
             artifact_names += get_dataset_names(eval_or_gen_ds.dataset)
 
@@ -279,7 +279,7 @@ def train(config: TrainConfig):
     else:
         cache_tuning = False
 
-    assert isinstance(dataset, CartridgeDataset)
+    assert isinstance(dataset, CartridgeTrainDataset)
 
     # Different model wrapping logic based on tuning method
     if use_peft:
@@ -296,7 +296,6 @@ def train(config: TrainConfig):
         wrapped_model = CacheAndModel(
             cache,
             model,
-            ema_cache=config.ema_cache,
         )
 
     if is_ddp:
@@ -996,8 +995,6 @@ def evaluate_generations_batch(
     has_score = hasattr(dataset.dataset, "score")
     has_batch_score = hasattr(dataset.dataset, "batch_score")
     prefix = f"generate_{dataset.name}"
-    # if step is not None:
-    #     prefix += f"_step{step}"
 
     if dataset.num_samples_final is not None and final:
         num_samples = dataset.num_samples_final
@@ -1208,30 +1205,20 @@ class LinearWithWarmup(Scheduler):
 
 
 class CacheAndModel(nn.Module):
-    def __init__(self, cache, model, ema_cache: bool = False):
+    def __init__(self, cache, model):
         super(CacheAndModel, self).__init__()
         self.cache = cache
         self.model = model
 
-        if ema_cache:
-            self.cache_ema = cache.clone()
-            self.cache_ema.requires_grad = False
-        else:
-            self.cache_ema = None
 
-    def forward(self, input_ids, labels=None, use_ema: bool = False):
-        if use_ema:
-            assert self.cache_ema is not None
+    def forward(self, input_ids, labels=None):
 
         out = self.model(
             input_ids,
             labels=labels,
             use_cache=True,
-            past_key_values=self.cache if not use_ema else self.cache_ema,
+            past_key_values=self.cache
         )
-
-        if use_ema:
-            self.cache_ema.clear()
 
         return out
 

@@ -220,7 +220,7 @@ from pathlib import Path
 
 import pydrantic
 
-from cartridges.kv_initialization.strategies.first_n_tokens import KVCacheInitFromFirstNTokensOfContext
+from cartridges.initialization.strategies.first_n_tokens import KVCacheInitFromFirstNTokensOfContext
 from cartridges.train import EvalDatasetConfig, GenerateDatasetConfig, TrainConfig
 from cartridges.config import HFModelConfig
 from cartridges.datasets import CartridgeDataset

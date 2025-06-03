@@ -3,7 +3,7 @@ from pathlib import Path
 import pydrantic
 
 from cartridges.clients.tokasaurus import TokasaurusClient
-from cartridges.kv_initialization.strategies.first_n_tokens import ( KVCacheInitFromFirstNTokensOfContext )
+from cartridges.initialization.strategies.first_n_tokens import ( KVCacheInitFromFirstNTokensOfContext )
 from cartridges.train import EvalDatasetConfig, GenerateDatasetConfig, TrainConfig
 from cartridges.generate_baseline import GenerateBaselineConfig, ICLBaseline
 from cartridges.train import GenerateDatasetConfig

@@ -5,10 +5,10 @@ import socket
 import pydrantic
 from pydrantic.variables import FormatStringVariable
 
-from cartridges.kv_initialization.strategies.first_n_tokens import (
+from cartridges.initialization.strategies.first_n_tokens import (
     KVCacheInitFromFirstNTokensOfContext,
 )
-from cartridges.kv_initialization.strategies.random import KVFromRandomText
+from cartridges.initialization.strategies.random import KVFromRandomText
 from cartridges.models.llama import LlamaForCausalLM
 from cartridges.optim import CosWithWarmup
 from cartridges.tasks.longhealth import (

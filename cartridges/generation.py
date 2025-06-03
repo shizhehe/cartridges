@@ -3,7 +3,7 @@ from cartridges.datasets import TEMPLATE
 from transformers import AutoTokenizer
 import wandb
 from cartridges.train import TrainConfig, CacheAndModel
-from cartridges.kv_initialization.base import TrainableCache
+from cartridges.cache import TrainableCache
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP

@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from datasets import load_dataset
 
 from cartridges.structs import Context, Document
-from cartridges.datasets import CartridgeDataset, CartridgeGenerateDataset, CartridgeGenerateDatasetElement, TEMPLATE
+from cartridges.datasets import CartridgeTrainDataset, CartridgeGenerateDataset, CartridgeGenerateDatasetElement, TEMPLATE
 from cartridges.context import BaseContextConfig
 from cartridges.utils import get_logger
 

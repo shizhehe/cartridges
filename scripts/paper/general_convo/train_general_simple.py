@@ -4,7 +4,7 @@ import pydrantic
 
 from cartridges.configs.common_evals.finance_evals import FinanceEvals
 from cartridges.configs.common_evals.finance_evals_anthropic import get_evals
-from cartridges.kv_initialization.strategies.first_n_tokens import ( KVCacheInitFromFirstNTokensOfContext )
+from cartridges.initialization.strategies.first_n_tokens import ( KVCacheInitFromFirstNTokensOfContext )
 from cartridges.tasks.finance import ( FinanceBenchContextConfig, FinanceBenchEvalDataset, FinanceBenchGenerateDataset, FinanceBenchMemorizationDataset )
 from cartridges.tasks.mmlu import MMLUEvalDataset
 from cartridges.train import EvalDatasetConfig, TrainConfig, GenerateDatasetConfig

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pydrantic
 
-from cartridges.kv_initialization.strategies.first_n_tokens import KVCacheInitFromFirstNTokensOfContext
+from cartridges.initialization.strategies.first_n_tokens import KVCacheInitFromFirstNTokensOfContext
 from cartridges.tasks.finance import FinanceBenchEvalDataset, FinanceBenchGenerateDataset, L3bFinanceBenchEvalDataset, L3bFinanceBenchGenerateDataset
 from cartridges.tasks.mmlu import MMLUEvalDataset
 from cartridges.train import EvalDatasetConfig, GenerateDatasetConfig, TrainConfig

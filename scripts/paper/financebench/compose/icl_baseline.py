@@ -4,10 +4,10 @@ import collections
 from transformers import AutoTokenizer
 from transformers import AutoModelForCausalLM
 
-from cartridges.kv_initialization.strategies.first_n_tokens_per_context import ( KVCacheInitFromFirstNTokensOfEachContext )
-from cartridges.kv_initialization.strategies.first_n_tokens import ( KVCacheInitFromFirstNTokensOfContext )
+from cartridges.initialization.strategies.first_n_tokens_per_context import ( KVCacheInitFromFirstNTokensOfEachContext )
+from cartridges.initialization.strategies.first_n_tokens import ( KVCacheInitFromFirstNTokensOfContext )
 from cartridges.tasks.finance import FinanceBenchContextConfig, FinanceBenchDocumentStructuredConfigCompose
-from cartridges.kv_initialization.base import AttnConfig, KVCacheFactory, TrainableCache
+from cartridges.cache import AttnConfig, KVCacheFactory, TrainableCache
 from cartridges.train import TrainConfig, CacheAndModel
 
 from cartridges.configs.paper.financebench.compose.eval_utils import ( QA_PAIRS, run_query_set )

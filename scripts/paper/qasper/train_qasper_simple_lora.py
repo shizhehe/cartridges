@@ -5,7 +5,7 @@ import socket
 import pydrantic
 from pydrantic.variables import FormatStringVariable
 
-from cartridges.kv_initialization.strategies.first_n_tokens import KVCacheInitFromFirstNTokensOfContext
+from cartridges.initialization.strategies.first_n_tokens import KVCacheInitFromFirstNTokensOfContext
 from cartridges.models.llama import LlamaForCausalLM
 from cartridges.tasks.mmlu import MMLUEvalDataset, MMLUGenerateDataset
 from cartridges.tasks.qasper.context import QasperStructuredContextConfig

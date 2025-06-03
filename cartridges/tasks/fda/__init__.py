@@ -14,7 +14,7 @@ import pandas as pd
 
 from cartridges.context import StructuredContext
 from cartridges.structs import Context, ContextConvo, Document, Message, Section
-from cartridges.datasets import CartridgeDataset, CartridgeDatasetElementTokenLabels, CartridgeGenerateDataset, CartridgeGenerateDatasetElement, TEMPLATE
+from cartridges.datasets import CartridgeTrainDataset, CartridgeDatasetElementTokenLabels, CartridgeGenerateDataset, CartridgeGenerateDatasetElement, TEMPLATE
 from cartridges.context import BaseContextConfig
 from cartridges.utils import get_logger
 
@@ -274,9 +274,9 @@ class EvaporateMultipleChoiceGenerateDataset(CartridgeGenerateDataset):
         return score, details
 
 
-class EvaporateEvalDataset(CartridgeDataset):
+class EvaporateEvalDataset(CartridgeTrainDataset):
     
-    class Config(CartridgeDataset.Config):
+    class Config(CartridgeTrainDataset.Config):
         _pass_as_config = True
         doc_id: str = None
         max_questions: Optional[int] = None

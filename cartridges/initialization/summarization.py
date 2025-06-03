@@ -7,7 +7,7 @@ from cartridges.clients.base import Client
 from transformers import AutoTokenizer
 
 from cartridges.structs import Context
-from cartridges.kv_initialization.base import (
+from cartridges.cache import (
     AttnConfig,
     KVCacheFactoryWithStateSaving,
     TrainableCache,
@@ -16,7 +16,7 @@ from cartridges.kv_initialization.base import (
 from pydrantic import ObjectConfig
 from transformers import DynamicCache
 
-from cartridges.kv_initialization.tokenization_utils import (
+from cartridges.initialization.tokenization_utils import (
     tokenize_data_into_system_prompt,
 )
 from cartridges.utils import get_logger

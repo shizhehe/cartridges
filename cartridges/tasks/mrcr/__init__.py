@@ -11,7 +11,7 @@ import pandas as pd
 
 from cartridges.context import StructuredContext
 from cartridges.structs import Context, ContextConvo, Message, Section
-from cartridges.datasets import CartridgeDataset, CartridgeGenerateDataset, CartridgeGenerateDatasetElement, TEMPLATE
+from cartridges.datasets import CartridgeTrainDataset, CartridgeGenerateDataset, CartridgeGenerateDatasetElement, TEMPLATE
 from cartridges.context import BaseContextConfig
 from cartridges.utils import get_logger
 
@@ -334,9 +334,9 @@ class MRCRGenerateDataset(CartridgeGenerateDataset):
 
 
 from cartridges.transforms import ConvoTransformConfig
-class MRCREvalDataset(CartridgeDataset):
+class MRCREvalDataset(CartridgeTrainDataset):
     
-    class Config(CartridgeDataset.Config):
+    class Config(CartridgeTrainDataset.Config):
         _pass_as_config = True
         document_id : int = -1
         use_cot: bool = True

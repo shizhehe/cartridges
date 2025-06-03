@@ -1,10 +1,10 @@
 from typing import Optional
 import torch
 from cartridges.structs import Context
-from cartridges.kv_initialization.base import AttnConfig, KVCacheFactory, TrainableCache
+from cartridges.cache import AttnConfig, KVCacheFactory, TrainableCache
 from transformers import DynamicCache
 
-from cartridges.kv_initialization.tokenization_utils import (
+from cartridges.initialization.tokenization_utils import (
     tokenize_data_into_system_prompt,
 )
 

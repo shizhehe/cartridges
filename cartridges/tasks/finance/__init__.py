@@ -16,7 +16,7 @@ from cartridges.structs import (
     ContextConvo,
 )
 from cartridges.datasets import (
-    CartridgeDataset,
+    CartridgeTrainDataset,
     CartridgeGenerateDataset,
     CartridgeGenerateDatasetElement,
     TEMPLATE,
@@ -264,8 +264,8 @@ First think step by step, but then provide your final answer within <answer> tag
 PROMPT_TEMPLATE = "{question}"
 
 
-class FinanceBenchEvalDataset(CartridgeDataset):
-    class Config(CartridgeDataset.Config):
+class FinanceBenchEvalDataset(CartridgeTrainDataset):
+    class Config(CartridgeTrainDataset.Config):
         _pass_as_config = True
         doc_names: Optional[List[str]] = None
 
@@ -393,8 +393,8 @@ class FinanceBenchGenerateDataset(CartridgeGenerateDataset):
         return len(self.questions)
 
 
-class FinanceBenchMemorizationDataset(CartridgeDataset):
-    class Config(CartridgeDataset.Config):
+class FinanceBenchMemorizationDataset(CartridgeTrainDataset):
+    class Config(CartridgeTrainDataset.Config):
         _pass_as_config = True
         doc_names: Optional[List[str]] = None
 
@@ -567,8 +567,8 @@ class L3bFinanceBenchGenerateDataset(CartridgeGenerateDataset):
         return len(self.questions)
 
 
-class L3bFinanceBenchEvalDataset(CartridgeDataset):
-    class Config(CartridgeDataset.Config):
+class L3bFinanceBenchEvalDataset(CartridgeTrainDataset):
+    class Config(CartridgeTrainDataset.Config):
         _pass_as_config = True
         doc_names: Optional[List[str]] = None
 

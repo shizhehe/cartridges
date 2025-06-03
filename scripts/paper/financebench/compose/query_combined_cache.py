@@ -10,8 +10,8 @@ from tqdm import tqdm
 from transformers import AutoTokenizer
 
 from cartridges.clients.together import TogetherClient
-from cartridges.kv_initialization.strategies.base_compose import TrainableCacheComposable
-from cartridges.kv_initialization.base import TrainableCache
+from cartridges.initialization.strategies.base_compose import TrainableCacheComposable
+from cartridges.cache import TrainableCache
 from cartridges.train import TrainConfig, CacheAndModel
 
 device = "cuda" if torch.cuda.is_available() else "cpu"

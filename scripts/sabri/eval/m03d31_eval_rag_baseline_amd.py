@@ -6,7 +6,7 @@ import pydrantic
 from cartridges.configs.common_evals.finance_evals import FinanceEvals
 from cartridges.configs.common_evals.finance_evals_anthropic import get_evals
 from cartridges.rag_baseline import EvaluateRAGBaselineConfig
-from cartridges.kv_initialization.strategies.first_n_tokens import (
+from cartridges.initialization.strategies.first_n_tokens import (
     KVCacheInitFromFirstNTokensOfContext,
 )
 from cartridges.tasks.finance import (

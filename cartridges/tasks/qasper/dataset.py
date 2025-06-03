@@ -5,7 +5,7 @@ from datasets import load_dataset
 
 from cartridges.structs import ContextConvo, Message
 from cartridges.tasks.qasper.rewrite import RewrittenQasperQuestion
-from cartridges.datasets import CartridgeDataset
+from cartridges.datasets import CartridgeTrainDataset
 
 PROMPT = """\
 Please write a succinct answer to the following question.
@@ -21,8 +21,8 @@ Provide your answer in the following format (output nothing else):
 {{your answer here}}
 </answer>"""
 
-class QasperEvalDataset(CartridgeDataset):
-    class Config(CartridgeDataset.Config):
+class QasperEvalDataset(CartridgeTrainDataset):
+    class Config(CartridgeTrainDataset.Config):
         _pass_as_config = True
         
         dataset: str = "sabrieyuboglu/qasper-rewrite-gpt-4.1"

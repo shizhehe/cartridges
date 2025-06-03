@@ -5,8 +5,8 @@ import pydrantic
 from pydrantic.variables import FormatStringVariable
 
 from cartridges.configs.common_evals.finance_evals_anthropic import get_evals
-from cartridges.kv_initialization.strategies.first_n_tokens import KVCacheInitFromFirstNTokensOfContext
-from cartridges.kv_initialization.strategies.pretrained import KVCacheFromPretrained
+from cartridges.initialization.strategies.first_n_tokens import KVCacheInitFromFirstNTokensOfContext
+from cartridges.initialization.strategies.pretrained import KVCacheFromPretrained
 from cartridges.optim import CosWithWarmup
 from cartridges.tasks.longhealth import LongHealthEvalDataset, LongHealthMultipleChoiceGenerateDataset
 from cartridges.tasks.reglab import ReglabHousingQAGenerateDataset

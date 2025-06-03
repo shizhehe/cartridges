@@ -7,7 +7,7 @@ from cartridges.configs.common_evals.finance_evals_anthropic import get_evals
 from cartridges.configs.paper.amd.ablate_initalization.paper_train_amd_common import (
     get_config,
 )
-from cartridges.kv_initialization.strategies.first_n_tokens import (
+from cartridges.initialization.strategies.first_n_tokens import (
     KVCacheInitFromFirstNTokensOfContext,
 )
 from cartridges.tasks.finance import (

@@ -6,7 +6,7 @@ import pydrantic
 from pydrantic.variables import FormatStringVariable
 
 from cartridges.icl_baseline import ICLBaselineConfig
-from cartridges.kv_initialization.strategies.first_n_tokens import KVCacheInitFromFirstNTokensOfContext
+from cartridges.initialization.strategies.first_n_tokens import KVCacheInitFromFirstNTokensOfContext
 from cartridges.models.llama import LlamaForCausalLM
 from cartridges.tasks.qasper.context import QasperStructuredContextConfig
 from cartridges.tasks.qasper.dataset import QasperEvalDataset
