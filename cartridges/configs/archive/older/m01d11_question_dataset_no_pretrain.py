@@ -1,0 +1,46 @@
+import os
+from pathlib import Path
+import numpy as np
+import pydrantic
+from pydrantic.variables import FormatStringVariable
+from capsules.config import HFModelConfig
+from capsules.train import TrainConfig, TrainableCache
+from capsules.tasks.finance.questions import FinanceQuestionDataset, FinanceQuestionTestDataset
+from capsules.utils import WandBConfig
+
+
+file_name = Path(__file__).stem
+
+configs = []
+# for lr in [5e-2, 1e-2, 5e-3, 1e-3, 5e-4, 1e-4, 5e-5, 1e-5]:
+for num_tokens in [1024, 4096, 8192, 16384, 32768, 65536]:
+    config = TrainConfig(
+        name=FormatStringVariable(f"{file_name}_nt{{cache.num_tokens}}"), #_l{model.pretrained_model_name_or_path}"),
+        model=HFModelConfig(
+            pretrained_model_name_or_path="meta-llama/Llama-3.2-1B-Instruct"
+        ),
+        dataset=FinanceQuestionDataset.Config(
+            data_path="/data/sabri/capsules/outputs/2025-01-03-17-57-45-m01d03_generate/46977143-a197-48aa-98e3-cd80c3a702e0/generated_questions.feather",
+            questions_per_epoch=1024
+        ),
+        test_dataset=FinanceQuestionTestDataset.Config(
+            data_path="/data/sabri/capsules/outputs/2025-01-04-16-53-16-m01d04_generate_question_test/80317e27-cb29-48af-a5b1-3e436f5dc4af/generated_questions.feather",
+            icl_examples=3
+        ),
+        cache=TrainableCache.Config(
+            num_tokens=num_tokens,
+        ),
+        cache_init="document",
+        lr=1e-3, 
+        epochs=64,
+        wandb=WandBConfig(
+            project="capsules",
+            tags=["cache_tuning", "development"],
+        ),
+        output_dir=os.environ["capsules_OUTPUT_DIR"],
+    )
+    configs.append(config)
+
+if __name__ == "__main__":
+    # Launch pydrantic CLI, which will parse arguments and run config.run() if desired.
+    pydrantic.main(configs)

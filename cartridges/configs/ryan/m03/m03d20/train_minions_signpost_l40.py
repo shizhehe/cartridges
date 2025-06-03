@@ -1,0 +1,114 @@
+import os
+from pathlib import Path
+
+import pydrantic
+
+
+# TODO(ryan): debug that
+# from capsules.data.paths import MINIONS_TITLE
+from capsules.kv_initialization.strategies.first_n_tokens import (
+    KVCacheInitFromFirstNTokensOfContext,
+)
+from capsules.tasks.mmlu import MMLUEvalDataset
+from capsules.train import (
+    EvalDatasetConfig,
+    GenerateDatasetConfig,
+    TrainConfig,
+)
+from capsules.config import HFModelConfig
+from capsules.datasets import CapsuleDataset, CapsuleGenerateDataset
+from capsules.utils import WandBConfig
+
+MONKEYS_TITLE = "Large Language Monkeys: Scaling Inference Compute with Repeated Sampling"
+MINIONS_TITLE = "Minions: Cost-efficient Collaboration Between On-device and Cloud Language Models"
+
+
+config = TrainConfig(
+    name=Path(__file__).stem,
+    model=HFModelConfig(
+        pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct"
+    ),
+    dataset=CapsuleDataset.Config(
+        data_sources=[
+            ("hazy-research/capsules/minions_teaching_data_chunks:v0", None),
+        ],
+        is_wandb=True,
+        label_type="logits",
+        user_prompt_prefix=[f"Here is a question about the paper '{MINIONS_TITLE}': "],
+    ),
+    eval_datasets=[
+        EvalDatasetConfig(
+            name_for_wandb="minions_chunks",
+            batch_size=16,
+            dataset=CapsuleDataset.Config(
+                data_sources=[
+                    ("hazy-research/capsules/openai_eval_minions_chunks:v0", None)
+                ],
+                is_wandb=True,
+                label_type="tokens",
+            ),
+        ),
+        EvalDatasetConfig(
+            name_for_wandb="minions_whole",
+            batch_size=16,
+            dataset=CapsuleDataset.Config(
+                data_sources=[
+                    ("hazy-research/capsules/openai_eval_minions_whole_doc:v0", None)
+                ],
+                is_wandb=True,
+                label_type="tokens",
+            ),
+        ),
+        EvalDatasetConfig(
+            name_for_wandb="mmlu",
+            batch_size=16,
+            dataset=MMLUEvalDataset.Config(num_samples=256),
+        ),
+    ],
+    generate_datasets=[
+        GenerateDatasetConfig(
+            name_for_wandb="minions_chunk",
+            dataset=CapsuleGenerateDataset.Config(
+                data_sources=[
+                    ("hazy-research/capsules/openai_eval_minions_chunks:v0", 16)
+                ],
+                is_wandb=True,
+                label_type="tokens",
+            ),
+        ),
+        GenerateDatasetConfig(
+            name_for_wandb="minions_whole",
+            dataset=CapsuleGenerateDataset.Config(
+                data_sources=[
+                    (
+                        "hazy-research/capsules/eval_openai_questions_3b_answers_minions_whole_doc:v0",
+                        16,
+                    )
+                ],
+                is_wandb=True,
+                label_type="tokens",
+            ),
+        ),
+    ],
+    kv_cache_initializer=KVCacheInitFromFirstNTokensOfContext.Config(
+        max_tokens=1000,
+        num_frozen_tokens=1,
+    ),
+    epochs=1,
+    lr=5e-3,
+    wandb=WandBConfig(
+        project="capsules",
+        tags=["cache_tuning", "development"],
+        entity="hazy-research",
+    ),
+    output_dir=os.environ["CAPSULES_OUTPUT_DIR"],
+    train_batch_size=2,
+    eval_every_n_steps=128,
+    generate_every_n_steps=256,
+    generate_max_new_tokens=64,
+    save_every_n_steps=128,
+    loss_type="logits",
+)
+
+if __name__ == "__main__":
+    pydrantic.main([config])

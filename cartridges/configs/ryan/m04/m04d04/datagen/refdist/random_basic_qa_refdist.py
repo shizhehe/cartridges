@@ -1,0 +1,11 @@
+import pydrantic
+from capsules.configs.ryan.m04d04.datagen.refdist.refdist import refdist_config
+
+
+name = "m04d04_amd_random_window_basic_qa"
+config = refdist_config(
+    input_artifact="hazy-research/capsules/{name}:v0",
+    output_artifact=f"{name}_refdist",
+)
+if __name__ == "__main__":
+    pydrantic.main([config])

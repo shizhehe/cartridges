@@ -1,4 +1,24 @@
-# 💊 Capsules
+<div align="center">
+    <img src="assets/banner.png" height=100 alt="Cartridges logo"/>
+
+**Lightweight and general-purpose long-context representations.**
+
+
+
+<!-- ![GitHub Workflow Status](https://github.com/HazyResearch/meerkat/actions/workflows/.github/workflows/ci.yml/badge.svg) -->
+[![GitHub](https://img.shields.io/github/license/HazyResearch/cartridges)](https://img.shields.io/github/license/HazyResearch/cartridges)
+[![arXiv](https://img.shields.io/badge/arXiv-2402.18668-b31b1b.svg)](https://arxiv.org/abs/2402.18668)
+
+
+
+<!-- [**Website**](http://meerkat.wiki)
+| [**Quickstart**](http://meerkat.wiki/docs/start/quickstart-df.html)
+| [**Docs**](http://meerkat.wiki/docs/index.html)
+| [**Contributing**](CONTRIBUTING.md)
+| [**Discord**](https://discord.gg/pw8E4Q26Tq)
+| [**Blogpost**](https://hazyresearch.stanford.edu/blog/2023-03-01-meerkat) -->
+
+</div>
 
 ## Setup
 

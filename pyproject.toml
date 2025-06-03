@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "capsules"
+version = "0.0.1"
+description = "Lookup over kvs"
+requires-python = ">=3.12"
+dependencies = [
+    "torch",
+    "openai",
+    "mwparserfromhell",
+    "datasets",
+    "transformers==4.49.0",
+    "numpy",
+    "einops",
+    "tqdm",
+    "wandb",
+    "ipykernel",
+    "pydrantic",
+    "pyright",
+    "tiktoken",
+    "together",
+    "peft",
+    "matplotlib",
+    "pymupdf",
+    "pymupdf4llm",
+    "anthropic",
+    "evaluate",
+    "sacrebleu",
+    "seaborn",
+]
+
+[project.scripts]
+pdr = "pdr.cli:main"
+
+[tool.pyright]
+include = ["capsules"]
+
+[tool.setuptools]
+packages = ["capsules"]
