@@ -11,23 +11,23 @@ from dataclasses import dataclass
 from typing import List
 from transformers import PreTrainedTokenizerFast
 from pydrantic import ObjectConfig
-from capsules.datasets import ( CapsuleGenerateDataset, CapsuleGenerateDatasetElement, TEMPLATE, )
+from cartridges.datasets import ( CartridgeGenerateDataset, CartridgeGenerateDatasetElement, TEMPLATE, )
 
 
-from capsules.tasks.thunderkittens.kernelbench_utils import ( 
+from cartridges.tasks.thunderkittens.kernelbench_utils import ( 
     KernelExecResult, 
     eval_kernel_against_ref, 
     check_metadata_serializable_all_types, 
     create_compilation_file_kernel_exec_result,
 )
 
-from capsules.tasks.thunderkittens.tk_strings import (
+from cartridges.tasks.thunderkittens.tk_strings import (
     prompt_generate_custom_cuda_from_prompt_template,
     prompt_generate_custom_thunderkitten_from_prompt_template,
     create_tk_makefile
 )
 
-REPO_TOP_DIR = "/home/simarora/code/capsules/capsules/tasks/thunderkittens/"
+REPO_TOP_DIR = "/home/simarora/code/Cartridges/Cartridges/tasks/thunderkittens/"
 
 
 def extract_code_blocks_of_type(text, code_language_type: str) -> str:
@@ -54,7 +54,7 @@ class KernelBenchQuestion:
     dir_path: str
 
 
-class KernelBenchGenerateDataset(CapsuleGenerateDataset):
+class KernelBenchGenerateDataset(CartridgeGenerateDataset):
     class Config(ObjectConfig):
         _pass_as_config = True
         max_questions: int = 1
@@ -106,7 +106,7 @@ class KernelBenchGenerateDataset(CapsuleGenerateDataset):
         self.tokenizer = tokenizer
 
 
-    def __getitem__(self, index: int) -> CapsuleGenerateDatasetElement:
+    def __getitem__(self, index: int) -> CartridgeGenerateDatasetElement:
         question: KernelBenchQuestion = self.questions[index]
 
         input_ids = self.tokenizer.apply_chat_template(
@@ -127,7 +127,7 @@ class KernelBenchGenerateDataset(CapsuleGenerateDataset):
             f.write(question.question)
         create_tk_makefile(kernel_dir)
 
-        return CapsuleGenerateDatasetElement(
+        return CartridgeGenerateDatasetElement(
             input_ids=input_ids,
             prompt=question.question,
             answer=question.answer,

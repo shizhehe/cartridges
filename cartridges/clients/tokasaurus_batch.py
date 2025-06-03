@@ -11,15 +11,15 @@ import numpy as np
 from pydantic import BaseModel
 from transformers import AutoTokenizer
 
-from capsules.clients.base import (
+from cartridges.clients.base import (
     Client,
     Sample,
     ClientConfig,
     ClientResponse,
-    CapsulesConvoWithLogprobs,
+    CartridgesConvoWithLogprobs,
 )
-from capsules.clients.usage import Usage
-from capsules.utils import get_logger
+from cartridges.clients.usage import Usage
+from cartridges.utils import get_logger
 
 
 logger = get_logger(__name__)
@@ -30,13 +30,13 @@ class CapulesMessage(BaseModel):
     content: str
 
 
-class CapsulesConvo(BaseModel):
+class CartridgesConvo(BaseModel):
     routing_tag: str | None
     messages: list[CapulesMessage]
 
 
-class CapsulesBatchRequest(BaseModel):
-    elements: list[CapsulesConvo]
+class CartridgesBatchRequest(BaseModel):
+    elements: list[CartridgesConvo]
     temperature: float
     max_tokens: int
 
@@ -108,16 +108,16 @@ class TokasaurusBatchClient(Client):
         top_logprobs: Optional[int] = None,
         routing_tag: Optional[str] = None,
         **kwargs,
-    ) -> list[CapsulesConvoWithLogprobs]:
+    ) -> list[CartridgesConvoWithLogprobs]:
         assert (
             stop is None
-        ), "stop is not supported by Tokasaurus batch capsules endpoint"
+        ), "stop is not supported by Tokasaurus batch Cartridges endpoint"
         t0 = time.time()
         port = None
 
-        request = CapsulesBatchRequest(
+        request = CartridgesBatchRequest(
             elements=[
-                CapsulesConvo(
+                CartridgesConvo(
                     routing_tag=routing_tag,
                     messages=chat,  # type: ignore
                 )
@@ -157,7 +157,7 @@ class TokasaurusBatchClient(Client):
             if self.config.on_failure == "raise":
                 raise Exception(f"Failed to get a response from the server.")
             else:
-                return [CapsulesConvoWithLogprobs(
+                return [CartridgesConvoWithLogprobs(
                     num_output_tokens=0,
                     token_ids=None,
                     assistant_text="",
@@ -175,7 +175,7 @@ class TokasaurusBatchClient(Client):
             # assert elem["top_logprob_logprobs"].shape[0] == num_tokens - 1
 
             elements.append(
-                CapsulesConvoWithLogprobs(
+                CartridgesConvoWithLogprobs(
                     num_output_tokens=elem["num_output_tokens"],
                     token_ids=elem["token_ids"],
                     assistant_text=elem["assistant_text"],

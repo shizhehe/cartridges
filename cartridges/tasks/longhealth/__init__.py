@@ -4,11 +4,11 @@ from typing import Dict, List, Optional, Tuple
 from transformers import PreTrainedTokenizerFast
 from pydrantic import ObjectConfig
 
-from capsules.generate.structs import Context, ContextConvo, Message, Section
-from capsules.datasets import CapsuleDataset, CapsuleGenerateDataset, CapsuleGenerateDatasetElement, TEMPLATE
-from capsules.generate.run import BaseContextConfig
-from capsules.utils import get_logger
-from capsules.tasks.longhealth.load import load_longhealth_dataset, LongHealthPatient, LongHealthQuestion
+from cartridges.structs import Context, ContextConvo, Message, Section
+from cartridges.datasets import CartridgeDataset, CartridgeGenerateDataset, CartridgeGenerateDatasetElement, TEMPLATE
+from cartridges.context import BaseContextConfig
+from cartridges.utils import get_logger
+from cartridges.tasks.longhealth.load import load_longhealth_dataset, LongHealthPatient, LongHealthQuestion
 
 logger = get_logger(__name__)
 
@@ -46,7 +46,7 @@ class LongHealthContextConfig(BaseContextConfig):
 
 
 
-class LongHealthMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
+class LongHealthMultipleChoiceGenerateDataset(CartridgeGenerateDataset):
     class Config(ObjectConfig):
         _pass_as_config = True
         patient_ids: Optional[List[str]] = None
@@ -116,7 +116,7 @@ class LongHealthMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
 
     def __getitem__(
         self, index: int
-    ) -> CapsuleGenerateDatasetElement:
+    ) -> CartridgeGenerateDatasetElement:
         # convo: ContextConvo = ContextConvo.model_validate(self.data[index])
         question: LongHealthQuestion = self.questions[index]
 
@@ -127,7 +127,7 @@ class LongHealthMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
             chat_template=TEMPLATE,
         )
 
-        return CapsuleGenerateDatasetElement(
+        return CartridgeGenerateDatasetElement(
             input_ids=input_ids,
             prompt=question.question,
             answer=question.correct,
@@ -172,8 +172,8 @@ class LongHealthMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
             pred = question.answer_a
             return pred.strip().lower() == answer.strip().lower(), {"extracted_pred": None}
         
-class LongHealthEvalDataset(CapsuleDataset):
-    class Config(CapsuleDataset.Config):
+class LongHealthEvalDataset(CartridgeDataset):
+    class Config(CartridgeDataset.Config):
         _pass_as_config = True
         patient_ids: Optional[List[str]] = None
 

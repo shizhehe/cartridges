@@ -1,6 +1,6 @@
 import datasets
 
-from capsules.clients.openai_batch import TokasaurusClient
+from cartridges.clients.openai_batch import TokasaurusClient
 
 DATASET_NAME: str = "ScalingIntelligence/mmlu-llama3b-generations"
 

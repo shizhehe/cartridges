@@ -5,10 +5,10 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, Literal, Optional
 
-from capsules.clients.base import Client, ClientConfig, Sample
-from capsules.generate.generators.base import ContextConvoGenerator
-from capsules.generate.structs import Context, ContextConvo, Message, Section
-from capsules.generate.run import BaseContextConfig
+from cartridges.clients.base import Client, ClientConfig, Sample
+from cartridges.generate.generators.base import ContextConvoGenerator
+from cartridges.structs import Context, ContextConvo, Message, Section
+from cartridges.context import BaseContextConfig
 
 
 @dataclass
@@ -260,8 +260,8 @@ class EvictionCategoriesMCGenerator(ContextConvoGenerator):
         from datasets import load_dataset
         self.questions = pd.read_json(
             os.path.join(
-                os.environ.get("CAPSULES_DIR", "./"), 
-                "capsules/tasks/reglab/housing_qa_consolidated_generations_with_answer_options.jsonl", 
+                os.environ.get("CARTRIDGES_DIR", "./"), 
+                "Cartridges/tasks/reglab/housing_qa_consolidated_generations_with_answer_options.jsonl", 
             ),
             lines=True
         )
@@ -355,7 +355,7 @@ class EvictionTemporalMiscEvalGenerator(ContextConvoGenerator):
         super().__init__(config, context)
 
         from datasets import load_dataset
-        self.questions = pd.read_json("capsules/tasks/reglab/housing_qa_consolidated_generations_with_answer_options.jsonl", lines=True)
+        self.questions = pd.read_json("Cartridges/tasks/reglab/housing_qa_consolidated_generations_with_answer_options.jsonl", lines=True)
         # filter by state!
         self.questions = self.questions[self.questions["state"].isin(config.states)]
         self.questions = self.questions[
@@ -439,7 +439,7 @@ class StatuteRecallEvalGenerator(ContextConvoGenerator):
         super().__init__(config, context)
 
         from datasets import load_dataset
-        self.questions = pd.read_json("capsules/tasks/reglab/housing_qa_consolidated_generations_with_answer_options.jsonl", lines=True)
+        self.questions = pd.read_json("Cartridges/tasks/reglab/housing_qa_consolidated_generations_with_answer_options.jsonl", lines=True)
         # filter by state!
         self.questions = self.questions[self.questions["state"].isin(config.states)]
 

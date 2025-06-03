@@ -10,7 +10,7 @@ from einops import rearrange
 from typing import Optional, Tuple
 from pydantic import validate_call
 
-from capsules.tasks.synth.utils import import_from_str
+from cartridges.tasks.synth.utils import import_from_str
 
 try:
     from transformers.models.llama.modeling_llama import apply_rotary_pos_emb, repeat_kv, LlamaRotaryEmbedding
@@ -32,23 +32,23 @@ def init_feature_map(feature_map: str='none', **kwargs: any):
     Initialize query and key mapping for linear attention
     """
     if feature_map in [None, 'none', 'identity']:
-        from capsules.tasks.synth.mixers.feature_maps.base import FeatureMap
+        from cartridges.tasks.synth.mixers.feature_maps.base import FeatureMap
         return FeatureMap(**kwargs)
     # Taylor series approximations to exp(x)
     elif feature_map == 'taylor_exp':
-        from capsules.tasks.synth.mixers.feature_maps.taylor import TaylorExp
+        from cartridges.tasks.synth.mixers.feature_maps.taylor import TaylorExp
         return TaylorExp(**kwargs) 
     elif feature_map == "performer":
-        from capsules.tasks.synth.mixers.feature_maps.performer import PerformerFeatureMap
+        from cartridges.tasks.synth.mixers.feature_maps.performer import PerformerFeatureMap
         return PerformerFeatureMap(**kwargs)
     elif feature_map == "cosformer":
-        from capsules.tasks.synth.mixers.feature_maps.cosformer import CosFormerFeatureMap
+        from cartridges.tasks.synth.mixers.feature_maps.cosformer import CosFormerFeatureMap
         return CosFormerFeatureMap(**kwargs)
     elif feature_map == "pos_elu":
-        from capsules.tasks.synth.mixers.feature_maps.base import PosELU
+        from cartridges.tasks.synth.mixers.feature_maps.base import PosELU
         return PosELU(**kwargs)
     elif feature_map == "all_poly":
-        from capsules.tasks.synth.mixers.feature_maps.all_poly import AllPolyMap
+        from cartridges.tasks.synth.mixers.feature_maps.all_poly import AllPolyMap
         return AllPolyMap(**kwargs)
     else:
         feature_map = import_from_str(feature_map)

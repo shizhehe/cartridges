@@ -71,8 +71,8 @@ def get_cache_size(model_name: str) -> int:
 
 
 def _convert_to_hashable(obj):
-    from capsules.context import StructuredContext
-    from capsules.clients.base import Client
+    from cartridges.context import StructuredContext
+    from cartridges.clients.base import Client
     from transformers import AutoTokenizer
     from pydrantic import BaseConfig
     if isinstance(obj, StructuredContext):

@@ -19,13 +19,13 @@ import wandb
 import pydrantic
 import torch.nn as nn
 
-# capsules specific imports
-from capsules.datasets import CapsuleGenerateDatasetElement
+# Cartridges specific imports
+from cartridges.datasets import CartridgeGenerateDatasetElement
 
-from capsules.generate.structs import Context
-from capsules.generate_baseline import BaselineGenerator, GenerateBaselineResponse
-from capsules.clients.base import Client, ClientConfig, ClientResponse
-from capsules.utils import get_logger
+from cartridges.structs import Context
+from cartridges.generate_baseline import BaselineGenerator, GenerateBaselineResponse
+from cartridges.clients.base import Client, ClientConfig, ClientResponse
+from cartridges.utils import get_logger
 
 
 logger = get_logger(__name__)
@@ -57,7 +57,7 @@ class ReglabHousingGoldPassageBaseline(BaselineGenerator):
 
     def generate(
         self, 
-        elements: List[CapsuleGenerateDatasetElement]
+        elements: List[CartridgeGenerateDatasetElement]
     ) -> List[GenerateBaselineResponse]:
         chats = []
         for element in elements:

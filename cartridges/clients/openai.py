@@ -7,9 +7,9 @@ import asyncio
 
 from pydrantic import ObjectConfig
 import tiktoken
-from capsules.clients.base import Client, Sample, SelectedToken, TopToken, ClientConfig, ClientResponse
-from capsules.clients.usage import Usage, num_tokens_from_messages_openai
-from capsules.utils import get_logger
+from cartridges.clients.base import Client, Sample, SelectedToken, TopToken, ClientConfig, ClientResponse
+from cartridges.clients.usage import Usage, num_tokens_from_messages_openai
+from cartridges.utils import get_logger
 
 # SE (2025-01-15): This is a hack to share a single event loop across all calls to Chat
 loop: Optional[asyncio.AbstractEventLoop] = None

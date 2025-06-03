@@ -10,21 +10,21 @@ from collections import defaultdict
 from transformers import AutoTokenizer
 
 
-from capsules.tasks.mrcr import get_toc_str, get_convo_map, occ_mapping, POSITIOINS
-from capsules.clients.base import ClientConfig
-from capsules.clients.tokasaurus_batch import CapsulesConvoWithLogprobs
-from capsules.generate.generators.base import ContextConvoGenerator
-from capsules.generate.generators.base import responses_and_chats_to_training_examples as responses_and_chats_to_training_examples_orig
-from capsules.generate.structs import (
+from cartridges.tasks.mrcr import get_toc_str, get_convo_map, occ_mapping, POSITIOINS
+from cartridges.clients.base import ClientConfig
+from cartridges.clients.tokasaurus_batch import CartridgesConvoWithLogprobs
+from cartridges.generate.generators.base import ContextConvoGenerator
+from cartridges.generate.generators.base import responses_and_chats_to_training_examples as responses_and_chats_to_training_examples_orig
+from cartridges.structs import (
     Context,
     TrainingExample,
 )
-from capsules.utils import get_logger
+from cartridges.utils import get_logger
 
 logger = get_logger(__name__)
 
 
-mrcr_path = "capsules/tasks/mrcr/mrcr_categories_document-2.json"
+mrcr_path = "Cartridges/tasks/mrcr/mrcr_categories_document-2.json"
 
 
 # UTILS
@@ -33,7 +33,7 @@ USE_CHAT_TAG = False
 
 
 def responses_and_chats_to_training_examples(
-    convos: list[CapsulesConvoWithLogprobs],
+    convos: list[CartridgesConvoWithLogprobs],
     answer_chats: list[list[dict]],
 ) -> list[TrainingExample]:
     examples = []
@@ -207,7 +207,7 @@ Put the conversations that are about the same topic into the same category. Incl
             },
         ]
         answer_chats.append(answer_chat)
-        convos: list[CapsulesConvoWithLogprobs] = self.client.chat_with_logprobs(
+        convos: list[CartridgesConvoWithLogprobs] = self.client.chat_with_logprobs(
             chats=answer_chats,
             temperature=self.config.temperature,
             top_logprobs=self.config.num_top_logprobs,
@@ -246,7 +246,7 @@ Output the json and no other text."""
             if i == 1: 
                 break
 
-        convos_categorized: list[CapsulesConvoWithLogprobs] = self.client.chat_with_logprobs(
+        convos_categorized: list[CartridgesConvoWithLogprobs] = self.client.chat_with_logprobs(
             chats=answer_chats,
             temperature=self.config.temperature,
             top_logprobs=self.config.num_top_logprobs,
@@ -425,7 +425,7 @@ The conversations in this category are as follows:
 
 
         print(f"Generated {len(answer_chats)} answer chats")
-        convos: list[CapsulesConvoWithLogprobs] = self.client.chat_with_logprobs(
+        convos: list[CartridgesConvoWithLogprobs] = self.client.chat_with_logprobs(
             chats=answer_chats,
             temperature=self.config.temperature,
             top_logprobs=self.config.num_top_logprobs,
@@ -542,7 +542,7 @@ Question:"""
             question_chats.append(question_chat)
         
 
-        question_responses: list[CapsulesConvoWithLogprobs] = (
+        question_responses: list[CartridgesConvoWithLogprobs] = (
             self.client.chat_with_logprobs(
                 chats=question_chats,
                 temperature=self.config.temperature,
@@ -614,7 +614,7 @@ First state the first sentence in passage contents and then provide your answer.
             for additional_instruction in additional_instructions
         ]
         print(f"Generated {len(answer_chats)} answer chats")
-        convos: list[CapsulesConvoWithLogprobs] = self.client.chat_with_logprobs(
+        convos: list[CartridgesConvoWithLogprobs] = self.client.chat_with_logprobs(
             chats=answer_chats,
             temperature=self.config.temperature,
             top_logprobs=self.config.num_top_logprobs,
@@ -722,7 +722,7 @@ class DirectGenerator(ContextConvoGenerator):
                 },
             ]
         ]
-        convos: list[CapsulesConvoWithLogprobs] = self.client.chat_with_logprobs(
+        convos: list[CartridgesConvoWithLogprobs] = self.client.chat_with_logprobs(
             chats=answer_chats,
             temperature=self.config.temperature,
             top_logprobs=self.config.num_top_logprobs,

@@ -1,13 +1,13 @@
 import numpy as np
-from capsules.generate.context_convo_generators.base import QuestionData
+from cartridges.generate.context_convo_generators.base import QuestionData
 from dataclasses import dataclass
 from typing import Optional
 
 import torch
 from torch.utils.data import Dataset
 
-from capsules.tasks.synth.config import DataSegmentConfig
-from capsules.tasks.synth.data import DataSegment, DataSegmentForTuning, TuningDataset
+from cartridges.tasks.synth.config import DataSegmentConfig
+from cartridges.tasks.synth.data import DataSegment, DataSegmentForTuning, TuningDataset
 
 @dataclass
 class MQARData:

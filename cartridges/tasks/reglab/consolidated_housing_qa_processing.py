@@ -1,7 +1,7 @@
 import json
 import pandas as pd
 
-df = pd.read_json('/home/emilyryliu/capsules/capsules/tasks/reglab/housing_qa_consolidated_generations.jsonl', lines=True)
+df = pd.read_json('/home/emilyryliu/Cartridges/Cartridges/tasks/reglab/housing_qa_consolidated_generations.jsonl', lines=True)
 
 # placeholders
 df['answer_options'] = df['answer']  
@@ -22,5 +22,5 @@ for question in df['question_number'].unique():
 
 
 # save the updated dataframe to a new jsonl file
-df.to_json('/home/emilyryliu/capsules/capsules/tasks/reglab/housing_qa_consolidated_generations_with_answer_options.jsonl', orient='records', lines=True)
+df.to_json('/home/emilyryliu/Cartridges/Cartridges/tasks/reglab/housing_qa_consolidated_generations_with_answer_options.jsonl', orient='records', lines=True)
     

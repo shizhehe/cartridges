@@ -33,10 +33,10 @@ def load_wandb_table(artifact_path: str, artifact_name: str) -> pd.DataFrame:
 
 # save for leaderboard
 
-pathname = "hazy-research/capsules/run-rfmcs03s-generate_novelqa_generate_B01table:v0" # icl
-pathname = "hazy-research/capsules/run-68u4k1a9-generate_novelqa_generate_B01table:v0" # rag topk=1
-pathname = 'hazy-research/capsules/run-ve6sx0uq-generate_novelqa_generate_B01table:v0' # rag topk=2
-pathname = "hazy-research/capsules/run-zwb38eyx-generate_novelqa_generate_B01table:v0" # rag topk=4
+pathname = "hazy-research/Cartridges/run-rfmcs03s-generate_novelqa_generate_B01table:v0" # icl
+pathname = "hazy-research/Cartridges/run-68u4k1a9-generate_novelqa_generate_B01table:v0" # rag topk=1
+pathname = 'hazy-research/Cartridges/run-ve6sx0uq-generate_novelqa_generate_B01table:v0' # rag topk=2
+pathname = "hazy-research/Cartridges/run-zwb38eyx-generate_novelqa_generate_B01table:v0" # rag topk=4
 df = load_wandb_table(pathname, "table")
 
 if not os.path.exists("outputs"):
@@ -55,9 +55,9 @@ for idx, row in df.iterrows():
     output[title].append(closest_letter)
 
 # for the remaining books just fill in "A"
-fmeta = "/home/simarora/code/capsules/scratch/simran/NovelQA/bookmeta.json"
-fquestions = "/home/simarora/code/capsules/scratch/simran/NovelQA/Data/PublicDomain/"
-fquestions2 = "/home/simarora/code/capsules/scratch/simran/NovelQA/Data/CopyrightProtected/"
+fmeta = "/home/simarora/code/Cartridges/scratch/simran/NovelQA/bookmeta.json"
+fquestions = "/home/simarora/code/Cartridges/scratch/simran/NovelQA/Data/PublicDomain/"
+fquestions2 = "/home/simarora/code/Cartridges/scratch/simran/NovelQA/Data/CopyrightProtected/"
 metadata = json.load(open(fmeta))
 for book in metadata:
     title = metadata[book]["title"].lower().replace(".", "").replace(" ", "").replace(",", "").replace("-", "").replace("_", "")

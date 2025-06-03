@@ -3,8 +3,8 @@ from pathlib import Path
 import wandb
 from torch.nn import Module
 
-from capsules.tasks.synth.model import LanguageModel
-from capsules.tasks.synth.config import PretrainConfig
+from cartridges.tasks.synth.model import LanguageModel
+from cartridges.tasks.synth.config import PretrainConfig
 
 class WandbLogger:
     def __init__(self, config: PretrainConfig):

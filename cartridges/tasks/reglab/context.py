@@ -3,12 +3,12 @@ import pandas as pd
 from pydantic import BaseModel
 from seaborn import load_dataset
 
-from capsules.context import TexDocument, TexChapter, TexSection
-from capsules.generate.run import BaseContextConfig
+from cartridges.context import TexDocument, TexChapter, TexSection
+from cartridges.context import BaseContextConfig
 
-from capsules.context import StructuredContext
-from capsules.generate.structs import Section
-from capsules.tasks.longhealth.load import load_longhealth_dataset, LongHealthPatient, LongHealthQuestion
+from cartridges.context import StructuredContext
+from cartridges.structs import Section
+from cartridges.tasks.longhealth.load import load_longhealth_dataset, LongHealthPatient, LongHealthQuestion
 
 class ReglabHousingStructuredContextConfig(BaseContextConfig):
     states: Optional[list[str]] = None

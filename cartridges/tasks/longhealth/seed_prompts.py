@@ -10,25 +10,25 @@ import concurrent.futures
 from transformers import AutoTokenizer
 
 
-from capsules.clients.base import Client, ClientConfig
-from capsules.clients.tokasaurus_batch import CapsulesConvoWithLogprobs
-from capsules.context import StructuredContext, list_nested_contexts
-from capsules.generate.chunk import Chunker
-from capsules.generate.generators.auto import PromptSampler, SYSTEM_PROMPT_TEMPLATE
-from capsules.generate.generators.base import (
+from cartridges.clients.base import Client, ClientConfig
+from cartridges.clients.tokasaurus_batch import CartridgesConvoWithLogprobs
+from cartridges.context import StructuredContext, list_nested_contexts
+from cartridges.generate.chunk import Chunker
+from cartridges.generate.generators.auto import PromptSampler, SYSTEM_PROMPT_TEMPLATE
+from cartridges.generate.generators.base import (
     ContextConvoGenerator,
     get_subcontext,
     responses_and_chats_to_training_examples,
 )
-from capsules.generate.outline import get_outline
-from capsules.generate.structs import (
+from cartridges.generate.outline import get_outline
+from cartridges.structs import (
     Context,
     Document,
     Section,
     TrainingExample,
 )
-from capsules.generate.tree_sampler import ContextTreeLeaf, flood_fill_from_leafs, flood_fill_from_leafs_tokens, serialize_with_elide, structured_context_to_context_tree
-from capsules.utils import get_logger
+from cartridges.generate.tree_sampler import ContextTreeLeaf, flood_fill_from_leafs, flood_fill_from_leafs_tokens, serialize_with_elide, structured_context_to_context_tree
+from cartridges.utils import get_logger
 
 logger = get_logger(__name__)
 

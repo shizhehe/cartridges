@@ -4,9 +4,9 @@ import numpy as np
 from typing import List
 import torch
 
-from capsules.generate.context_convo_generators.base import ContextConvoGenerator, QuestionData
-from capsules.generate.structs import Context, ContextConvo, Message
-from capsules.tasks.synth.mqar.mqar_data import MQARConfig, multiquery_ar
+from cartridges.generate.context_convo_generators.base import ContextConvoGenerator, QuestionData
+from cartridges.structs import Context, ContextConvo, Message
+from cartridges.tasks.synth.mqar.mqar_data import MQARConfig, multiquery_ar
 
 @dataclass
 class MQARGenerator(ContextConvoGenerator):

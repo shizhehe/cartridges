@@ -1,6 +1,6 @@
 
 import os
-from capsules.tasks.thunderkittens.kernelbench_utils import ( 
+from cartridges.tasks.thunderkittens.kernelbench_utils import ( 
     read_file, 
     KERNEL_BENCH_PATH as REPO_TOP_PATH,
 )

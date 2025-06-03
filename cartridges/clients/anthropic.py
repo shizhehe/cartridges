@@ -7,7 +7,7 @@ import asyncio
 
 from pydrantic import ObjectConfig
 import tiktoken
-from capsules.clients.base import (
+from cartridges.clients.base import (
     Client,
     Sample,
     SelectedToken,
@@ -15,8 +15,8 @@ from capsules.clients.base import (
     ClientConfig,
     ClientResponse,
 )
-from capsules.clients.usage import Usage, num_tokens_from_messages_openai
-from capsules.utils import get_logger
+from cartridges.clients.usage import Usage, num_tokens_from_messages_openai
+from cartridges.utils import get_logger
 
 # import anthropic
 

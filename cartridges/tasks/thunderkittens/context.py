@@ -3,10 +3,10 @@
 import os
 from typing import List
 
-from capsules.context import StructuredContext
-from capsules.generate.structs import Context, Section
-from capsules.tasks.thunderkittens.tk_strings import ( tk_description ) 
-from capsules.generate.run import BaseContextConfig
+from cartridges.context import StructuredContext
+from cartridges.structs import Context, Section
+from cartridges.tasks.thunderkittens.tk_strings import ( tk_description ) 
+from cartridges.context import BaseContextConfig
 
 
 class TKFile(StructuredContext):

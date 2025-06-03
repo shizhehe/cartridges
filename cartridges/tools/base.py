@@ -8,7 +8,7 @@ import abc
 from pydantic import BaseModel
 from pydrantic import ObjectConfig
 
-from capsules.context import StructuredContext
+from cartridges.context import StructuredContext
 from transformers import AutoTokenizer
 
 

@@ -9,8 +9,8 @@ class SWDEContextConfig(BaseContextConfig):
     max_tokens_per_section: int = -1
 
     # pages_path: str = "/data/sabri/data/evaporate/swde/movie/movie-imdb(2000)"
-    pages_path: str = "/home/simarora/code/capsules/scratch/simran/SWDE/data/evaporate/swde/movie/movie-imdb(2000)"
-    table_path: str = "/home/simarora/code/capsules/scratch/simran/SWDE/table.json"
+    pages_path: str = "/home/simarora/code/Cartridges/scratch/simran/SWDE/data/evaporate/swde/movie/movie-imdb(2000)"
+    table_path: str = "/home/simarora/code/Cartridges/scratch/simran/SWDE/table.json"
 
     def instantiate(self) -> Context:
 

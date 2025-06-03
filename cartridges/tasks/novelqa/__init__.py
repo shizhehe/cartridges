@@ -13,10 +13,10 @@ from transformers import PreTrainedTokenizerFast
 from pydrantic import ObjectConfig
 import pandas as pd
 
-from capsules.generate.structs import Context, ContextConvo, Document, Message, Section
-from capsules.datasets import CapsuleDataset, CapsuleDatasetElementTokenLabels, CapsuleGenerateDataset, CapsuleGenerateDatasetElement, TEMPLATE
-from capsules.generate.run import BaseContextConfig
-from capsules.utils import get_logger
+from cartridges.structs import Context, ContextConvo, Document, Message, Section
+from cartridges.datasets import CartridgeDataset, CartridgeDatasetElementTokenLabels, CartridgeGenerateDataset, CartridgeGenerateDatasetElement, TEMPLATE
+from cartridges.context import BaseContextConfig
+from cartridges.utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -58,17 +58,17 @@ class Novel(BaseModel):
 def load_novelqa_dataset(book_id: str) -> List[Novel]:
 
     if book_id == "Frankenstein_Demo":
-        fquestions = "/home/simarora/code/capsules/scratch/simran/NovelQA/Demonstration/"
-        fbooks = "/home/simarora/code/capsules/scratch/simran/NovelQA/Demonstration/"
+        fquestions = "/home/simarora/code/Cartridges/scratch/simran/NovelQA/Demonstration/"
+        fbooks = "/home/simarora/code/Cartridges/scratch/simran/NovelQA/Demonstration/"
         questions = ['Frankenstein.json']
         books = ['Frankenstein.txt']
         book_id = "Frankenstein"
     else:
-        fquestions = "/home/simarora/code/capsules/scratch/simran/GoldNovelQA/Data/PublicDomain/"
-        fbooks = "/home/simarora/code/capsules/scratch/simran/GoldNovelQA/Books/PublicDomain/"
+        fquestions = "/home/simarora/code/Cartridges/scratch/simran/GoldNovelQA/Data/PublicDomain/"
+        fbooks = "/home/simarora/code/Cartridges/scratch/simran/GoldNovelQA/Books/PublicDomain/"
         questions = sorted(os.listdir(fquestions))
         books = sorted(os.listdir(fbooks))
-        fmeta = "/home/simarora/code/capsules/scratch/simran/NovelQA/bookmeta.json"
+        fmeta = "/home/simarora/code/Cartridges/scratch/simran/NovelQA/bookmeta.json"
         metadata = json.load(open(fmeta)) # dict_keys(['title', 'source', 'link', 'whichgtb', 'copyright', 'yearpub', 'author', 'yearperish', 'period', 'tokenlen'])
 
     # load the dataset
@@ -187,7 +187,7 @@ class NovelContextConfig(BaseContextConfig):
         return context
 
 
-class NovelMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
+class NovelMultipleChoiceGenerateDataset(CartridgeGenerateDataset):
     class Config(ObjectConfig):
         _pass_as_config = True
         book_id: str = None
@@ -249,7 +249,7 @@ class NovelMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
 
     def __getitem__(
         self, index: int
-    ) -> CapsuleGenerateDatasetElement:
+    ) -> CartridgeGenerateDatasetElement:
         
         question: NovelQuestion = self.questions[index]
 
@@ -260,7 +260,7 @@ class NovelMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
             chat_template=TEMPLATE,
         )
 
-        return CapsuleGenerateDatasetElement(
+        return CartridgeGenerateDatasetElement(
             input_ids=input_ids,
             prompt=question.question,
             answer=question.answer,
@@ -332,9 +332,9 @@ class NovelMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
         return score, details
 
 
-class NovelEvalDataset(CapsuleDataset):
+class NovelEvalDataset(CartridgeDataset):
     
-    class Config(CapsuleDataset.Config):
+    class Config(CartridgeDataset.Config):
         _pass_as_config = True
         book_id: str = None
         max_questions: Optional[int] = None

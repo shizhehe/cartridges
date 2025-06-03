@@ -21,7 +21,7 @@ from tokasaurus.allocation import NoSpaceException
 
 
 
-from capsules.clients.base import Client, ClientConfig, ClientResponse, Sample, Usage
+from cartridges.clients.base import Client, ClientConfig, ClientResponse, Sample, Usage
 
 
 class TokasaurusServerlessClient(Client):

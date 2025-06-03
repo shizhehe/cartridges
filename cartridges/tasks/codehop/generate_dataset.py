@@ -6,10 +6,10 @@ from typing import Dict, Optional, List, Tuple
 from pydrantic import ObjectConfig
 from transformers import PreTrainedTokenizerFast
 
-from capsules.datasets import CapsuleGenerateDataset, CapsuleGenerateDatasetElement, TEMPLATE
-from capsules.tasks.codehop.code_hop_synth import CodeHopFile, CodeHopSynthConfig, make_code_hop
+from cartridges.datasets import CartridgeGenerateDataset, CartridgeGenerateDatasetElement, TEMPLATE
+from cartridges.tasks.codehop.code_hop_synth import CodeHopFile, CodeHopSynthConfig, make_code_hop
 
-class CodeHopGenerateDataset(CapsuleGenerateDataset):
+class CodeHopGenerateDataset(CartridgeGenerateDataset):
     class Config(ObjectConfig):
         _pass_as_config = True
         code_hop_config: CodeHopSynthConfig
@@ -58,7 +58,7 @@ class CodeHopGenerateDataset(CapsuleGenerateDataset):
             return_tensors="pt",
             chat_template=TEMPLATE,
         )
-        return CapsuleGenerateDatasetElement(
+        return CartridgeGenerateDatasetElement(
             input_ids=input_ids,
             answer=answer,
             convo_id=f"codehop_{index}",

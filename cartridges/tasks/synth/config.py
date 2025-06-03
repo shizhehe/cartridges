@@ -6,7 +6,7 @@ from typing import List, Optional, Tuple, Union
 from pydrantic import BaseConfig, RunConfig
 import pydrantic
 
-from capsules.tasks.synth.utils import import_from_str
+from cartridges.tasks.synth.utils import import_from_str
 
 
 class FunctionConfig(BaseConfig):
@@ -50,7 +50,7 @@ class DataConfig(BaseConfig):
 class ModelConfig(BaseConfig):
     sequence_mixer: ModuleConfig = None
     state_mixer: ModuleConfig = ModuleConfig(
-        name="capsules.tasks.synth.mixers.mlp.MLP", 
+        name="cartridges.tasks.synth.mixers.mlp.MLP", 
         kwargs={"hidden_mult": 4}
     )
 
@@ -95,5 +95,5 @@ class PretrainConfig(pydrantic.RunConfig):
     save_to_wandb: bool = True
 
     def run(self):
-        from capsules.tasks.synth.pretrain import train
+        from cartridges.tasks.synth.pretrain import train
         train(self)

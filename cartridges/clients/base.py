@@ -5,13 +5,13 @@ from typing import Any, Dict, List, Literal, Optional, Union
 import numpy as np
 from pydrantic import ObjectConfig
 from pydantic import BaseModel
-from capsules.clients.usage import Usage
+from cartridges.clients.usage import Usage
 from dataclasses import dataclass, asdict
 
 
 @dataclass(slots=True)
 class TopToken:
-    # TODO (SE): text is temporarily optional because the tokasaurus capsules api
+    # TODO (SE): text is temporarily optional because the tokasaurus Cartridges api
     # does not return it.
     logprob: float
     text: Optional[str] = None
@@ -20,12 +20,12 @@ class TopToken:
     id: Optional[int] = None
 @dataclass(slots=True)
 class SelectedToken: 
-    # TODO (SE): text is temporarily optional because the tokasaurus capsules api
+    # TODO (SE): text is temporarily optional because the tokasaurus Cartridges api
     # does not return it.
     text: Optional[str] = None
 
     # TODO (SE): making this optional is a temporary solution to support
-    # tokasaurus capsules api which does not return logprob for the selected token
+    # tokasaurus Cartridges api which does not return logprob for the selected token
     logprob: Optional[float] = None
 
     # id is optional because some clients (e.g. OpenAI) do not return it.
@@ -35,7 +35,7 @@ class SelectedToken:
 
 @dataclass(slots=True)
 class InputToken: 
-    # TODO (SE): text is temporarily optional because the tokasaurus capsules api
+    # TODO (SE): text is temporarily optional because the tokasaurus Cartridges api
     # does not return it.
     text: Optional[str] = None
 
@@ -63,7 +63,7 @@ class ClientResponse:
         return asdict(self)
     
 @dataclass(slots=True)
-class CapsulesConvoWithLogprobs:
+class CartridgesConvoWithLogprobs:
     num_output_tokens: int
 
     token_ids: np.ndarray
@@ -116,7 +116,7 @@ class Client(ABC):
         top_logprobs: Optional[int] = None,
         routing_tag: Optional[str] = None,
         **kwargs,
-    ) -> list[CapsulesConvoWithLogprobs]:
+    ) -> list[CartridgesConvoWithLogprobs]:
         raise NotImplementedError(
             "The `chat_with_logprobs` method is not yet supported for this client. See the `TokasaurusBatchClient` for an example."
         )

@@ -1,17 +1,17 @@
 import re  # Added for CoT answer extraction
-from capsules.data.mtob import (
+from cartridges.data.mtob import (
     load_test_ek,
     load_test_ke,
     load_train_examples,
 )  # Added load_train_examples
-from capsules.datasets import (
-    CapsuleDataset,
-    CapsuleGenerateDataset,
+from cartridges.datasets import (
+    CartridgeDataset,
+    CartridgeGenerateDataset,
     TEMPLATE,
-    CapsuleGenerateDatasetElement,
+    CartridgeGenerateDatasetElement,
 )
-from capsules.generate.structs import ContextConvo, Message
-from capsules.train import EvalDatasetConfig, GenerateDatasetConfig
+from cartridges.structs import ContextConvo, Message
+from cartridges.train import EvalDatasetConfig, GenerateDatasetConfig
 import evaluate
 
 # --- Prompts ---
@@ -68,8 +68,8 @@ def extract_answer_from_cot(text: str) -> str:
         return text.strip()
 
 
-class MtobEnglishToKalamangEvalDataset(CapsuleDataset):
-    class Config(CapsuleDataset.Config):
+class MtobEnglishToKalamangEvalDataset(CartridgeDataset):
+    class Config(CartridgeDataset.Config):
         _pass_as_config = True
         label_type: str = "tokens"
         data_sources: list = []
@@ -89,8 +89,8 @@ class MtobEnglishToKalamangEvalDataset(CapsuleDataset):
         self.tokenizer = tokenizer
 
 
-class MtobKalamangToEnglishEvalDataset(CapsuleDataset):
-    class Config(CapsuleDataset.Config):
+class MtobKalamangToEnglishEvalDataset(CartridgeDataset):
+    class Config(CartridgeDataset.Config):
         _pass_as_config = True
         label_type: str = "tokens"
         data_sources: list = []
@@ -110,8 +110,8 @@ class MtobKalamangToEnglishEvalDataset(CapsuleDataset):
         self.tokenizer = tokenizer
 
 
-class MtobKalamangToEnglishTrainDataset(CapsuleDataset):
-    class Config(CapsuleDataset.Config):
+class MtobKalamangToEnglishTrainDataset(CartridgeDataset):
+    class Config(CartridgeDataset.Config):
         _pass_as_config = True
         label_type: str = "tokens"
         data_sources: list = []
@@ -131,8 +131,8 @@ class MtobKalamangToEnglishTrainDataset(CapsuleDataset):
         self.tokenizer = tokenizer
 
 
-class MtobEnglishToKalamangTrainDataset(CapsuleDataset):
-    class Config(CapsuleDataset.Config):
+class MtobEnglishToKalamangTrainDataset(CartridgeDataset):
+    class Config(CartridgeDataset.Config):
         _pass_as_config = True
         label_type: str = "tokens"
         data_sources: list = []
@@ -152,8 +152,8 @@ class MtobEnglishToKalamangTrainDataset(CapsuleDataset):
         self.tokenizer = tokenizer
 
 
-class MtobGenerateDataset(CapsuleGenerateDataset):
-    class Config(CapsuleGenerateDataset.Config):
+class MtobGenerateDataset(CartridgeGenerateDataset):
+    class Config(CartridgeGenerateDataset.Config):
         _pass_as_config = True
         use_cot: bool = False  # Added CoT config flag
         # ignored
@@ -166,7 +166,7 @@ class MtobGenerateDataset(CapsuleGenerateDataset):
         self.tokenizer = tokenizer
         # Data loading and setting source/target languages will happen in subclasses
 
-    def __getitem__(self, index: int) -> CapsuleGenerateDatasetElement:
+    def __getitem__(self, index: int) -> CartridgeGenerateDatasetElement:
         row = self.data[index]
 
         # Select prompt based on config
@@ -184,7 +184,7 @@ class MtobGenerateDataset(CapsuleGenerateDataset):
             chat_template=TEMPLATE,
         )
 
-        return CapsuleGenerateDatasetElement(
+        return CartridgeGenerateDatasetElement(
             input_ids=input_ids,
             prompt=user_content,  # Keep original sentence as prompt context if needed
             answer=row["ground_truth"],

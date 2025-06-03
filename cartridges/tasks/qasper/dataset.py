@@ -3,9 +3,9 @@ from typing_extensions import Literal
 from transformers import PreTrainedTokenizerFast
 from datasets import load_dataset
 
-from capsules.generate.structs import ContextConvo, Message
-from capsules.tasks.qasper.rewrite import RewrittenQasperQuestion
-from capsules.datasets import CapsuleDataset
+from cartridges.structs import ContextConvo, Message
+from cartridges.tasks.qasper.rewrite import RewrittenQasperQuestion
+from cartridges.datasets import CartridgeDataset
 
 PROMPT = """\
 Please write a succinct answer to the following question.
@@ -21,8 +21,8 @@ Provide your answer in the following format (output nothing else):
 {{your answer here}}
 </answer>"""
 
-class QasperEvalDataset(CapsuleDataset):
-    class Config(CapsuleDataset.Config):
+class QasperEvalDataset(CartridgeDataset):
+    class Config(CartridgeDataset.Config):
         _pass_as_config = True
         
         dataset: str = "sabrieyuboglu/qasper-rewrite-gpt-4.1"

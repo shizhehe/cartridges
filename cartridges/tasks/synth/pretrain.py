@@ -13,15 +13,15 @@ from tqdm import tqdm
 import numpy as np
 from einops import rearrange
 
-from capsules.tasks.synth.data import prepare_data
-from capsules.tasks.synth.config import PretrainConfig
-from capsules.tasks.synth.model import LanguageModel
-from capsules.tasks.synth.logger import WandbLogger
-from capsules.tasks.synth.utils import set_determinism
+from cartridges.tasks.synth.data import prepare_data
+from cartridges.tasks.synth.config import PretrainConfig
+from cartridges.tasks.synth.model import LanguageModel
+from cartridges.tasks.synth.logger import WandbLogger
+from cartridges.tasks.synth.utils import set_determinism
 
 
 class WandBConfig(BaseConfig):
-    project: str = "capsules"
+    project: str = "Cartridges"
     entity: Optional[str] = None
     name: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
@@ -64,7 +64,7 @@ class PretrainConfig(pydrantic.RunConfig):
     save_to_wandb: bool = True
 
     def run(self):
-        from capsules.tasks.synth.pretrain import train
+        from cartridges.tasks.synth.pretrain import train
         train(self)
 
 

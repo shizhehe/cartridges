@@ -15,10 +15,10 @@ import pandas as pd
 import tqdm
 import wandb
 
-from capsules.generate.generators.base import ContextConvoGenerator
-from capsules.utils import WandBConfig, prepare_wandb, get_logger
-from capsules.generate.structs import SectionedContext, TrainingExample
-from capsules.generate.run import BaseContextConfig
+from cartridges.generate.generators.base import ContextConvoGenerator
+from cartridges.utils import WandBConfig, prepare_wandb, get_logger
+from cartridges.structs import SectionedContext, TrainingExample
+from cartridges.context import BaseContextConfig
 
 
 logger = get_logger(__name__)

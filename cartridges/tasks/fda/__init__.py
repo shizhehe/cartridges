@@ -12,11 +12,11 @@ from transformers import PreTrainedTokenizerFast
 from pydrantic import ObjectConfig
 import pandas as pd
 
-from capsules.context import StructuredContext
-from capsules.generate.structs import Context, ContextConvo, Document, Message, Section
-from capsules.datasets import CapsuleDataset, CapsuleDatasetElementTokenLabels, CapsuleGenerateDataset, CapsuleGenerateDatasetElement, TEMPLATE
-from capsules.generate.run import BaseContextConfig
-from capsules.utils import get_logger
+from cartridges.context import StructuredContext
+from cartridges.structs import Context, ContextConvo, Document, Message, Section
+from cartridges.datasets import CartridgeDataset, CartridgeDatasetElementTokenLabels, CartridgeGenerateDataset, CartridgeGenerateDatasetElement, TEMPLATE
+from cartridges.context import BaseContextConfig
+from cartridges.utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -157,7 +157,7 @@ class EvaporateContextConfig(BaseContextConfig):
             return out_document
 
 
-class EvaporateMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
+class EvaporateMultipleChoiceGenerateDataset(CartridgeGenerateDataset):
     class Config(ObjectConfig):
         _pass_as_config = True
         doc_id: str = None
@@ -193,7 +193,7 @@ class EvaporateMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
 
     def __getitem__(
         self, index: int
-    ) -> CapsuleGenerateDatasetElement:
+    ) -> CartridgeGenerateDatasetElement:
         
         question: EvaporateQuestion = self.questions[index]
 
@@ -204,7 +204,7 @@ class EvaporateMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
             chat_template=TEMPLATE,
         )
 
-        return CapsuleGenerateDatasetElement(
+        return CartridgeGenerateDatasetElement(
             input_ids=input_ids,
             prompt=question.question,
             answer=question.answer,
@@ -274,9 +274,9 @@ class EvaporateMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
         return score, details
 
 
-class EvaporateEvalDataset(CapsuleDataset):
+class EvaporateEvalDataset(CartridgeDataset):
     
-    class Config(CapsuleDataset.Config):
+    class Config(CartridgeDataset.Config):
         _pass_as_config = True
         doc_id: str = None
         max_questions: Optional[int] = None

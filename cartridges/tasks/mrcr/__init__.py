@@ -9,11 +9,11 @@ from transformers import PreTrainedTokenizerFast
 from pydrantic import ObjectConfig
 import pandas as pd
 
-from capsules.context import StructuredContext
-from capsules.generate.structs import Context, ContextConvo, Message, Section
-from capsules.datasets import CapsuleDataset, CapsuleGenerateDataset, CapsuleGenerateDatasetElement, TEMPLATE
-from capsules.generate.run import BaseContextConfig
-from capsules.utils import get_logger
+from cartridges.context import StructuredContext
+from cartridges.structs import Context, ContextConvo, Message, Section
+from cartridges.datasets import CartridgeDataset, CartridgeGenerateDataset, CartridgeGenerateDatasetElement, TEMPLATE
+from cartridges.context import BaseContextConfig
+from cartridges.utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -210,7 +210,7 @@ class MRCRSectionedContextConfig(BaseContextConfig):
         return document
 
 
-class MRCRGenerateDataset(CapsuleGenerateDataset):
+class MRCRGenerateDataset(CartridgeGenerateDataset):
     
     class Config(ObjectConfig):
         _pass_as_config = True
@@ -253,7 +253,7 @@ class MRCRGenerateDataset(CapsuleGenerateDataset):
 
     def __getitem__(
         self, index: int
-    ) -> CapsuleGenerateDatasetElement:
+    ) -> CartridgeGenerateDatasetElement:
         
         question: MRCRQuestion = self.questions[index]
 
@@ -273,7 +273,7 @@ class MRCRGenerateDataset(CapsuleGenerateDataset):
             chat_template=TEMPLATE,
         )
 
-        return CapsuleGenerateDatasetElement(
+        return CartridgeGenerateDatasetElement(
             input_ids=input_ids,
             prompt=question.question,
             answer=question.answer,
@@ -333,10 +333,10 @@ class MRCRGenerateDataset(CapsuleGenerateDataset):
         return score, details
 
 
-from capsules.transforms import ConvoTransformConfig
-class MRCREvalDataset(CapsuleDataset):
+from cartridges.transforms import ConvoTransformConfig
+class MRCREvalDataset(CartridgeDataset):
     
-    class Config(CapsuleDataset.Config):
+    class Config(CartridgeDataset.Config):
         _pass_as_config = True
         document_id : int = -1
         use_cot: bool = True

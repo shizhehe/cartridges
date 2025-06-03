@@ -12,10 +12,10 @@ import numpy as np
 import pandas as pd
 from datasets import load_dataset
 
-from capsules.context import StructuredContext
-from capsules.generate.run import BaseContextConfig
-from capsules.tasks.mrcr import MRCRQuestion
-from capsules.utils import get_logger
+from cartridges.context import StructuredContext
+from cartridges.context import BaseContextConfig
+from cartridges.tasks.mrcr import MRCRQuestion
+from cartridges.utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -95,7 +95,7 @@ class MRCRStructuredContextConfig(BaseContextConfig):
     def instantiate(self) -> ChatSession:
         hash_key = hashlib.md5(json.dumps(self.to_dict()).encode()).hexdigest()
         cache_path = os.path.join(
-            os.environ["CAPSULES_DIR"],
+            os.environ["CARTRIDGES_DIR"],
             "output",
             "mrcr",
             f"{hash_key}.feather"

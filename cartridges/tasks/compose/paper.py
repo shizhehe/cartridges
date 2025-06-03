@@ -1,8 +1,8 @@
 import os
 from typing import List
-from capsules.context import StructuredContext
-from capsules.generate.structs import Context, Section
-from capsules.generate.run import BaseContextConfig
+from cartridges.context import StructuredContext
+from cartridges.structs import Context, Section
+from cartridges.context import BaseContextConfig
 
 
 class PaperFigure(StructuredContext):
@@ -39,7 +39,7 @@ class Paper(StructuredContext):
 def load_paper_dataset() -> List[str]:
 
 
-   filepath = "/root/simran/capsules/capsules/tasks/thunderkittens/arXiv-2410.20399v1/"
+   filepath = "/root/simran/Cartridges/Cartridges/tasks/thunderkittens/arXiv-2410.20399v1/"
    sections = f"{filepath}/Sections/"
    figures = f"{sections}/figures/"
    listings = f"{sections}/listings/"

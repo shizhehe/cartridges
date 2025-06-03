@@ -4,8 +4,8 @@ from textwrap import dedent
 from typing import Literal
 import torch
 
-from capsules.datasets import CapsuleDataset, TokenCounts
-from capsules.tasks.codehop.code_hop_synth import (
+from cartridges.datasets import CartridgeDataset, TokenCounts
+from cartridges.tasks.codehop.code_hop_synth import (
     CodeHopSynthConfig,
     make_code_hop,
     serialize_file,
@@ -13,7 +13,7 @@ from capsules.tasks.codehop.code_hop_synth import (
 
 
 @dataclass
-class CapsuleDatasetCodeHopElement:
+class CartridgeDatasetCodeHopElement:
     context_ids: list[int]
     input_ids: list[int]
 
@@ -22,7 +22,7 @@ USER_HEADER = [128006, 882, 128007, 271]
 
 
 @dataclass
-class CapsuleDatasetCodeHopBatch:
+class CartridgeDatasetCodeHopBatch:
     input_ids_with_context: torch.Tensor
     input_ids: torch.Tensor
 
@@ -37,8 +37,8 @@ class CapsuleDatasetCodeHopBatch:
         assert self.input_ids.shape[0] == self.context_start_end
 
 
-class CodeHopDataset(CapsuleDataset):
-    class Config(CapsuleDataset.Config):
+class CodeHopDataset(CartridgeDataset):
+    class Config(CartridgeDataset.Config):
         _pass_as_config = True
 
         code_hop_config: CodeHopSynthConfig
@@ -100,7 +100,7 @@ Here is a python file named {file.name}:
                             128009,
                         ]
                         self.data.append(
-                            CapsuleDatasetCodeHopElement(
+                            CartridgeDatasetCodeHopElement(
                                 context_ids=context,
                                 input_ids=input_ids,
                             )
@@ -119,8 +119,8 @@ Here is a python file named {file.name}:
 
     def collate(
         self,
-        batch: list[CapsuleDatasetCodeHopElement],
-    ) -> CapsuleDatasetCodeHopBatch:
+        batch: list[CartridgeDatasetCodeHopElement],
+    ) -> CartridgeDatasetCodeHopBatch:
         max_len_contexts = max([len(x.context_ids) + len(x.input_ids) for x in batch])
         max_len_inputs = max([len(x.input_ids) + len(USER_HEADER) for x in batch])
 
@@ -156,7 +156,7 @@ Here is a python file named {file.name}:
                     len(element.context_ids) + len(element.input_ids),
                 )
             )
-        return CapsuleDatasetCodeHopBatch(
+        return CartridgeDatasetCodeHopBatch(
             input_ids_with_context=input_ids_with_context,
             input_ids=input_ids,
             context_start_end=context_start_end,

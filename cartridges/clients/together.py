@@ -5,15 +5,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from tqdm import tqdm
 
-from capsules.clients.base import (
+from cartridges.clients.base import (
     Client,
     Sample,
     SelectedToken,
     ClientConfig,
     ClientResponse,
 )
-from capsules.clients.usage import Usage
-from capsules.utils import get_logger
+from cartridges.clients.usage import Usage
+from cartridges.utils import get_logger
 
 from together import Together
 from pydrantic import BaseConfig

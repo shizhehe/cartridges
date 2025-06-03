@@ -8,7 +8,7 @@ from pydrantic import BaseConfig
 
 
 if TYPE_CHECKING:
-    from capsules.generate.structs import Context
+    from cartridges.structs import Context
     from bs4 import Tag
 
 class BaseContextConfig(BaseConfig, ABC):

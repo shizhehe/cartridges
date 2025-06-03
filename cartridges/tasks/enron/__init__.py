@@ -3,10 +3,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel
 from datasets import load_dataset
 
-from capsules.generate.structs import Context, Document
-from capsules.datasets import CapsuleDataset, CapsuleGenerateDataset, CapsuleGenerateDatasetElement, TEMPLATE
-from capsules.generate.run import BaseContextConfig
-from capsules.utils import get_logger
+from cartridges.structs import Context, Document
+from cartridges.datasets import CartridgeDataset, CartridgeGenerateDataset, CartridgeGenerateDatasetElement, TEMPLATE
+from cartridges.context import BaseContextConfig
+from cartridges.utils import get_logger
 
 logger = get_logger(__name__)
 

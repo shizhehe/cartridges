@@ -4,8 +4,8 @@ from transformers import PreTrainedTokenizerFast
 from pydrantic import ObjectConfig
 import pandas as pd
 
-from capsules.datasets import CapsuleGenerateDataset, CapsuleGenerateDatasetElement, TEMPLATE
-from capsules.utils import get_logger
+from cartridges.datasets import CartridgeGenerateDataset, CartridgeGenerateDatasetElement, TEMPLATE
+from cartridges.utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -15,7 +15,7 @@ Please answer this multiple choice question, giving only your answer:
 
 {question}"""
 
-class OpenStaxMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
+class OpenStaxMultipleChoiceGenerateDataset(CartridgeGenerateDataset):
     class Config(ObjectConfig):
         _pass_as_config = True
 
@@ -34,7 +34,7 @@ class OpenStaxMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
 
     def __getitem__(
         self, index: int
-    ) -> CapsuleGenerateDatasetElement:
+    ) -> CartridgeGenerateDatasetElement:
         # convo: ContextConvo = ContextConvo.model_validate(self.data[index])
         prompt = PROMPT_TEMPLATE.format(question=self.data[index]["question"])
 
@@ -45,7 +45,7 @@ class OpenStaxMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
             chat_template=TEMPLATE,
         )
 
-        return CapsuleGenerateDatasetElement(
+        return CartridgeGenerateDatasetElement(
             input_ids=input_ids,
             prompt=prompt,
             answer=self.data[index]["answer"],
@@ -56,6 +56,6 @@ class OpenStaxMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
     def score(
         self,
         pred: str,
-        element: CapsuleGenerateDatasetElement,
+        element: CartridgeGenerateDatasetElement,
     ):
         return pred.strip().lower()[0] == element.answer.strip().lower()[0]

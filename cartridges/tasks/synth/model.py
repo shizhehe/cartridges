@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.ops import StochasticDepth
 
-from capsules.tasks.synth.config import ModelConfig
+from cartridges.tasks.synth.config import ModelConfig
 
 
 class TokenEmbeddings(nn.Module):

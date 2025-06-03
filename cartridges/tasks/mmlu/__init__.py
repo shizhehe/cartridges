@@ -3,21 +3,21 @@ import random
 from typing import Literal
 import datasets
 import torch
-from capsules.datasets import (
-    CapsuleDataset,
-    CapsuleGenerateDataset,
-    CapsuleGenerateDatasetElement,
+from cartridges.datasets import (
+    CartridgeDataset,
+    CartridgeGenerateDataset,
+    CartridgeGenerateDatasetElement,
 )
 from transformers import PreTrainedTokenizerFast
 from pydantic import Field
 
-from capsules.generate.structs import ContextConvo, Message
-from capsules.tasks.mmlu.generate_hf_dataset import DATASET_NAME
-from capsules.train import GenerateDatasetConfig
+from cartridges.structs import ContextConvo, Message
+from cartridges.tasks.mmlu.generate_hf_dataset import DATASET_NAME
+from cartridges.train import GenerateDatasetConfig
 
 
-class MMLUEvalDataset(CapsuleDataset):
-    class Config(CapsuleDataset.Config):
+class MMLUEvalDataset(CartridgeDataset):
+    class Config(CartridgeDataset.Config):
         num_samples: int
         seed: int = 42
         label_type: Literal["tokens", "logits"] = "tokens"
@@ -81,8 +81,8 @@ def parse_chat_messages(text):
     
     return messages
 
-class MMLUGenerateDataset(CapsuleGenerateDataset):
-    class Config(CapsuleGenerateDataset.Config):
+class MMLUGenerateDataset(CartridgeGenerateDataset):
+    class Config(CartridgeGenerateDataset.Config):
         num_problems: int = 200
         seed: int = 47
 
@@ -115,7 +115,7 @@ class MMLUGenerateDataset(CapsuleGenerateDataset):
             )
 
             data.append(
-                CapsuleGenerateDatasetElement(
+                CartridgeGenerateDatasetElement(
                     input_ids=torch.tensor([tokenizer.encode(prompt)]),
                     prompt=prompt,
                     prompt_messages=prompt_messages,

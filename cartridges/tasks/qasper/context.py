@@ -2,8 +2,8 @@ from typing import List, Optional
 
 from datasets import load_dataset
 
-from capsules.generate.run import BaseContextConfig
-from capsules.context import StructuredContext
+from cartridges.context import BaseContextConfig
+from cartridges.context import StructuredContext
 
 TOPIC_TO_IDS = {
     "question": [

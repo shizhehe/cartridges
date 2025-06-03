@@ -1,11 +1,11 @@
 from typing import List, Optional
 from pydantic import BaseModel
 
-from capsules.context import TexDocument, TexChapter, TexSection
-from capsules.generate.run import BaseContextConfig
+from cartridges.context import TexDocument, TexChapter, TexSection
+from cartridges.context import BaseContextConfig
 
-from capsules.context import StructuredContext
-from capsules.tasks.codehop.code_hop_synth import CodeHopSynthConfig, make_code_hop, serialize_file
+from cartridges.context import StructuredContext
+from cartridges.tasks.codehop.code_hop_synth import CodeHopSynthConfig, make_code_hop, serialize_file
 
 class CodeHopStructuredContextConfig(BaseContextConfig):
     

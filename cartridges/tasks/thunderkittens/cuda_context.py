@@ -3,9 +3,9 @@
 import os
 from typing import List
 
-from capsules.context import StructuredContext
-from capsules.generate.structs import Context, Section
-from capsules.generate.run import BaseContextConfig
+from cartridges.context import StructuredContext
+from cartridges.structs import Context, Section
+from cartridges.context import BaseContextConfig
 
 
 class CudaFile(StructuredContext):

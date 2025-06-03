@@ -1,9 +1,9 @@
-from capsules.generate.run import BaseContextConfig
-from capsules.generate.structs import Context
+from cartridges.context import BaseContextConfig
+from cartridges.structs import Context
 from pydantic import BaseModel
 from typing import Dict
-from capsules.tasks.synth.mqar.mqar_data import MQARConfig, MQARData
-from capsules.tasks.synth.mqar.generator import MQARGenerator
+from cartridges.tasks.synth.mqar.mqar_data import MQARConfig, MQARData
+from cartridges.tasks.synth.mqar.generator import MQARGenerator
 
 
 class MQARQuestion(BaseModel):

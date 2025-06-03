@@ -12,7 +12,7 @@ import torch
 from tqdm import tqdm
 from torch.utils.data import TensorDataset, DataLoader, Dataset
 
-from capsules.tasks.synth.config import DataConfig, DataSegmentConfig
+from cartridges.tasks.synth.config import DataConfig, DataSegmentConfig
 
 
 @dataclass

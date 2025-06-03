@@ -2,11 +2,11 @@ from __future__ import annotations
 from pydantic import BaseModel
 from typing import Literal, Optional, Union
 
-from capsules.baselines.mtob import prompt_generic
-from capsules.context import TexDocument, TexChapter, TexSection
-from capsules.generate.run import BaseContextConfig
+from cartridges.baselines.mtob import prompt_generic
+from cartridges.context import TexDocument, TexChapter, TexSection
+from cartridges.context import BaseContextConfig
 
-from capsules.context import StructuredContext, HTMLDocument, HTMLElement
+from cartridges.context import StructuredContext, HTMLDocument, HTMLElement
 
 
 class SimpleStructuredContext(StructuredContext):
@@ -71,7 +71,7 @@ class KalamangContext(StructuredContext):
 
     @classmethod
     def load(cls) -> KalamangContext:
-        from capsules.tasks.mtob.load import load_mtob, MTOBData
+        from cartridges.tasks.mtob.load import load_mtob, MTOBData
 
         data: MTOBData = load_mtob()
 

@@ -1,9 +1,9 @@
 import os
-from capsules.datasets import TEMPLATE
+from cartridges.datasets import TEMPLATE
 from transformers import AutoTokenizer
 import wandb
-from capsules.train import TrainConfig, CacheAndModel
-from capsules.kv_initialization.base import TrainableCache
+from cartridges.train import TrainConfig, CacheAndModel
+from cartridges.kv_initialization.base import TrainableCache
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -394,7 +394,7 @@ def generate_batch(
 
 if __name__ == "__main__":
     cache_and_model, tokenizer = load_model_and_cache_from_wandb(   
-        wandb_run_id="hazy-research/capsules/ghm1tny6",
+        wandb_run_id="hazy-research/Cartridges/ghm1tny6",
         step=64,
         device="cuda"
     )

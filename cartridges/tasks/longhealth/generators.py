@@ -9,22 +9,22 @@ import math
 import concurrent.futures
 
 
-from capsules.clients.base import Client, ClientConfig
-from capsules.clients.tokasaurus_batch import CapsulesConvoWithLogprobs
-from capsules.generate.chunk import Chunker
-from capsules.generate.generators.base import (
+from cartridges.clients.base import Client, ClientConfig
+from cartridges.clients.tokasaurus_batch import CartridgesConvoWithLogprobs
+from cartridges.generate.chunk import Chunker
+from cartridges.generate.generators.base import (
     ContextConvoGenerator,
     get_subcontext,
     responses_and_chats_to_training_examples,
 )
-from capsules.generate.structs import (
+from cartridges.structs import (
     Context,
     Document,
     Section,
     TrainingExample,
 )
-from capsules.generate.subcontext import SubcontextGenerator
-from capsules.utils import get_logger
+from cartridges.generate.subcontext import SubcontextGenerator
+from cartridges.utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -233,7 +233,7 @@ class ReformatGenerator(ContextConvoGenerator):
             for prompt in prompts
         ]
 
-        convos: list[CapsulesConvoWithLogprobs] = self.client.chat_with_logprobs(
+        convos: list[CartridgesConvoWithLogprobs] = self.client.chat_with_logprobs(
             chats=answer_chats,
             temperature=self.config.temperature,
             top_logprobs=self.config.num_top_logprobs,
@@ -378,7 +378,7 @@ class ReformatWithToCGenerator(ContextConvoGenerator):
             for prompt in prompts
         ]
 
-        convos: list[CapsulesConvoWithLogprobs] = self.client.chat_with_logprobs(
+        convos: list[CartridgesConvoWithLogprobs] = self.client.chat_with_logprobs(
             chats=answer_chats,
             temperature=self.config.temperature,
             top_logprobs=self.config.num_top_logprobs,

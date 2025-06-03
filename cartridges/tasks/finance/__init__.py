@@ -6,8 +6,8 @@ from transformers import PreTrainedTokenizerFast
 from pydrantic import ObjectConfig
 import pandas as pd
 
-from capsules.context import StructuredContext
-from capsules.generate.structs import (
+from cartridges.context import StructuredContext
+from cartridges.structs import (
     SECTION_BUFFER_TOKENS,
     Message,
     Section,
@@ -15,20 +15,20 @@ from capsules.generate.structs import (
     Context,
     ContextConvo,
 )
-from capsules.datasets import (
-    CapsuleDataset,
-    CapsuleGenerateDataset,
-    CapsuleGenerateDatasetElement,
+from cartridges.datasets import (
+    CartridgeDataset,
+    CartridgeGenerateDataset,
+    CartridgeGenerateDatasetElement,
     TEMPLATE,
 )
 
-from capsules.generate.run import BaseContextConfig
-from capsules.generate.generate_training import BaseSectionedContextConfig
-from capsules.tasks.finance.dataset import load_finance
-from capsules.tasks.finance.markdown import markdown_to_sections, MarkdownSection
-from capsules.tasks.mtob.context import SimpleStructuredContext
-from capsules.transforms import ConvoTransformConfig
-from capsules.utils import get_logger
+from cartridges.context import BaseContextConfig
+from cartridges.generate.generate_training import BaseSectionedContextConfig
+from cartridges.tasks.finance.dataset import load_finance
+from cartridges.tasks.finance.markdown import markdown_to_sections, MarkdownSection
+from cartridges.tasks.mtob.context import SimpleStructuredContext
+from cartridges.transforms import ConvoTransformConfig
+from cartridges.utils import get_logger
 
 
 class MarkdownSectionStructured(StructuredContext):
@@ -264,8 +264,8 @@ First think step by step, but then provide your final answer within <answer> tag
 PROMPT_TEMPLATE = "{question}"
 
 
-class FinanceBenchEvalDataset(CapsuleDataset):
-    class Config(CapsuleDataset.Config):
+class FinanceBenchEvalDataset(CartridgeDataset):
+    class Config(CartridgeDataset.Config):
         _pass_as_config = True
         doc_names: Optional[List[str]] = None
 
@@ -337,7 +337,7 @@ class FinanceBenchEvalDataset(CapsuleDataset):
             self.convo_transforms = []
 
 
-class FinanceBenchGenerateDataset(CapsuleGenerateDataset):
+class FinanceBenchGenerateDataset(CartridgeGenerateDataset):
     class Config(ObjectConfig):
         _pass_as_config = True
         doc_names: Optional[List[str]] = None
@@ -361,7 +361,7 @@ class FinanceBenchGenerateDataset(CapsuleGenerateDataset):
         self.questions = questions
         self.tokenizer = tokenizer
 
-    def __getitem__(self, index: int) -> CapsuleGenerateDatasetElement:
+    def __getitem__(self, index: int) -> CartridgeGenerateDatasetElement:
         question: FinanceBenchQuestion = self.questions[index]
 
         input_ids = self.tokenizer.apply_chat_template(
@@ -381,7 +381,7 @@ class FinanceBenchGenerateDataset(CapsuleGenerateDataset):
             chat_template=TEMPLATE,
         )
 
-        return CapsuleGenerateDatasetElement(
+        return CartridgeGenerateDatasetElement(
             input_ids=input_ids,
             prompt=question.question,
             answer=question.answer,
@@ -393,8 +393,8 @@ class FinanceBenchGenerateDataset(CapsuleGenerateDataset):
         return len(self.questions)
 
 
-class FinanceBenchMemorizationDataset(CapsuleDataset):
-    class Config(CapsuleDataset.Config):
+class FinanceBenchMemorizationDataset(CartridgeDataset):
+    class Config(CartridgeDataset.Config):
         _pass_as_config = True
         doc_names: Optional[List[str]] = None
 
@@ -510,7 +510,7 @@ L3b_qa_pairs = {
 }
 
 
-class L3bFinanceBenchGenerateDataset(CapsuleGenerateDataset):
+class L3bFinanceBenchGenerateDataset(CartridgeGenerateDataset):
     class Config(ObjectConfig):
         _pass_as_config = True
         doc_names: Optional[List[str]] = None
@@ -540,7 +540,7 @@ class L3bFinanceBenchGenerateDataset(CapsuleGenerateDataset):
         self.questions = questions
         self.tokenizer = tokenizer
 
-    def __getitem__(self, index: int) -> CapsuleGenerateDatasetElement:
+    def __getitem__(self, index: int) -> CartridgeGenerateDatasetElement:
         question: FinanceBenchQuestion = self.questions[index]
 
         input_ids = self.tokenizer.apply_chat_template(
@@ -555,7 +555,7 @@ class L3bFinanceBenchGenerateDataset(CapsuleGenerateDataset):
             chat_template=TEMPLATE,
         )
 
-        return CapsuleGenerateDatasetElement(
+        return CartridgeGenerateDatasetElement(
             input_ids=input_ids,
             prompt=question.question,
             answer=question.answer,
@@ -567,8 +567,8 @@ class L3bFinanceBenchGenerateDataset(CapsuleGenerateDataset):
         return len(self.questions)
 
 
-class L3bFinanceBenchEvalDataset(CapsuleDataset):
-    class Config(CapsuleDataset.Config):
+class L3bFinanceBenchEvalDataset(CartridgeDataset):
+    class Config(CartridgeDataset.Config):
         _pass_as_config = True
         doc_names: Optional[List[str]] = None
 

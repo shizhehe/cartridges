@@ -5,22 +5,22 @@ import uuid
 import numpy as np
 from transformers import AutoTokenizer
 
-from capsules.tasks.mrcr import get_toc_str, get_mapping
-from capsules.clients.base import ClientConfig
-from capsules.clients.tokasaurus_batch import CapsulesConvoWithLogprobs
-from capsules.generate.generators.base import ContextConvoGenerator
-from capsules.generate.generators.base import responses_and_chats_to_training_examples as responses_and_chats_to_training_examples_orig
-from capsules.generate.structs import (
+from cartridges.tasks.mrcr import get_toc_str, get_mapping
+from cartridges.clients.base import ClientConfig
+from cartridges.clients.tokasaurus_batch import CartridgesConvoWithLogprobs
+from cartridges.generate.generators.base import ContextConvoGenerator
+from cartridges.generate.generators.base import responses_and_chats_to_training_examples as responses_and_chats_to_training_examples_orig
+from cartridges.structs import (
     Context,
     TrainingExample,
 )
-from capsules.utils import get_logger
+from cartridges.utils import get_logger
 
 logger = get_logger(__name__)
 
 
 def responses_and_chats_to_training_examples(
-    convos: list[CapsulesConvoWithLogprobs],
+    convos: list[CartridgesConvoWithLogprobs],
     answer_chats: list[list[dict]],
 ) -> list[TrainingExample]:
     examples = []
@@ -153,7 +153,7 @@ class CheatGenerator(ContextConvoGenerator):
             answer_chats.append(answer_chat)
 
         # print(f"Generated {len(answer_chats)} answer chats")
-        convos: list[CapsulesConvoWithLogprobs] = self.client.chat_with_logprobs(
+        convos: list[CartridgesConvoWithLogprobs] = self.client.chat_with_logprobs(
             chats=answer_chats,
             temperature=self.config.temperature,
             top_logprobs=self.config.num_top_logprobs,
@@ -248,7 +248,7 @@ Output the preceding interaction in the history.
             ]
         ]
         # print(f"Generated {len(answer_chats)} answer chats")
-        convos: list[CapsulesConvoWithLogprobs] = self.client.chat_with_logprobs(
+        convos: list[CartridgesConvoWithLogprobs] = self.client.chat_with_logprobs(
             chats=answer_chats,
             temperature=self.config.temperature,
             top_logprobs=self.config.num_top_logprobs,
@@ -342,7 +342,7 @@ Output the subsequent interaction in the history.
             ]
         ]
         # print(f"Generated {len(answer_chats)} answer chats")
-        convos: list[CapsulesConvoWithLogprobs] = self.client.chat_with_logprobs(
+        convos: list[CartridgesConvoWithLogprobs] = self.client.chat_with_logprobs(
             chats=answer_chats,
             temperature=self.config.temperature,
             top_logprobs=self.config.num_top_logprobs,
@@ -452,7 +452,7 @@ Output the passage that appears {order} in the conversation history.
             ]
         ]
         # print(f"Generated {len(answer_chats)} answer chats")
-        convos: list[CapsulesConvoWithLogprobs] = self.client.chat_with_logprobs(
+        convos: list[CartridgesConvoWithLogprobs] = self.client.chat_with_logprobs(
             chats=answer_chats,
             temperature=self.config.temperature,
             top_logprobs=self.config.num_top_logprobs,
@@ -538,7 +538,7 @@ class DirectGenerator(ContextConvoGenerator):
             ]
         ]
         # print(f"Generated {len(answer_chats)} answer chats")
-        convos: list[CapsulesConvoWithLogprobs] = self.client.chat_with_logprobs(
+        convos: list[CartridgesConvoWithLogprobs] = self.client.chat_with_logprobs(
             chats=answer_chats,
             temperature=self.config.temperature,
             top_logprobs=self.config.num_top_logprobs,
@@ -635,7 +635,7 @@ Question:
             },
         ]
         question_chats.append(question_chat)
-        question_responses: list[CapsulesConvoWithLogprobs] = (
+        question_responses: list[CartridgesConvoWithLogprobs] = (
             self.client.chat_with_logprobs(
                 chats=question_chats,
                 temperature=0.9,
@@ -693,7 +693,7 @@ Now answer the question: {question}. Do not start your answer with "According to
             for question in questions
         ]
         print(f"Generated {len(answer_chats)} answer chats")
-        convos: list[CapsulesConvoWithLogprobs] = self.client.chat_with_logprobs(
+        convos: list[CartridgesConvoWithLogprobs] = self.client.chat_with_logprobs(
             chats=answer_chats,
             temperature=self.config.temperature,
             top_logprobs=self.config.num_top_logprobs,
@@ -781,7 +781,7 @@ Question:
             },
         ]
         question_chats.append(question_chat)
-        question_responses: list[CapsulesConvoWithLogprobs] = (
+        question_responses: list[CartridgesConvoWithLogprobs] = (
             self.client.chat_with_logprobs(
                 chats=question_chats,
                 temperature=0.9,
@@ -834,7 +834,7 @@ Now answer the question: {question}. Do not start your answer with "According to
             for question in questions
         ]
         print(f"Generated {len(answer_chats)} answer chats")
-        convos: list[CapsulesConvoWithLogprobs] = self.client.chat_with_logprobs(
+        convos: list[CartridgesConvoWithLogprobs] = self.client.chat_with_logprobs(
             chats=answer_chats,
             temperature=self.config.temperature,
             top_logprobs=self.config.num_top_logprobs,
@@ -934,7 +934,7 @@ Please output the {pos} a assistant response from this user conversation log and
             answer_chats.append(chat)
             
         print(f"Generated {len(answer_chats)} answer chats")
-        convos: list[CapsulesConvoWithLogprobs] = self.client.chat_with_logprobs(
+        convos: list[CartridgesConvoWithLogprobs] = self.client.chat_with_logprobs(
             chats=answer_chats,
             temperature=self.config.temperature,
             top_logprobs=self.config.num_top_logprobs,
@@ -1063,7 +1063,7 @@ Output the modified passage.
             ]
             answer_chats.append(answer_chat)
 
-        convos: list[CapsulesConvoWithLogprobs] = self.client.chat_with_logprobs(
+        convos: list[CartridgesConvoWithLogprobs] = self.client.chat_with_logprobs(
             chats=answer_chats,
             temperature=self.config.temperature,
             top_logprobs=self.config.num_top_logprobs,

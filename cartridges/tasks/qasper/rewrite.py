@@ -3,7 +3,7 @@ from dataclasses import dataclass, asdict
 import random
 from datasets import load_dataset
 import pydrantic
-from capsules.tasks.qasper.context import TOPIC_TO_IDS
+from cartridges.tasks.qasper.context import TOPIC_TO_IDS
 
 import asyncio
 import os

@@ -1,11 +1,11 @@
 from typing import List, Optional
 from pydantic import BaseModel
 
-from capsules.context import TexDocument, TexChapter, TexSection
-from capsules.generate.run import BaseContextConfig
+from cartridges.context import TexDocument, TexChapter, TexSection
+from cartridges.context import BaseContextConfig
 
-from capsules.context import StructuredContext
-from capsules.tasks.longhealth.load import load_longhealth_dataset, LongHealthPatient, LongHealthQuestion
+from cartridges.context import StructuredContext
+from cartridges.tasks.longhealth.load import load_longhealth_dataset, LongHealthPatient, LongHealthQuestion
 
 class LongHealthStructuredContextConfig(BaseContextConfig):
     patient_ids: Optional[List[str]] = None

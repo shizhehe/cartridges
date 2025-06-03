@@ -1,13 +1,15 @@
+from __future__ import annotations
 import contextlib
 from dataclasses import dataclass, field
 import itertools
 import math
+from math import cos, pi
 from pathlib import Path
 import time
-from typing import Any, Literal, Optional, Union
+from typing import Literal, Optional
 import re
-
 import os
+
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -21,30 +23,22 @@ import torch.amp
 from transformers import AutoTokenizer
 import wandb
 from tqdm.auto import tqdm
-from pydrantic import ObjectConfig, BaseConfig
+from pydrantic import ObjectConfig, BaseConfig, RunConfig
 
-from transformers import LlamaForCausalLM
-
-import pydrantic
-
-
-# capsules specific imports
-from capsules.datasets import (
-    CapsuleDataset,
-    CapsuleDatasetBatchLogitLabels,
-    CapsuleDatasetBatchSampler,
-    CapsuleDatasetOnlineBatch,
-    CapsuleGenerateDataset,
-    CapsuleGenerateDatasetElement,
-    CapsuleDatasetBatchTokenLabels,
+from cartridges.datasets import (
+    CartridgeDataset,
+    CartridgeDatasetBatchLogitLabels,
+    CartridgeDatasetBatchSampler,
+    CartridgeDatasetOnlineBatch,
+    CartridgeGenerateDataset,
+    CartridgeGenerateDatasetElement,
+    CartridgeDatasetBatchTokenLabels,
 )
-from capsules.config import ModelConfig
-from capsules.optim import Scheduler
-from capsules.kv_initialization.base import AttnConfig, KVCacheFactory, TrainableCache
-from capsules.tasks.codehop.code_hop_dataset import CapsuleDatasetCodeHopBatch
-from capsules.utils import WandBConfig, prepare_wandb, seed_everything, get_logger
-from capsules.utils.wandb import download_artifacts, figure_to_wandb
-from capsules.context import BaseContextConfig
+from cartridges.models.config import ModelConfig
+from cartridges.cache import AttnConfig, KVCacheFactory, TrainableCache
+from cartridges.utils import WandBConfig, prepare_wandb, seed_everything, get_logger
+from cartridges.utils.wandb import download_artifacts, figure_to_wandb
+from cartridges.context import BaseContextConfig
 
 
 logger = get_logger(__name__)
@@ -62,7 +56,7 @@ class EvalDatasetConfig(BaseConfig):
 
 @dataclass
 class EvalDataset:
-    dataset: CapsuleDataset
+    dataset: CartridgeDataset
     batch_size: int
     name: str
     only_eval_rank_0: bool = False
@@ -82,7 +76,7 @@ class GenerateDatasetConfig(BaseConfig):
 
 @dataclass
 class GenerateDataset:
-    dataset: CapsuleGenerateDataset
+    dataset: CartridgeGenerateDataset
     name: str
     dataloader_num_workers: int = 0
     num_samples: int = 1
@@ -92,11 +86,11 @@ class GenerateDataset:
     override_max_tokens: int | None = None
 
 
-class TrainConfig(pydrantic.RunConfig):
+class TrainConfig(RunConfig):
     name: str = "default"  # A name for the run for wandb
     model: ModelConfig
     wandb: Optional[WandBConfig] = None
-    dataset: CapsuleDataset.Config
+    dataset: CartridgeDataset.Config
     context: BaseContextConfig
 
     # dataset for evaluating perplexity on other generations
@@ -135,7 +129,7 @@ class TrainConfig(pydrantic.RunConfig):
 
     kv_cache_initializer: Optional[KVCacheFactory.Config] = None
     pretrained_cache_path: Optional[str] = None
-    loss_type: Literal["tokens", "logits", "online"] = "logits"
+    loss_type: Literal["tokens", "logits"] = "logits"
 
     # NOTE: steps here is the number of **optimizer steps**, which we keep track of
     # with the `optimizer_step` variable. This is different than the number of batches
@@ -144,9 +138,6 @@ class TrainConfig(pydrantic.RunConfig):
     save_after_training: bool = True
     keep_last_n_saved: int = 1
     save_to_wandb: bool = True
-    online_model: bool = True
-    ema_cache: bool = False
-    cache_ema_alpha: float = 0.9
 
     max_optimizer_steps: int = -1
 
@@ -158,43 +149,8 @@ class TrainConfig(pydrantic.RunConfig):
         return train(self)
 
 
-class LRSchedulerConfig(BaseConfig):
-    scheduler: Literal["linear"] = "linear"
-    warmup_steps: int = 1000
-    total_steps: int = 10000
-
-
-class CacheAndModel(nn.Module):
-    def __init__(self, cache, model, ema_cache: bool = False):
-        super(CacheAndModel, self).__init__()
-        self.cache = cache
-        self.model = model
-
-        if ema_cache:
-            self.cache_ema = cache.clone()
-            self.cache_ema.requires_grad = False
-        else:
-            self.cache_ema = None
-
-    def forward(self, input_ids, labels=None, use_ema: bool = False):
-        if use_ema:
-            assert self.cache_ema is not None
-
-        out = self.model(
-            input_ids,
-            labels=labels,
-            use_cache=True,
-            past_key_values=self.cache if not use_ema else self.cache_ema,
-        )
-
-        if use_ema:
-            self.cache_ema.clear()
-
-        return out
-
-
 def get_dataset_names(
-    config: CapsuleDataset.Config | CapsuleGenerateDataset.Config,
+    config: CartridgeDataset.Config | CartridgeGenerateDataset.Config,
 ) -> list[str]:
     return (
         [artifact_name for (artifact_name, _) in config.data_sources]
@@ -211,7 +167,7 @@ def download_wandb_artifacts(config: TrainConfig):
     ):
         if isinstance(
             eval_or_gen_ds.dataset,
-            (CapsuleDataset.Config, CapsuleGenerateDataset.Config),
+            (CartridgeDataset.Config, CartridgeGenerateDataset.Config),
         ):
             artifact_names += get_dataset_names(eval_or_gen_ds.dataset)
 
@@ -323,10 +279,7 @@ def train(config: TrainConfig):
     else:
         cache_tuning = False
 
-    # TODO(ryan): should this just be a single config?
-    # assert config.loss_type == dataset.config.label_type, "loss types should match"
-
-    assert isinstance(dataset, CapsuleDataset)
+    assert isinstance(dataset, CartridgeDataset)
 
     # Different model wrapping logic based on tuning method
     if use_peft:
@@ -359,7 +312,8 @@ def train(config: TrainConfig):
         wrapped_model = DDP(wrapped_model, device_ids=[local_rank])
         dist.barrier()
     else:
-        # SE (04/17): We need to set a seed for the random sampler so that the
+        # SE (04/17): We need to set a seed for the random sampler so that the 
+        # results are reproducible with or without DDP
         train_sampler = torch.utils.data.RandomSampler(
             dataset,
             replacement=False,
@@ -368,14 +322,13 @@ def train(config: TrainConfig):
         )
 
     if config.use_batch_sampler:
-        sampler = CapsuleDatasetBatchSampler(
+        sampler = CartridgeDatasetBatchSampler(
             sampler=train_sampler,
             dataset=dataset,
             batch_size=config.local_batch_size,
             shuffle=True,
         )
         sampler_kwargs = {"batch_sampler": sampler}
-        print("Using batch sampler!!!!")
     else:
         sampler_kwargs = {"sampler": train_sampler, "batch_size": config.local_batch_size}
     
@@ -482,7 +435,7 @@ def train(config: TrainConfig):
         )
         for batch in train_pbar:
 
-            batch: CapsuleDatasetBatchTokenLabels | CapsuleDatasetBatchLogitLabels
+            batch: CartridgeDatasetBatchTokenLabels | CartridgeDatasetBatchLogitLabels
             do_step = (iter_idx + 1) % accumulate_grad_steps == 0
 
             if (
@@ -499,63 +452,6 @@ def train(config: TrainConfig):
                 and iter_idx % accumulate_grad_steps == 0
             ):
                 do_evaluate_generations(step=iter_idx)
-
-            if config.loss_type == "online":
-                assert isinstance(batch, (CapsuleDatasetCodeHopBatch, CapsuleDatasetOnlineBatch))
-                with torch.inference_mode():
-                    EOS_TOKEN_ID = 128009
-                    TOP_K = 128
-
-                    # (1) Run a forward pass with the wrapped model to get the logits
-                    outputs = (wrapped_model if config.online_model else model)(
-                        input_ids=batch.input_ids_with_context.to(local_rank),
-                        # logits_to_keep=
-                        # TODO(sabri): make sure only run the LM head on the non-context tokens
-                        use_ema=config.ema_cache,
-                    )
-                    if config.online_model:
-                        cache.clear()
-
-
-                    # (2) Compute the softmax for all the tokens
-                    full_log_probs = F.log_softmax(
-                        outputs.logits, dim=-1
-                    )  # [batch_size x seq_len x vocab_size]
-
-                    # (3) Remove any context tokens at the beginning of the
-                    # the sequence and any padding tokens at the end of the sequence
-                    # Then, repad the sequence
-                    max_len = 4 + max(
-                        end - start for start, end in batch.context_start_end
-                    )
-                    shape = (full_log_probs.shape[0], max_len, TOP_K)
-                    topk_tgt_tokens = torch.full(
-                        shape, fill_value=EOS_TOKEN_ID, dtype=torch.long
-                    )
-                    topk_tgt_logprobs = torch.full(
-                        shape, fill_value=-TOP_K, dtype=torch.float
-                    )
-                    mask = torch.zeros(
-                        (full_log_probs.shape[0], max_len), dtype=torch.float
-                    )
-
-                    for idx, (log_probs, (start, end)) in enumerate(
-                        zip(full_log_probs, batch.context_start_end)
-                    ):
-                        log_probs, tokens = torch.topk(
-                            log_probs[start:end], k=TOP_K, dim=-1
-                        )
-
-                        input_ids_end = end - start + 4
-
-                        topk_tgt_tokens[idx, 4:input_ids_end] = tokens
-                        topk_tgt_logprobs[idx, 4:input_ids_end] = log_probs
-                        mask[idx, 4:input_ids_end] = 1.0
-
-            elif config.loss_type == "logits":
-                topk_tgt_logprobs = batch.topk_logprobs
-                topk_tgt_tokens = batch.topk_tokens
-                mask = batch.mask
 
             # SE (05/02): We are careful to only reduce the loss across processes
             # when we are on the last batch of gradient accumulation before the optimizer
@@ -582,7 +478,10 @@ def train(config: TrainConfig):
                         # to ensure we have the same loss as if we were not using gradient accumulation
                         loss = outputs.loss / accumulate_grad_steps
                         mask = batch.mask.to(local_rank)
-                    elif config.loss_type == "logits" or config.loss_type == "online":
+                    elif config.loss_type == "logits":
+                        topk_tgt_logprobs = batch.topk_logprobs
+                        topk_tgt_tokens = batch.topk_tokens
+                        mask = batch.mask
                         pred_log_probs = F.log_softmax(outputs.logits, dim=-1)
 
                         topk_pred_logprobs = pred_log_probs.gather(
@@ -621,20 +520,7 @@ def train(config: TrainConfig):
 
             if do_step:
                 optimizer.step()
-                optimizer.zero_grad()
-
-                if config.ema_cache:
-                    with torch.no_grad():
-                        for param, ema_param in zip(
-                            cache.parameters(), wrapped_model.cache_ema.parameters()
-                        ):
-                            # Calculate the new value
-                            new_ema_value = (
-                                config.cache_ema_alpha * ema_param.data
-                                + (1 - config.cache_ema_alpha) * param.data
-                            )
-                            # Update in-place
-                            ema_param.data.copy_(new_ema_value)
+                optimizer.zero_grad()              
 
                 # SE (05/02): We are careful to only reduce the loss immediately
                 # after the optimizer step. Doing this outside the `do_step` block
@@ -724,7 +610,8 @@ def train(config: TrainConfig):
             model.save_pretrained(f"{config.run_dir}/peft_model")
 
     # SE (03/21): Careful to synchronize all processes before finishing in case
-    # there's another call to `train` after that will reuse the same process group.
+    # there's another call to `train` in the same process
+    # after that will reuse the same process group.
     if is_ddp:
         dist.barrier()
 
@@ -784,7 +671,7 @@ def evaluate(
         epoch_num_elements = torch.tensor(0, device="cuda")
 
         for batch in dataloader_pbar:
-            batch: CapsuleDatasetBatchTokenLabels
+            batch: CartridgeDatasetBatchTokenLabels
             labels = batch.labels.to(local_rank)[:, 1:]
 
             epoch_num_system_and_user_tokens += sum(
@@ -866,7 +753,7 @@ def evaluate(
 
                     if not eval_dataset.only_eval_rank_0 or is_rank_zero:
                         if config.log_logprob_viz:
-                            from capsules.analysis.figures.likelihoods import (
+                            from cartridges.analysis.figures.likelihoods import (
                                 visualize_text_likelihoods,
                             )
 
@@ -941,7 +828,7 @@ def evaluate_generations(
     step: int = None,
     final: bool = False,
 ):
-    from capsules.generation import generate, generate_samples
+    from cartridges.generation import generate, generate_samples
 
     is_ddp = "LOCAL_RANK" in os.environ
     is_rank_zero = (not is_ddp) or (dist.get_rank() == 0)
@@ -975,7 +862,7 @@ def evaluate_generations(
         if index not in indexes:
             continue
 
-        element: CapsuleGenerateDatasetElement = dataset.dataset[index]
+        element: CartridgeGenerateDatasetElement = dataset.dataset[index]
 
         kwargs = dict(
             input_ids=element.input_ids.to(local_rank),
@@ -1096,7 +983,7 @@ def evaluate_generations_batch(
     step: int = None,
     final: bool = False,
 ):
-    from capsules.generation import generate_batch
+    from cartridges.generation import generate_batch
 
     is_ddp = "LOCAL_RANK" in os.environ
     is_rank_zero = (not is_ddp) or (dist.get_rank() == 0)
@@ -1247,6 +1134,107 @@ def evaluate_generations_batch(
     return results
 
 
+
+# ---- Learning rate scheduler code ----
+# 
+class Scheduler(metaclass=ABCMeta):
+    class Config(ObjectConfig):
+        _pass_as_config = True
+
+        # This maximum number of steps is used to calculate the schedule, it is not
+        # used to limit the number of steps that training runs for. Once the steps
+        # exceed this, the schedule will simply use the final learning rate.
+        max_steps: Optional[int]
+
+        # The starting point for the warmup
+        warmup_min_lr: Optional[float] = 5e-3
+
+    def __init__(self, config: Config):
+        self.config = config
+
+    @abstractmethod
+    def get_lr(self, initial_lr: float, step: int, max_steps: int) -> float:
+        raise NotImplementedError
+
+    def _linear_warmup(self, initial_lr: float, step: int, warmup_steps: int = 2000) -> float:
+        warmup_min_lr = self.config.warmup_min_lr if self.config.warmup_min_lr is not None else initial_lr * 0.10
+        assert 0 <= warmup_min_lr < initial_lr
+        return warmup_min_lr + (initial_lr - warmup_min_lr) * min(step, warmup_steps) / warmup_steps
+
+
+@dataclass
+class CosWithWarmup(Scheduler):
+
+    class Config(Scheduler.Config):
+        warmup_steps: int
+        alpha_f: float = 0.1
+    
+    def __init__(self, config: Config):
+        self.config = config
+
+    def get_lr(self, initial_lr: float, step: int) -> float:
+        max_steps = self.config.max_steps
+        eta_min = initial_lr * self.config.alpha_f
+        if step < self.config.warmup_steps:
+            return self._linear_warmup(initial_lr, step, self.config.warmup_steps)
+        elif step >= max_steps:
+            return eta_min
+        else:
+            step = step - self.config.warmup_steps
+            max_steps = max_steps - self.config.warmup_steps
+            return eta_min + (initial_lr - eta_min) * (1 + cos(pi * step / max_steps)) / 2
+
+
+@dataclass
+class LinearWithWarmup(Scheduler):
+    class Config(Scheduler.Config):
+        warmup_steps: int
+        alpha_f: float = 0.1
+    
+    def __init__(self, config: Config):
+        self.config = config
+
+    def get_lr(self, initial_lr: float, step: int) -> float:
+        max_steps = self.config.max_steps
+        eta_min = initial_lr * self.config.alpha_f
+        if step < self.config.warmup_steps:
+            return self._linear_warmup(initial_lr, step, self.config.warmup_steps)
+        elif step >= max_steps:
+            return eta_min
+        else:
+            step = step - self.config.warmup_steps
+            max_steps = max_steps - self.config.warmup_steps
+            return initial_lr - (initial_lr - eta_min) * (step / max_steps)
+
+
+class CacheAndModel(nn.Module):
+    def __init__(self, cache, model, ema_cache: bool = False):
+        super(CacheAndModel, self).__init__()
+        self.cache = cache
+        self.model = model
+
+        if ema_cache:
+            self.cache_ema = cache.clone()
+            self.cache_ema.requires_grad = False
+        else:
+            self.cache_ema = None
+
+    def forward(self, input_ids, labels=None, use_ema: bool = False):
+        if use_ema:
+            assert self.cache_ema is not None
+
+        out = self.model(
+            input_ids,
+            labels=labels,
+            use_cache=True,
+            past_key_values=self.cache if not use_ema else self.cache_ema,
+        )
+
+        if use_ema:
+            self.cache_ema.clear()
+
+        return out
+
 def save_cache(config: TrainConfig, cache: TrainableCache, optimizer_step: int):
     """
     Saves the trainable cache to a file and manages saved checkpoints.
@@ -1303,6 +1291,3 @@ def save_cache(config: TrainConfig, cache: TrainableCache, optimizer_step: int):
         os.remove(os.path.join(config.run_dir, oldest))
 
 
-if __name__ == "__main__":
-    config = TrainConfig()
-    pydrantic.main([config])

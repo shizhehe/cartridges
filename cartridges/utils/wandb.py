@@ -18,7 +18,7 @@ import torch.distributed as dist
 
 
 class WandBConfig(BaseConfig):
-    project: str = "capsules"
+    project: str = "Cartridges"
     entity: Optional[str] = None
     name: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
@@ -132,7 +132,7 @@ def unflatten(d: dict) -> dict:
 
 
 def fetch_wandb_runs(
-    project_name: str = "hazy-research/capsules",
+    project_name: str = "hazy-research/Cartridges",
     filters: dict = None,
     wandb_run_ids: List[str] = None,
     step: Optional[int] = None,
@@ -161,7 +161,7 @@ def fetch_wandb_runs(
             filters[f"config.{k}"] = v
     
     if wandb_run_ids is not None:
-        # allow people to pass the full run path (e.g. hazy-research/capsules/rfdhxjn6)
+        # allow people to pass the full run path (e.g. hazy-research/Cartridges/rfdhxjn6)
         # or just the run id (e.g. rfdhxjn6)
         wandb_run_ids = [
             os.path.split(wandb_run_id)[-1]
@@ -227,7 +227,7 @@ def fetch_wandb_runs(
 def fetch_wandb_table(
     artifact_id: str,
     versions: Literal["latest", "all"] = "latest",
-    project_name: str = "capsules",
+    project_name: str = "Cartridges",
     entity: str = "hazy-research",
 ) -> pd.DataFrame:
     """
@@ -241,7 +241,7 @@ def fetch_wandb_table(
                          in which case the version parameter is ignored.
     - version (Literal["latest", "all"]): Whether to fetch only the latest version or all versions of the artifact.
                                           Default is "latest".
-    - project_name (str): The name of the W&B project. Default is "capsules".
+    - project_name (str): The name of the W&B project. Default is "Cartridges".
     - entity (str): The W&B entity (username or team name). Default is "hazy-research".
 
     Returns:

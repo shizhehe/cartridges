@@ -11,11 +11,11 @@ import tqdm
 import wandb
 
 
-from capsules.tasks.synth.config import DataConfig, LoggerConfig, ModelConfig
-from capsules.tasks.synth.cache import BaseKVCache
-from capsules.tasks.synth.data import TuningDataset
-from capsules.tasks.synth.pretrain import compute_metrics
-from capsules.utils.wandb import WandBConfig, prepare_wandb
+from cartridges.tasks.synth.config import DataConfig, LoggerConfig, ModelConfig
+from cartridges.tasks.synth.cache import BaseKVCache
+from cartridges.tasks.synth.data import TuningDataset
+from cartridges.tasks.synth.pretrain import compute_metrics
+from cartridges.utils.wandb import WandBConfig, prepare_wandb
 
 
 class EvaluateTuningConfig(RunConfig):
@@ -40,7 +40,7 @@ class EvaluateTuningConfig(RunConfig):
     seed: int = 123
 
     def run(self):
-        from capsules.tasks.synth.evaluate_tuning import evaluate_tuning
+        from cartridges.tasks.synth.evaluate_tuning import evaluate_tuning
         evaluate_tuning(self)
 
 def train_cache(

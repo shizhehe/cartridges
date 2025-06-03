@@ -12,11 +12,11 @@ from transformers import PreTrainedTokenizerFast
 from pydrantic import ObjectConfig
 import pandas as pd
 
-from capsules.context import StructuredContext
-from capsules.generate.structs import Context, ContextConvo, Document, Message, Section
-from capsules.datasets import CapsuleDataset, CapsuleDatasetElementTokenLabels, CapsuleGenerateDataset, CapsuleGenerateDatasetElement, TEMPLATE
-from capsules.generate.run import BaseContextConfig
-from capsules.utils import get_logger
+from cartridges.context import StructuredContext
+from cartridges.structs import Context, ContextConvo, Document, Message, Section
+from cartridges.datasets import CartridgeDataset, CartridgeDatasetElementTokenLabels, CartridgeGenerateDataset, CartridgeGenerateDatasetElement, TEMPLATE
+from cartridges.context import BaseContextConfig
+from cartridges.utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -87,8 +87,8 @@ handcrafted_questions = {
 
 def load_swde_dataset(
     webpage_id: str,
-    fpages: str="/home/simarora/code/capsules/scratch/simran/SWDE/data/evaporate/swde/movie/movie-imdb(2000)/",
-    fmetadata: str="/home/simarora/code/capsules/scratch/simran/SWDE/table.json",
+    fpages: str="/home/simarora/code/Cartridges/scratch/simran/SWDE/data/evaporate/swde/movie/movie-imdb(2000)/",
+    fmetadata: str="/home/simarora/code/Cartridges/scratch/simran/SWDE/table.json",
 ) -> List[SWDE]:
 
     htmls = sorted(os.listdir(fpages))
@@ -110,7 +110,7 @@ def load_swde_dataset(
                 # question=f"What is/are the '{k}' of this movie?",
                 # question=f"What is/are the '{k}' attribute of this movie?",
                 # question=f"The value of the '{k}' attribute of this movie is?",
-                # question=f"Who/what/where/why/when -- the '{k}' of this movie?", # best (https://wandb.ai/hazy-research/capsules/runs/wpfewtpz) 
+                # question=f"Who/what/where/why/when -- the '{k}' of this movie?", # best (https://wandb.ai/hazy-research/Cartridges/runs/wpfewtpz) 
                 # question=f"Who/what/where/when? The full '{k}' of this movie is?",
 
                 question=question,
@@ -140,8 +140,8 @@ class SWDEContextConfig(BaseContextConfig):
     max_tokens_per_section: int = -1
 
     # pages_path: str = "/data/sabri/data/evaporate/swde/movie/movie-imdb(2000)"
-    pages_path: str = "/home/simarora/code/capsules/scratch/simran/SWDE/data/evaporate/swde/movie/movie-imdb(2000)"
-    table_path: str = "/home/simarora/code/capsules/scratch/simran/SWDE/table.json"
+    pages_path: str = "/home/simarora/code/Cartridges/scratch/simran/SWDE/data/evaporate/swde/movie/movie-imdb(2000)"
+    table_path: str = "/home/simarora/code/Cartridges/scratch/simran/SWDE/table.json"
 
     def instantiate(self) -> Context:
 
@@ -197,7 +197,7 @@ class SWDEContextConfig(BaseContextConfig):
             return webpage
 
 
-class SWDEMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
+class SWDEMultipleChoiceGenerateDataset(CartridgeGenerateDataset):
     class Config(ObjectConfig):
         _pass_as_config = True
         webpage_id: str = None
@@ -245,7 +245,7 @@ class SWDEMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
 
     def __getitem__(
         self, index: int
-    ) -> CapsuleGenerateDatasetElement:
+    ) -> CartridgeGenerateDatasetElement:
         
         question: SWDEQuestion = self.questions[index]
 
@@ -256,7 +256,7 @@ class SWDEMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
             chat_template=TEMPLATE,
         )
 
-        return CapsuleGenerateDatasetElement(
+        return CartridgeGenerateDatasetElement(
             input_ids=input_ids,
             prompt=question.question,
             answer=question.answer,
@@ -325,9 +325,9 @@ class SWDEMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
         return score, details
 
 
-class SWDEEvalDataset(CapsuleDataset):
+class SWDEEvalDataset(CartridgeDataset):
     
-    class Config(CapsuleDataset.Config):
+    class Config(CartridgeDataset.Config):
         _pass_as_config = True
         webpage_id: str = None
         max_questions: Optional[int] = None

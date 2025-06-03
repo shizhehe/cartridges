@@ -8,11 +8,11 @@ from transformers import PreTrainedTokenizerFast
 from pydrantic import ObjectConfig
 import pandas as pd
 
-from capsules.generate.structs import Context, ContextConvo, Document, Message
-from capsules.datasets import CapsuleDataset, CapsuleDatasetElementTokenLabels, CapsuleGenerateDataset, CapsuleGenerateDatasetElement, TEMPLATE
-from capsules.generate.run import BaseContextConfig
-from capsules.train import GenerateDatasetConfig
-from capsules.utils import get_logger
+from cartridges.structs import Context, ContextConvo, Document, Message
+from cartridges.datasets import CartridgeDataset, CartridgeDatasetElementTokenLabels, CartridgeGenerateDataset, CartridgeGenerateDatasetElement, TEMPLATE
+from cartridges.context import BaseContextConfig
+from cartridges.train import GenerateDatasetConfig
+from cartridges.utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -78,7 +78,7 @@ class ReglabHousingCategoriesQuestion:
     answer_options: str
 
 
-class ReglabHousingQAGenerateDataset(CapsuleGenerateDataset):
+class ReglabHousingQAGenerateDataset(CartridgeGenerateDataset):
     class Config(ObjectConfig):
         _pass_as_config = True
         cot: bool = True
@@ -126,7 +126,7 @@ class ReglabHousingQAGenerateDataset(CapsuleGenerateDataset):
 
     def __getitem__(
         self, index: int
-    ) -> CapsuleGenerateDatasetElement:
+    ) -> CartridgeGenerateDatasetElement:
         question = self.questions[index]
         question_prompt = self._wrap_question(question)
 
@@ -137,7 +137,7 @@ class ReglabHousingQAGenerateDataset(CapsuleGenerateDataset):
             chat_template=TEMPLATE,
         )
 
-        return CapsuleGenerateDatasetElement(
+        return CartridgeGenerateDatasetElement(
             input_ids=input_ids,
             prompt=question_prompt,
             answer=question.answer,
@@ -172,7 +172,7 @@ class ReglabHousingQAGenerateDataset(CapsuleGenerateDataset):
         return extracted_pred == answer.strip().lower(), {"extracted_pred": extracted_pred, "extraction": "success", "pred": pred}
 
 
-class ReglabHousingCategoriesQAGenerateDataset(CapsuleGenerateDataset):
+class ReglabHousingCategoriesQAGenerateDataset(CartridgeGenerateDataset):
     class Config(ObjectConfig):
         _pass_as_config = True
         cot: bool = True
@@ -186,8 +186,8 @@ class ReglabHousingCategoriesQAGenerateDataset(CapsuleGenerateDataset):
         import os
         df = pd.read_json(
             os.path.join(
-                os.environ.get("CAPSULES_DIR", "./"), 
-                "capsules/tasks/reglab/housing_qa_consolidated_generations_with_answer_options.jsonl", 
+                os.environ.get("CARTRIDGES_DIR", "./"), 
+                "Cartridges/tasks/reglab/housing_qa_consolidated_generations_with_answer_options.jsonl", 
             ),
             lines=True
         )
@@ -229,7 +229,7 @@ class ReglabHousingCategoriesQAGenerateDataset(CapsuleGenerateDataset):
 
     def __getitem__(
         self, index: int
-    ) -> CapsuleGenerateDatasetElement:
+    ) -> CartridgeGenerateDatasetElement:
         question = self.questions[index]
         question_prompt = self._wrap_question(question)
 
@@ -240,7 +240,7 @@ class ReglabHousingCategoriesQAGenerateDataset(CapsuleGenerateDataset):
             chat_template=TEMPLATE,
         )
 
-        return CapsuleGenerateDatasetElement(
+        return CartridgeGenerateDatasetElement(
             input_ids=input_ids,
             prompt=question_prompt,
             answer=question.answer,
