@@ -53,7 +53,7 @@ The codebase relies on your setting the following variables. We recommend adding
 
 ```bash
 # path to your the directory where you cloned this repo
-export CARTRIDGES_DIR=/path/to/cartridges/repo
+export CARTRIDGES_DIR=/path/to/cartridges
 
 # path to a directory where you want to store outputs like models checkpoints and such
 export CARTRIDGES_OUTPUT_DIR=/path/to/cartridges/outputs
