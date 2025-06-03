@@ -423,7 +423,7 @@ class SelfStudySynthesizer(ConvoSynthesizer):
                     num_output_tokens=convo_with_logprobs.num_output_tokens,
                     type="todo",
                     metadata=meta,
-                    context=context,
+                    system_prompt=context,
                 )
             )
         return examples
