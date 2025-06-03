@@ -18,7 +18,7 @@ from cartridges.tasks.longhealth.context import LongHealthStructuredContextConfi
 
 
 client = TokasaurusBatchClient.Config(
-    url="https://hazyresearch--tksrs-entry-Cartridges-8b-1xh100-min0-max32-serve.modal.run",
+    url="https://hazyresearch--tksrs-entry-capsules-8b-1xh100-min0-max32-serve.modal.run",
     ports=None,
     model_name="meta-llama/Llama-3.1-8B-Instruct",
 )
