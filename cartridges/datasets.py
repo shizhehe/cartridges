@@ -13,11 +13,8 @@ import os
 from transformers import PreTrainedTokenizerFast
 from pydrantic import ObjectConfig
 
-from cartridges.structs import (
-    Context,
-    ContextConvo,
-    TrainingExample,
-)
+from cartridges.context import StructuredContext
+from cartridges.structs import TrainingExample
 from torch.utils.data import BatchSampler, Sampler
 from cartridges.utils import get_logger, wandb
 
@@ -146,8 +143,8 @@ class CartridgeTrainDataset(Dataset):
         user_prompt_prefix: list[str] | None = None
         # system_prompt: str | None = None
 
-    data: list[ContextConvo]
-    context: Context
+    data: list[TrainingExample]
+    context: StructuredContext
 
     def __init__(self, config: Config, tokenizer: PreTrainedTokenizerFast):
 

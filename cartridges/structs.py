@@ -31,7 +31,7 @@ class TrainingExample:
     """
 
     messages: list[TrainingExample.Message]
-    context: str
+    system_prompt: str
 
     num_output_tokens: int
     type: str

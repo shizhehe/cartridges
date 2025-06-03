@@ -7,9 +7,8 @@ import math
 
 import pickle
 import time
-from typing import List, Literal, Optional, Union
+from typing import Literal, Optional, Union
 
-from transformers import AutoTokenizer
 import concurrent.futures
 from pydrantic import RunConfig
 import pandas as pd
@@ -18,21 +17,11 @@ import wandb
 
 from cartridges.synthesizers.base import ConvoSynthesizer
 from cartridges.utils import WandBConfig, prepare_wandb, get_logger
-from cartridges.structs import SectionedContext, TrainingExample
+from cartridges.structs import TrainingExample
 from cartridges.context import BaseContextConfig
 
 
 logger = get_logger(__name__)
-
-class BaseSectionedContextConfig(BaseContextConfig, ABC):
-    """This should be subclassed by different tasks to specify the parameters
-    and method for instantiating a Context object.
-    For example, see LongHealthContextConfig in tasks/longhealth/__init__.py
-    """
-
-    max_tokens_per_section: int
-    def instantiate(self, tokenizer) -> SectionedContext:
-        raise NotImplementedError("Subclasses must implement this method")
 
 
 class SynthesizeConfig(RunConfig):
@@ -73,11 +62,7 @@ class SynthesizeConfig(RunConfig):
             self.wandb.name = self.name
             prepare_wandb(self.wandb, self.to_dict())
 
-        if isinstance(self.context, BaseSectionedContextConfig):
-            tokenizer = AutoTokenizer.from_pretrained(self.tokenizer)
-            context = self.context.instantiate(tokenizer)
-        else:
-            context = self.context.instantiate()
+        context = self.context.instantiate()
 
         logger.info(f"Instantiating convo generator...")
         synthesizer = self.synthesizer.instantiate(context=context)

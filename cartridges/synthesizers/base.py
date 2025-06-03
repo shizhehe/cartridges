@@ -2,7 +2,7 @@ import abc
 from pydrantic import ObjectConfig
 
 from cartridges.clients.tokasaurus_batch import CartridgesConvoWithLogprobs
-from cartridges.structs import Context, TrainingExample, TrainingExample
+from cartridges.structs import TrainingExample
 from cartridges.context import StructuredContext
 
 import numpy as np
@@ -13,7 +13,7 @@ class ConvoSynthesizer(abc.ABC):
     class Config(ObjectConfig):
         _pass_as_config: bool = True
 
-    def __init__(self, config: Config, context: Context | StructuredContext):
+    def __init__(self, config: Config, context:  StructuredContext):
         self.config = config
         self.context = context
 

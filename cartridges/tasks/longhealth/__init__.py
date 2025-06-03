@@ -4,46 +4,11 @@ from typing import Dict, List, Optional, Tuple
 from transformers import PreTrainedTokenizerFast
 from pydrantic import ObjectConfig
 
-from cartridges.structs import Context, ContextConvo, Message, Section
 from cartridges.datasets import CartridgeTrainDataset, CartridgeGenerateDataset, CartridgeGenerateDatasetElement, TEMPLATE
-from cartridges.context import BaseContextConfig
 from cartridges.utils import get_logger
 from cartridges.tasks.longhealth.load import load_longhealth_dataset, LongHealthPatient, LongHealthQuestion
 
 logger = get_logger(__name__)
-
-
-class LongHealthContextConfig(BaseContextConfig):
-
-    patient_ids: Optional[List[str]] = None
-
-    def instantiate(self) -> Context:
-
-        patients = load_longhealth_dataset(self.patient_ids)
-
-        sections = [
-            Section(
-                desc=f"Patient {patient.patient_id}, Name: {patient.name}, Birthday: {patient.birthday}, Diagnosis: {patient.diagnosis}, Text: {text_id}",
-                path=f"{patient.patient_id}/{text_id}.txt",
-                content=text
-            )
-            for patient in patients
-            for text_id, text in patient.texts.items()
-        ]
-
-        if self.patient_ids is not None:
-            title = f"LongHealth-{'-'.join(self.patient_ids)}"
-        else:
-            title = "LongHealth"
-
-        context = Context(
-            title=title,
-            sections=sections,
-        )
-        
-        return context
-
-
 
 
 class LongHealthMultipleChoiceGenerateDataset(CartridgeGenerateDataset):
