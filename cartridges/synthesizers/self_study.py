@@ -240,6 +240,7 @@ class SelfStudySynthesizer(ConvoSynthesizer):
                 [[system(ctx), *convo] for ctx, convo in zip(contexts, convos)],
                 temperature=self.config.temperature_b,
                 top_logprobs=self.config.num_top_logprobs,
+                logprobs_start_message=1,  # do not include logprobs for the system prompt
                 max_completion_tokens=self.config.max_completion_tokens_b,
             )
             convos = [
@@ -576,9 +577,6 @@ SEED_PROMPT_REGISTRY: dict[SLICE_TYPES, Callable] = {
     "use_case": use_case_seed_prompt,
     "creative": creative_seed_prompt,
     "generic": generic_seed_prompt,
-    
-    "mtob_ke": kalamang_ke,
-    "mtob_ek": kalamang_ek,
 }
 # --- end generators for seed prompt slices  ---
 

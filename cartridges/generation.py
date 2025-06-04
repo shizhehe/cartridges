@@ -44,7 +44,6 @@ def generate(
     tokenizer: AutoTokenizer,
     max_new_tokens: int = 32,
 ):
-    
     cache = None
     
     if isinstance(cache_and_model, PeftModel):

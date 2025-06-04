@@ -10,66 +10,29 @@ from dataclasses import dataclass, asdict
 
 
 @dataclass(slots=True)
-class TopToken:
-    # TODO (SE): text is temporarily optional because the tokasaurus Cartridges api
-    # does not return it.
-    logprob: float
-    text: Optional[str] = None
+class ClientSample:
+    output_text: str
+    num_output_tokens: int
 
-    # id is optional because some clients (e.g. OpenAI) do not return it.
-    id: Optional[int] = None
-@dataclass(slots=True)
-class SelectedToken: 
-    # TODO (SE): text is temporarily optional because the tokasaurus Cartridges api
-    # does not return it.
-    text: Optional[str] = None
-
-    # TODO (SE): making this optional is a temporary solution to support
-    # tokasaurus Cartridges api which does not return logprob for the selected token
-    logprob: Optional[float] = None
-
-    # id is optional because some clients (e.g. OpenAI) do not return it.
-    id: Optional[int] = None
-
-    top_logprobs: Optional[List[TopToken]] = None
-
-@dataclass(slots=True)
-class InputToken: 
-    # TODO (SE): text is temporarily optional because the tokasaurus Cartridges api
-    # does not return it.
-    text: Optional[str] = None
-
-    # id is optional because some clients (e.g. OpenAI) do not return it.
-    id: Optional[int] = None
-
-    top_logprobs: Optional[List[TopToken]] = None
-
-
-@dataclass(slots=True)
-class Sample:
-    text: str  # Does NOT include eos_token
-    tokens: List[SelectedToken] # Includes eos_token
-    stop_reason: Literal["max_tokens", "stop", "length", "error"]
-    input_tokens: Optional[List[InputToken]] = None # Does NOT include eos_token
+    top_logprobs: Optional[TopLogprobs] = None
 
 
 @dataclass(slots=True)
 class ClientResponse:
-    samples: List[Sample]
+    samples: List[ClientSample]
     usage: Usage
     
     timings: Optional[List[Dict[str, Any]]] = None
     def to_dict(self):
         return asdict(self)
     
-@dataclass(slots=True)
-class CartridgesConvoWithLogprobs:
-    num_output_tokens: int
 
-    token_ids: np.ndarray
-    top_logprob_logprobs: np.ndarray
-    top_logprob_ids: np.ndarray
-    assistant_text: str
+@dataclass(slots=True)
+class TopLogprobs:
+    num_input_tokens: int # the first `num_input_tokens` are from the input 
+    token_ids: np.ndarray  # [num_tokens]
+    top_logprobs: np.ndarray  # [num_tokens, num_top_logprobs]
+    top_ids: np.ndarray  # [num_tokens, num_top_logprobs]
 
 
 class ClientConfig(ObjectConfig):
@@ -104,19 +67,6 @@ class Client(ABC):
         max_completion_tokens: Optional[int] = None,
         frequency_penalty: float = 0.0,
         top_logprobs: int = 1,
+        logprobs_start_message: Optional[int] = None
     ) -> ClientResponse:
         raise NotImplementedError
-
-    def chat_with_logprobs(
-        self,
-        chats: List[list[Dict[str, Any]]],
-        max_completion_tokens: int,
-        temperature: float = 0.6,
-        stop: Optional[List[str]] = None,
-        top_logprobs: Optional[int] = None,
-        routing_tag: Optional[str] = None,
-        **kwargs,
-    ) -> list[CartridgesConvoWithLogprobs]:
-        raise NotImplementedError(
-            "The `chat_with_logprobs` method is not yet supported for this client. See the `TokasaurusBatchClient` for an example."
-        )

@@ -24,7 +24,7 @@ patients_str = f"p{NUM_PATIENTS}"
 patient_ids = [f"patient_{idx:02d}" for idx in patient_idxs]
 
 data_sources = [
-    "/data/sabri/cartridges/2025-06-03-13-00-41-longhealth_synthesize/longhealth_synthesize_p10_n1024-0/artifact/dataset.pkl",
+    "/data/sabri/cartridges/2025-06-03-13-37-17-longhealth_synthesize/longhealth_synthesize_p10_n65536-0/artifact/dataset.pkl"
 ]
 
 config = TrainConfig(

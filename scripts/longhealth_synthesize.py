@@ -6,6 +6,7 @@ import pydrantic
 from pydrantic.variables import FormatStringVariable
 
 from cartridges.clients.tokasaurus_batch import TokasaurusBatchClient
+from cartridges.clients.sglang import SGLangClient
 from cartridges.synthesize import SynthesizeConfig
 from cartridges.synthesizers.self_study import SelfStudySynthesizer, SlicePromptSamplerWithChunks
 from cartridges.utils import WandBConfig
@@ -16,6 +17,11 @@ from cartridges.tasks.longhealth.context import LongHealthStructuredContextConfi
 client = TokasaurusBatchClient.Config(
     url="https://hazyresearch--tksrs-entry-capsules-3b-1xh100-min0-max64-serve.modal.run",
     ports=None,
+    model_name="meta-llama/Llama-3.2-3B-Instruct",
+)
+
+client = SGLangClient.Config(
+    url="https://hazyresearch--sglang-llama-3-2-3b-instruct-l40s-serve.modal.run",
     model_name="meta-llama/Llama-3.2-3B-Instruct",
 )
 
@@ -49,7 +55,7 @@ config = SynthesizeConfig(
     ),
     context=LongHealthStructuredContextConfig(patient_ids=patient_ids),
     output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),
-    num_samples=1024,
+    num_samples=65536,
     batch_size=16,
     max_num_batches_in_parallel=64,
     save_wandb_artifact=True,

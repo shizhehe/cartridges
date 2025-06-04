@@ -13,10 +13,10 @@ from transformers import AutoTokenizer
 
 from cartridges.clients.base import (
     Client,
-    Sample,
+    ClientSample,
     ClientConfig,
     ClientResponse,
-    CartridgesConvoWithLogprobs,
+    TopLogprobs,
 )
 from cartridges.clients.usage import Usage
 from cartridges.utils import get_logger
@@ -79,7 +79,7 @@ class TokasaurusBatchClient(Client):
         stop: Optional[List[str]] = None,
         max_completion_tokens: int = 1,
         **kwargs,
-    ) -> Sample:
+    ) -> ClientSample:
         """
         Tokasaurus does not directly support a `complete` API.
         """
@@ -94,21 +94,9 @@ class TokasaurusBatchClient(Client):
         temperature: float = 0.6,
         stop: Optional[List[str]] = None,
         top_logprobs: Optional[int] = None,
-        routing_tag: Optional[str] = None,
+        logprobs_start_message: Optional[int] = None,
         **kwargs,
     ) -> ClientResponse:
-        raise NotImplementedError("Please use chat_custom")
-
-    def chat_with_logprobs(
-        self,
-        chats: List[Dict[str, Any]],
-        max_completion_tokens: int,
-        temperature: float = 0.6,
-        stop: Optional[List[str]] = None,
-        top_logprobs: Optional[int] = None,
-        routing_tag: Optional[str] = None,
-        **kwargs,
-    ) -> list[CartridgesConvoWithLogprobs]:
         assert (
             stop is None
         ), "stop is not supported by Tokasaurus batch Cartridges endpoint"
@@ -118,7 +106,7 @@ class TokasaurusBatchClient(Client):
         request = CartridgesBatchRequest(
             elements=[
                 CartridgesConvo(
-                    routing_tag=routing_tag,
+                    routing_tag=None,
                     messages=chat,  # type: ignore
                 )
                 for chat in chats
@@ -157,16 +145,17 @@ class TokasaurusBatchClient(Client):
             if self.config.on_failure == "raise":
                 raise Exception(f"Failed to get a response from the server.")
             else:
-                return [CartridgesConvoWithLogprobs(
-                    num_output_tokens=0,
-                    token_ids=None,
-                    assistant_text="",
-                    top_logprob_logprobs=None,
-                    top_logprob_ids=None,
-                )] * len(chats)
+                return ClientResponse(
+                    samples=[
+                        ClientSample(assistant_text="", num_output_tokens=0) for _ in chats
+                    ], 
+                    usage=Usage(num_input_tokens=0, num_output_tokens=0)
+                )    
+                    
+                
 
-        elements = []
-
+        samples = []
+        usage = Usage(prompt_tokens=0, completion_tokens=0)
         batch_elements = pickle.loads(response.content)
         for elem in batch_elements:
             (num_tokens,) = elem["token_ids"].shape
@@ -174,16 +163,57 @@ class TokasaurusBatchClient(Client):
             assert elem["top_logprob_logprobs"].shape == elem["top_logprob_ids"].shape
             # assert elem["top_logprob_logprobs"].shape[0] == num_tokens - 1
 
-            elements.append(
-                CartridgesConvoWithLogprobs(
+            usage += Usage(
+                prompt_tokens=len(elem["token_ids"]) - elem["num_output_tokens"],
+                completion_tokens=elem["num_output_tokens"],
+            )
+            logprobs = TopLogprobs(                   
+                num_input_tokens=len(elem["token_ids"]) - elem["num_output_tokens"],
+                token_ids=elem["token_ids"],
+                top_logprobs=elem["top_logprob_logprobs"],
+                top_ids=elem["top_logprob_ids"],
+            )
+            if logprobs_start_message is not None or logprobs_start_message > 0:
+                logprobs = self._trim_logprobs(logprobs, logprobs_start_message)
+
+            samples.append(
+                ClientSample(
                     num_output_tokens=elem["num_output_tokens"],
-                    token_ids=elem["token_ids"],
-                    assistant_text=elem["assistant_text"],
-                    top_logprob_logprobs=elem["top_logprob_logprobs"],
-                    top_logprob_ids=elem["top_logprob_ids"],
+                    output_text=elem["assistant_text"],
+                    top_logprobs=logprobs,
                 )
             )
         # logger.info(f"Chat logprobs full time: {time.time() - t0} seconds -- {t2 - t1} seconds for requests")
 
-        assert len(elements) == len(chats)
-        return elements
+        assert len(samples) == len(chats)
+        return ClientResponse(samples=samples, usage=usage)
+
+    def _trim_logprobs(
+        self, 
+        logprobs: TopLogprobs, 
+        logprobs_start_message: int
+    ) -> TopLogprobs:
+        assert logprobs_start_message == 1
+
+        header_locations = np.where(logprobs.token_ids == 128006)[
+            0
+        ].tolist()
+
+        assert len(header_locations) > 1, "There should be at least two messages in the inputs to use trim logprobs"
+
+        prefix_end_idx = header_locations[1]
+        token_ids = logprobs.token_ids[prefix_end_idx:]
+
+        assert (
+            logprobs.top_logprobs.shape
+            == logprobs.top_ids.shape
+        )
+        assert (
+            logprobs.top_logprobs.shape[0] == len(token_ids) - 1
+        ), "You probably need to pull down on tokasaurus server"
+
+        return TopLogprobs(
+            token_ids=token_ids,
+            top_logprobs=logprobs.top_logprobs,
+            top_ids=logprobs.top_ids,
+        )
