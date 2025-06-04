@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union, TYPE_CHECKING
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import numpy as np
 from transformers import AutoTokenizer
@@ -12,18 +12,8 @@ from cartridges.clients.base import (
 )
 from cartridges.clients.usage import Usage
 from cartridges.clients.mixin import ServerMixin
-from cartridges.utils import get_logger
-
-if TYPE_CHECKING:
-    from sglang import ProgramState
-
 
 class SGLangClient(Client, ServerMixin):
-    """
-    SE (01/16/25): The usage returned by this client does NOT take into consider prefix
-    sharing. It is simply a sum of the number of tokens in the prompt and completion 
-    across the batch.
-    """
 
     class Config(ClientConfig):
         _pass_as_config: bool = True
@@ -103,7 +93,6 @@ class SGLangClient(Client, ServerMixin):
                     add_generation_prompt=True,
                     tokenize=True
                 ))
-            print(logprob_start_len)
             s += assistant(gen(
                 "answer", 
                 max_tokens=max_completion_tokens, 
@@ -116,7 +105,6 @@ class SGLangClient(Client, ServerMixin):
 
             ))
         
-        print(f"Running parallel chats with {len(chats)} chats")
         states: List[ProgramState] = parallel_chats.run_batch(
             [
                 {"messages": messages}
@@ -124,29 +112,28 @@ class SGLangClient(Client, ServerMixin):
             ], 
             backend=self.backend
         )
-        print(f"Finished running parallel chats with {len(states)} states")
         return self._parse_states(states)
     
 
     def _parse_logprobs(self, answer: Dict[str, Any]) -> TopLogprobs:
-        top_logprobs, top_ids = [], []
+        token_ids, top_logprobs, top_ids = [], [], []
 
         num_input_tokens = 0
         for key in ["input", "output"]:
             if f"{key}_top_logprobs" not in answer:
-                
                 continue
-            _, token_ids, _ = zip(*answer[f"{key}_token_logprobs"])
+            _, curr_ids, _ = zip(*answer[f"{key}_token_logprobs"])
+            token_ids.extend(curr_ids)
 
             if key == "input":  
-                num_input_tokens += len(token_ids)
+                num_input_tokens += len(curr_ids)
 
             for logprobs in answer[f"{key}_top_logprobs"]:
                 if logprobs is None:
                     continue
-                logprob, token_ids, _ = zip(*logprobs)
-                top_logprobs.append(logprob)
-                top_ids.append(token_ids)
+                logprobs, ids, _ = zip(*logprobs)
+                top_logprobs.append(logprobs)
+                top_ids.append(ids)
 
         top_logprobs = TopLogprobs(
             num_input_tokens=num_input_tokens,
@@ -164,11 +151,9 @@ class SGLangClient(Client, ServerMixin):
             if state.error() is not None:
                 print(f"[SGLang] Error: {state.error()}")
                 responses.append(ClientSample(
-                    text=state.messages()[-1]["content"],
-                    tokens=[],
-                    log_prob=0,
-                    token_ids=[],
-                    stop_reason="error"
+                    output_text=state.messages()[-1]["content"],
+                    num_output_tokens=0,
+                    top_logprobs=None,
                 ))
                 continue
             
@@ -177,7 +162,7 @@ class SGLangClient(Client, ServerMixin):
 
             responses.append(
                 ClientSample(
-                    text=state.messages()[-1]["content"],
+                    output_text=state.messages()[-1]["content"],
                     num_output_tokens=answer["completion_tokens"],
                     top_logprobs=top_logprobs,
                 )

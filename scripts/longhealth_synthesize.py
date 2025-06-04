@@ -21,8 +21,8 @@ client = TokasaurusBatchClient.Config(
 )
 
 client = SGLangClient.Config(
-    url="https://hazyresearch--sglang-llama-3-2-3b-instruct-l40s-serve.modal.run",
     model_name="meta-llama/Llama-3.2-3B-Instruct",
+    url="https://hazyresearch--sglang-llama-3-2-3b-instruct-h100-serve.modal.run",
 )
 
 NUM_PATIENTS = 10
@@ -55,9 +55,10 @@ config = SynthesizeConfig(
     ),
     context=LongHealthStructuredContextConfig(patient_ids=patient_ids),
     output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),
-    num_samples=65536,
+    num_samples=512,
     batch_size=16,
-    max_num_batches_in_parallel=64,
+    max_num_batches_in_parallel=0,
+    handle_exceptions=False,
     save_wandb_artifact=True,
     wandb=WandBConfig(
         project="cartridges",

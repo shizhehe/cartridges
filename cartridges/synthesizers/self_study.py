@@ -19,7 +19,7 @@ from transformers import AutoTokenizer
 
 from cartridges.context import StructuredContext, list_nested_contexts
 from cartridges.structs import TrainingExample
-from cartridges.clients.base import CartridgesConvoWithLogprobs, Client, ClientConfig
+from cartridges.clients.base import Client, ClientConfig, ClientSample
 from cartridges.synthesizers.base import ConvoSynthesizer
 from cartridges.synthesizers.outline import get_outline
 from cartridges.tools.base import Tool
@@ -192,19 +192,19 @@ class SelfStudySynthesizer(ConvoSynthesizer):
             # (3.2) With new information in context, generate user message
             # --- begin bot A response generation ---
             t0 = time.time()
-            resps = self.client.chat_with_logprobs(
+            resps = self.client.chat(
                 [
                     [system(ctx), user(seed), *flip_roles(convo)]
                     for ctx, seed, convo in zip(contexts, seed_prompts, convos)
                 ],
                 temperature=self.config.temperature_a,
                 max_completion_tokens=self.config.max_completion_tokens_a,
-            )
+            ).samples
             convos = [
                 convo
                 + [
                     user(
-                        resp.assistant_text,
+                        resp.output_text,
                         cot=random.random() < self.config.prob_cot_a,
                     )
                 ]
@@ -236,15 +236,15 @@ class SelfStudySynthesizer(ConvoSynthesizer):
             # (3.4) bot_b generates a response
             # --- begin bot B response generation ---
             t0 = time.time()
-            resps = self.client.chat_with_logprobs(
+            resps = self.client.chat(
                 [[system(ctx), *convo] for ctx, convo in zip(contexts, convos)],
                 temperature=self.config.temperature_b,
                 top_logprobs=self.config.num_top_logprobs,
                 logprobs_start_message=1,  # do not include logprobs for the system prompt
                 max_completion_tokens=self.config.max_completion_tokens_b,
-            )
+            ).samples
             convos = [
-                convo + [assistant(resp.assistant_text)]
+                convo + [assistant(resp.output_text)]
                 for convo, resp in zip(convos, resps)
             ]
             logger.info(
@@ -256,7 +256,7 @@ class SelfStudySynthesizer(ConvoSynthesizer):
         # --- begin conversion to training examples ---
         t0 = time.time()
         examples = self._responses_and_chats_to_training_examples(
-            convos_with_logprobs=resps,
+            samples=resps,
             convos=convos,
             metas=metas,
             contexts=contexts,
@@ -287,7 +287,7 @@ class SelfStudySynthesizer(ConvoSynthesizer):
         # (2) Query the model to pick a tool and set its arguments
         # --- begin tool selection ---
         t0 = time.time()
-        resps = self.client.chat_with_logprobs(
+        resps = self.client.chat(
             [
                 # we funk with the last user message to add the tool prompt
                 convo[:-1]
@@ -296,8 +296,8 @@ class SelfStudySynthesizer(ConvoSynthesizer):
             ],
             temperature=self.config.temperature_a,
             max_completion_tokens=self.config.max_tool_tokens,
-        )
-        reqs = [resp.assistant_text for resp in resps]
+        ).samples
+        reqs = [resp.output_text for resp in resps]
         logger.info(f"Tool selection took {time.time() - t0} seconds")
         # --- end tool selection ---
 
@@ -377,51 +377,31 @@ class SelfStudySynthesizer(ConvoSynthesizer):
 
     def _responses_and_chats_to_training_examples(
         self,
-        convos_with_logprobs: list[CartridgesConvoWithLogprobs],
+        samples: list[ClientSample],
         convos: list[list[dict]],
         metas: list[dict],
         contexts: list[str] | None,
     ) -> list[TrainingExample]:
         examples = []
-        for convo_with_logprobs, chat, meta, context in zip(
-            convos_with_logprobs,
+        for sample, chat, meta, context in zip(
+            samples,
             convos,
             metas,
             contexts,
             strict=True,
         ):
-            # (1) Strip the system prompt from the returned token_ids
-            header_locations = np.where(convo_with_logprobs.token_ids == 128006)[
-                0
-            ].tolist()
-            try:
-                assert len(header_locations) == len(chat) + 1
-                assert header_locations[0] == 1
-            except:
-                return []
-
-            prefix_end_idx = header_locations[1]
-            token_ids = convo_with_logprobs.token_ids[prefix_end_idx:]
-
-            assert len(token_ids) > convo_with_logprobs.num_output_tokens
-            assert (
-                convo_with_logprobs.top_logprob_logprobs.shape
-                == convo_with_logprobs.top_logprob_ids.shape
-            )
-            assert (
-                convo_with_logprobs.top_logprob_logprobs.shape[0] == len(token_ids) - 1
-            ), "You probably need to pull down on tokasaurus or your first message is not a system message"
-
-            # (2) Create the training example
+            if sample.top_logprobs is None:
+                continue
+            
             examples.append(
                 TrainingExample(
                     messages=[TrainingExample.Message(**message) for message in chat],
-                    top_logprob_ids=convo_with_logprobs.top_logprob_ids,
-                    top_logprob_logprobs=convo_with_logprobs.top_logprob_logprobs.astype(
+                    top_logprob_ids=sample.top_logprobs.top_ids,
+                    top_logprob_logprobs=sample.top_logprobs.top_logprobs.astype(
                         np.float32
                     ),  # We can convert to float32 to save space in the file
-                    token_ids=token_ids,
-                    num_output_tokens=convo_with_logprobs.num_output_tokens,
+                    token_ids=sample.top_logprobs.token_ids,
+                    num_output_tokens=sample.num_output_tokens,
                     type="todo",
                     metadata=meta,
                     system_prompt=context,
