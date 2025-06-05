@@ -20,13 +20,6 @@
 
 </div>
 
-## What is this?
-
-Blah...
-
-<div align="center">
-    <img src="assets/tradeoff-plots.png" height=70 alt="Cartridges logo"/>
-</div>
 
 **Table of contents**
 - [Setup](#setup)
