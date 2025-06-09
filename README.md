@@ -1,7 +1,7 @@
 <div align="center">
     <img src="assets/banner.png" height=100 alt="Cartridges logo"/>
 
-**Lightweight and general-purpose long-context representations.**
+**Storing long contexts in tiny KV caches with self-study.**
 
 
 
@@ -11,10 +11,13 @@
 
 </div>
 
-[**Blogpost**](https://hazyresearch.stanford.edu/blog/2025-06-08-cartridges)
 
-When we put lots of text (e.g. a whole code repo) into a language model’s context, generation cost soars because of the KV cache’s size. What if we trained a smaller KV cache for our documents offline? Using a test-time training recipe called self-study, we show that this simple idea can improve throughput by 
-26× while maintaining quality.
+**What is this?** This repository provides code for training a cartridge, a small KV cache representing a large dump of text, using a test-time training recipe called self-study.
+The code is based on our paper *[Cartridges: Lightweight and general-purpose long context representations via self-study](https://arxiv.org/abs/2506.06266)*.
+
+**tl;dr** When we put lots of text (*e.g.* a whole code repo) into a language model’s context, generation cost soars because of the KV cache’s size. *What if we trained a smaller KV cache for our documents offline?* Using a test-time training recipe called self-study, we show that this simple idea can improve throughput by 
+26× while maintaining quality. (See our [blogpost](https://hazyresearch.stanford.edu/blog/2025-06-08-cartridges) for more.)
+
 
 **Table of contents**
 - [Setup](#setup)
@@ -53,54 +56,67 @@ export CARTRIDGES_OUTPUT_DIR=/path/to/cartridges/outputs
 For configuration of experiments, we use [Pydantic](https://docs.pydantic.dev/latest/) models.
 Pydantic models are useful for defining the schema of the config and quickly ensuring that the config is valid at the beginning of the script. We also rely on `pydrantic`, which provides a few utilities for working with configs. 
 
-To generate training data for a document, you can create a config file under `cartridges/configs/{your_name}/generate/` that looks like this (see `cartridges/configs/sabri/generate/m03d17_generate_longhealth_p01.py` for an example): 
+To 
 
 ```python 
 import os
 from pathlib import Path
+
+
 import pydrantic
+from pydrantic.variables import FormatStringVariable
 
-from cartridges.clients.together import TogetherClient
-from cartridges.generate.generate_basic import GenerateDatasetConfig, GenerateSettings
+from cartridges.clients.tokasaurus_batch import TokasaurusBatchClient
+from cartridges.synthesize import SynthesizeConfig
+from cartridges.synthesizers.self_study import SelfStudySynthesizer, SlicePromptSamplerWithChunks
+from cartridges.utils import WandBConfig
+from cartridges.tasks.longhealth.context import LongHealthStructuredContextConfig
 
-# Make sure you have a valid API key for Together in your environment (e.g. put it in your ~/.bashrc)
-client_config = TogetherClient.Config(
-    model_name="meta-llama/Llama-3.2-3B-Instruct-Turbo",
+
+client = TokasaurusBatchClient.Config(
+    url="https://hazyresearch--tksrs-entry-capsules-3b-1xh100-min0-max64-serve.modal.run",
+    ports=None,
+    model_name="meta-llama/Llama-3.2-3B-Instruct",
 )
 
-file_name = Path(__file__).stem
+NUM_PATIENTS = 10
+patient_idxs = list(range(1, NUM_PATIENTS + 1))
+patients_str = f"p{NUM_PATIENTS}"
+patient_ids = [f"patient_{idx:02d}" for idx in patient_idxs]
 
-config = GenerateConfig(
-    name=file_name,
-    convo_generator=SimpleQuestionFromChunk.Config(
-        question_client=client_config,
-        question_temperature=0.6,
-        question_max_completion_tokens=256,
-        answer_client=client_config,
-        answer_temperature=0.0,
-        answer_max_completion_tokens=256,
-        chunker=SimpleCharacterChunker.Config(
-            min_chunk_size_in_chars=500,
-            max_chunk_size_in_chars=10_000,
+config = SynthesizeConfig(
+    name=FormatStringVariable(f"{Path(__file__).stem}_{patients_str}_n{{num_samples}}"),
+    run_id=FormatStringVariable("{name}"),
+    synthesizer=SelfStudySynthesizer.Config(
+        client=client,
+        tokenizer="meta-llama/Llama-3.2-3B-Instruct",
+        max_rounds=1,
+        prompt_sampler=SlicePromptSamplerWithChunks.Config(
+            slices=["structuring", "summarization", "question", "use_case", "creative"],
+            min_chunk_size=512,
+            max_chunk_size=4096,
+            desc=f"Below is a section of a patient's medical record. It is part of a larger corpus of medical records for {NUM_PATIENTS} different patients."
         ),
-        question_system_prompt_generator=QuestionSystemPromptWithEntireContext.Config(),
-        answer_system_prompt_generator=AnswerSystemPromptWithChunk.Config(),
+        prob_cot_a=0.2,
+        use_tools=False, 
+        tools=[]
     ),
-    document_title="Large Language Monkeys: Scaling Inference Compute with Repeated Sampling",
-    document_path_or_url=str(MONKEYS.absolute()),
+    context=LongHealthStructuredContextConfig(patient_ids=patient_ids),
     output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),
-    # generate config
-    num_samples=8192,
-    batch_size=128,
-    max_num_batches_in_parallel=20,
+    num_samples=512,
+    batch_size=16,
+    max_num_batches_in_parallel=0,
+    handle_exceptions=False,
+    save_wandb_artifact=True,
     wandb=WandBConfig(
         project="cartridges",
         entity="hazy-research",
+        tags=[f"longhealth", "generate", f"patients_{patients_str}"],
     ),
 )
 
-if __name__ == "__main__":
-    # Launch pydrantic CLI, which will parse arguments and run config.run() if desired.
+
+if __name__ == "__main__": 
     pydrantic.main([config])
 ```
 
