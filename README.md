@@ -20,13 +20,6 @@
 
 </div>
 
-## What is this?
-
-Blah...
-
-<div align="center">
-    <img src="assets/tradeoff-plots.png" height=70 alt="Cartridges logo"/>
-</div>
 
 **Table of contents**
 - [Setup](#setup)
@@ -57,10 +50,6 @@ export CARTRIDGES_DIR=/path/to/cartridges
 
 # path to a directory where you want to store outputs like models checkpoints and such
 export CARTRIDGES_OUTPUT_DIR=/path/to/cartridges/outputs
-
-# OPTIONAL: Your API keys for any cloud providers you want to use (don't need to set all)
-export TOGETHER_API_KEY=...
-export OPENAI_API_KEY=...
 ```
 
 
