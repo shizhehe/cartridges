@@ -9,6 +9,8 @@
 [![GitHub](https://img.shields.io/github/license/HazyResearch/cartridges)](https://img.shields.io/github/license/HazyResearch/cartridges)
 [![arXiv](https://img.shields.io/badge/arXiv-2402.18668-b31b1b.svg)](https://arxiv.org/abs/2506.06266)
 
+</div>
+
 [**Blogpost**](https://hazyresearch.stanford.edu/blog/2025-06-08-cartridges)
 
 When we put lots of text (e.g. a whole code repo) into a language model’s context, generation cost soars because of the KV cache’s size. What if we trained a smaller KV cache for our documents offline? Using a test-time training recipe called self-study, we show that this simple idea can improve throughput by 
