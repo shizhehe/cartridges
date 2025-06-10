@@ -183,14 +183,8 @@ client = SGLangClient.Config(
 </details>
 
 
-### Step 3: Create a Synthesis Config
+### Step 3: Configure the Synthesizer
 
-The `SynthesizeConfig` configures the entire self-study process.
-
-**Core Settings**:
-- `num_samples`: Total number of training examples to generate
-- `batch_size`: Number of training examples to generate per call to the inference server.
-- `max_num_batches_in_parallel`: Number of batches to process concurrently. When using Modal, high values 
 
 **Synthesizer Configuration**:
 ```python
@@ -207,7 +201,7 @@ synthesizer_config = SelfStudySynthesizer.Config(
         slices=["structuring", "summarization", "question", "use_case", "creative"],
         min_chunk_size=512,   # Minimum context chunk size in tokens
         max_chunk_size=4096,  # Maximum context chunk size in tokens
-        desc="Context description to prepend to chunks"
+        desc="Below is a research paper on test-time training for long contexts."
     ),
     
     # Chain-of-thought reasoning
@@ -220,6 +214,13 @@ synthesizer_config = SelfStudySynthesizer.Config(
 ```
 
 ### Step 4: Putting it all together
+
+We are now going to put all of the pieces together in a `SynthesizeConfig` object that configures the entire self-study process.
+
+**Core Settings**:
+- `num_samples`: Total number of training examples to generate
+- `batch_size`: Number of training examples to generate per call to the inference server.
+- `max_num_batches_in_parallel`: Number of batches to process concurrently. When using Modal, high values 
 
 Here's a complete example script:
 
