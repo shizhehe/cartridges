@@ -219,42 +219,6 @@ synthesizer_config = SelfStudySynthesizer.Config(
 )
 ```
 
-#### Example Complete Config
-
-```python
-from cartridges.synthesize import SynthesizeConfig
-from cartridges.utils import WandBConfig
-
-config = SynthesizeConfig(
-    name="my_self_study_experiment",
-    
-    # Your context configuration
-    context=MyCustomContextConfig(
-        data_path=Path("path/to/your/corpus.txt")
-    ),
-    
-    # Synthesis settings
-    synthesizer=synthesizer_config,
-    
-    # Generation parameters
-    num_samples=1000,
-    batch_size=16,
-    max_num_batches_in_parallel=4,
-    
-    # Output and logging
-    run_dir=Path(os.environ.get("CARTRIDGES_OUTPUT_DIR", ".")) / "my_experiment",
-    save_wandb_artifact=True,
-    save_wandb_preview=True,
-    
-    # WandB integration
-    wandb=WandBConfig(
-        project="cartridges",
-        entity="your-wandb-entity",
-        tags=["self-study", "my-dataset"]
-    )
-)
-```
-
 ### Step 4: Putting it all together
 
 Here's a complete example script:
