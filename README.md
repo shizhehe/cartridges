@@ -15,7 +15,7 @@
 **What is this?** This repository provides code for training a cartridge, a small KV cache representing a large dump of text, using a test-time training recipe called self-study.
 The code is based on our paper *[Cartridges: Lightweight and general-purpose long context representations via self-study](https://arxiv.org/abs/2506.06266)*.
 
-**tl;dr** When we put lots of text (*e.g.* a whole code repo) into a language model’s context, generation cost soars because of the KV cache’s size. *What if we trained a smaller KV cache for our documents offline?* Using a test-time training recipe called self-study, we show that this simple idea can improve throughput by 
+**tl;dr** When we put lots of text (*e.g.* a whole code repo) into a language model's context, generation cost soars because of the KV cache's size. *What if we trained a smaller KV cache for our documents offline?* Using a test-time training recipe called self-study, we show that this simple idea can improve throughput by 
 26× while maintaining quality. (See our [blogpost](https://hazyresearch.stanford.edu/blog/2025-06-08-cartridges) for more.)
 
 
@@ -51,17 +51,217 @@ export CARTRIDGES_OUTPUT_DIR=/path/to/cartridges/outputs
 ```
 
 
-## Generating Training Data with Self-Study
+## Synthesizing Training Data with Self-Study
 
-For configuration of experiments, we use [Pydantic](https://docs.pydantic.dev/latest/) models.
-Pydantic models are useful for defining the schema of the config and quickly ensuring that the config is valid at the beginning of the script. We also rely on `pydrantic`, which provides a few utilities for working with configs. 
+**What is self-study?** Self-study is a test-time training approach where we generate synthetic conversations about a corpus of text. The process simulates two AI agents: one asks questions or makes requests about the content, and another responds using the provided context. This creates training data that teaches the model to efficiently compress and retrieve information from long contexts.
 
-To 
+**Quickstart**: Take a look at the script at `scripts/longhealth_synthesize.py` for an example of how to generate training data with self-study. To actually run the script, you will need to spin up an inference server (either [Tokasaurus](https://github.com/ScalingIntelligence/tokasaurus) or [SGLang](https://github.com/ScalingIntelligence/tokasaurus)) and set the `client` variable to point to it.
+
+Below we walk through the process of generating synthetic training data for a corpus of text in more detail. As a running example, we'll be training a cartridge on our [paper on Cartridges](https://arxiv.org/abs/2506.06266). How meta!
+Here are the steps:
+1. Create a `StructuredContext` object that contains the data you want to store in the cartridge
+2. Ensure you have an inference server running (either [Tokasaurus](https://github.com/ScalingIntelligence/tokasaurus) or [SGLang](https://github.com/ScalingIntelligence/tokasaurus)) and configure your client to point to it
+4. Instantiate a `SynthesizeConfig` object that contains the parameters for the self-study process
+4. Put it all together in one script and run it!
+
+> **Note:** For configuration, we use [Pydantic](https://docs.pydantic.dev/latest/) models. Pydantic models are useful for defining the schema of the config and quickly ensuring that the config is valid at the beginning of the script. We also rely on [`pydrantic`](https://github.com/seyuboglu/pydrantic), which provides a few utilities for working with configs.
+
+### Step 1: Create a Context Object
+
+A `StructuredContext` represents your corpus in a format that the self-study process can work with. We provide several built-in context types. For our example, we'll use the `TexDocument` context type. 
 
 ```python 
+config = TexDocument.Config(
+    arxiv_src_url="https://arxiv.org/src/2506.06266",
+    main_file="main.tex"
+)
+```
+
+We provide a few other context types including `HTMLDocument`, `TexDocument`.
+Can also use an arbitrary JSON object as a context. 
+
+### Step 2: Prepare an Inference Server
+
+Self-study requires an inference server to generate the synthetic conversations. We support two options:
+- [Tokasaurus](https://github.com/ScalingIntelligence/tokasaurus) (recommended) - We ran all of our experiments with Tokasaurus, which provides higher throughput generation and is easier to modify. 
+- [SGLang](https://github.com/sgl-project/sglang) - We're also providing support for SGLang, but we have not tested it extensively.
+
+<details>
+<summary>
+Option A: Modal Deployment (Tokasaurus)
+</summary>
+
+We found it easiest to run data generation with Modal because it provides serverless horizontal scaling.
+
+For cloud deployment, you can deploy on Modal:
+```bash
+modal deploy infra/modal_deploy_tksrs.py
+```
+
+Then configure with the modal URL:
+```python
+from cartridges.clients.tokasaurus_batch import TokasaurusBatchClient
+
+client = TokasaurusBatchClient.Config(
+    url="https://your-modal-deployment-url.modal.run",
+    model_name="meta-llama/Llama-3.2-3B-Instruct"
+)
+```
+---
+</details>
+
+
+<details>
+<summary>
+Option B: Local deployment (Tokasaurus)
+</summary>
+
+If you have access to GPUs, you can run also run a local Tokasaurus server:
+
+1. Clone and install Tokasaurus:
+```bash
+git clone https://github.com/ScalingIntelligence/tokasaurus
+cd tokasaurus
+git checkout --track origin/add-top-logprobs
+uv pip install -e .
+```
+
+2. Start the server:
+```bash
+tksrs model=meta-llama/Llama-3.2-3B-Instruct kv_cache_num_tokens='(512 * 1024)' max_top_logprobs=5
+```
+
+3. Configure your client:
+```python
+from cartridges.clients.tokasaurus_batch import TokasaurusBatchClient
+
+client = TokasaurusBatchClient.Config(
+    port=8001,  # Default Tokasaurus port
+    model_name="meta-llama/Llama-3.2-3B-Instruct"
+)
+```
+</details>
+
+<details>
+<summary>
+Option C: Modal deployment (SGLang)
+</summary>
+
+We found it easiest to run data generation with Modal because it provides serverless horizontal scaling.
+
+For cloud deployment, you can deploy on Modal:
+```bash
+modal deploy infra/modal_deploy_sglang.py
+```
+
+Then configure with the modal URL:
+```python
+from cartridges.clients.sglang import SGLangClient
+
+client = SGLangClient.Config(
+    url="https://your-modal-deployment-url.modal.run",
+    model_name="meta-llama/Llama-3.2-3B-Instruct"
+)
+```
+</details>
+
+<details>
+<summary>
+Option D: Local deployment (SGLang)
+</summary>
+
+1. Install and launch a SGLang server following the instructions [here](https://docs.sglang.ai/start/install.html).
+2. Configure your client:
+```python
+from cartridges.clients.sglang import SGLangClient
+
+client = SGLangClient.Config(
+    model_name="meta-llama/Llama-3.2-3B-Instruct",
+    url="http://localhost:8000",
+)
+```
+</details>
+
+
+### Step 3: Create a Synthesis Config
+
+The `SynthesizeConfig` configures the entire self-study process.
+
+**Core Settings**:
+- `num_samples`: Total number of training examples to generate
+- `batch_size`: Number of training examples to generate per call to the inference server.
+- `max_num_batches_in_parallel`: Number of batches to process concurrently. When using Modal, high values 
+
+**Synthesizer Configuration**:
+```python
+from cartridges.synthesizers.self_study import SelfStudySynthesizer, SlicePromptSamplerWithChunks
+
+synthesizer_config = SelfStudySynthesizer.Config(
+    client=client,
+    tokenizer="meta-llama/Llama-3.2-3B-Instruct",
+    max_rounds=1,  # Number of conversation rounds
+    
+    # Configure the prompt sampler
+    prompt_sampler=SlicePromptSamplerWithChunks.Config(
+        # The 
+        slices=["structuring", "summarization", "question", "use_case", "creative"],
+        min_chunk_size=512,   # Minimum context chunk size in tokens
+        max_chunk_size=4096,  # Maximum context chunk size in tokens
+        desc="Context description to prepend to chunks"
+    ),
+    
+    # Chain-of-thought reasoning
+    prob_cot_a=0.2,  # Probability of using CoT for agent A
+    
+    # Tool usage (optional)
+    use_tools=False,
+    tools=[]
+)
+```
+
+#### Example Complete Config
+
+```python
+from cartridges.synthesize import SynthesizeConfig
+from cartridges.utils import WandBConfig
+
+config = SynthesizeConfig(
+    name="my_self_study_experiment",
+    
+    # Your context configuration
+    context=MyCustomContextConfig(
+        data_path=Path("path/to/your/corpus.txt")
+    ),
+    
+    # Synthesis settings
+    synthesizer=synthesizer_config,
+    
+    # Generation parameters
+    num_samples=1000,
+    batch_size=16,
+    max_num_batches_in_parallel=4,
+    
+    # Output and logging
+    run_dir=Path(os.environ.get("CARTRIDGES_OUTPUT_DIR", ".")) / "my_experiment",
+    save_wandb_artifact=True,
+    save_wandb_preview=True,
+    
+    # WandB integration
+    wandb=WandBConfig(
+        project="cartridges",
+        entity="your-wandb-entity",
+        tags=["self-study", "my-dataset"]
+    )
+)
+```
+
+### Step 4: Putting it all together
+
+Here's a complete example script:
+
+```python
 import os
 from pathlib import Path
-
 
 import pydrantic
 from pydrantic.variables import FormatStringVariable
@@ -79,14 +279,13 @@ client = TokasaurusBatchClient.Config(
     model_name="meta-llama/Llama-3.2-3B-Instruct",
 )
 
-NUM_PATIENTS = 10
-patient_idxs = list(range(1, NUM_PATIENTS + 1))
-patients_str = f"p{NUM_PATIENTS}"
-patient_ids = [f"patient_{idx:02d}" for idx in patient_idxs]
+context = TexDocument.Config(
+    arxiv_src_url="https://arxiv.org/src/2506.06266",
+    main_file="main.tex"
+)
 
 config = SynthesizeConfig(
-    name=FormatStringVariable(f"{Path(__file__).stem}_{patients_str}_n{{num_samples}}"),
-    run_id=FormatStringVariable("{name}"),
+    context=context,
     synthesizer=SelfStudySynthesizer.Config(
         client=client,
         tokenizer="meta-llama/Llama-3.2-3B-Instruct",
@@ -95,24 +294,21 @@ config = SynthesizeConfig(
             slices=["structuring", "summarization", "question", "use_case", "creative"],
             min_chunk_size=512,
             max_chunk_size=4096,
-            desc=f"Below is a section of a patient's medical record. It is part of a larger corpus of medical records for {NUM_PATIENTS} different patients."
+            desc=f"Below is a research paper on test-time training for long contexts."
         ),
         prob_cot_a=0.2,
         use_tools=False, 
         tools=[]
     ),
-    context=LongHealthStructuredContextConfig(patient_ids=patient_ids),
     output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),
     num_samples=512,
     batch_size=16,
-    max_num_batches_in_parallel=0,
-    handle_exceptions=False,
+    max_num_batches_in_parallel=4,
+    handle_exceptions=True,  # Continue if individual batches fail
     save_wandb_artifact=True,
-    wandb=WandBConfig(
-        project="cartridges",
-        entity="hazy-research",
-        tags=[f"longhealth", "generate", f"patients_{patients_str}"],
-    ),
+
+    name="cartridges-tutorial",
+    wandb=WandBConfig(project="cartridges", entity="hazy-research"),
 )
 
 
@@ -120,40 +316,105 @@ if __name__ == "__main__":
     pydrantic.main([config])
 ```
 
-Important parameters to set: 
-- `document_path_or_url`: this should point to a url or a local file that contains the document for which you want to generate training data. Add any good documents you find to the `data/example_docs` directory.
-- `question_client` and `answer_client`: update this config to change the models and model arguments (e.g. temperature) used for the question and answer clients. See `cartridges/clients` for all the available clients.
+### Running the Synthesis
 
-See all the parameters that control the generation in `cartridges.generate.generate_basic.GenerateDatasetConfig`.
-
-Once you've created the file run it with: 
+Once you've created the file, run it with: 
 ```bash
-python cartridges/configs/generate/your_file_name.py
+python your_synthesis_script.py
+```
+### Output Format
+
+```python 
+class TrainingExample(BaseModel):
+    messages: List[Message]  # The conversation between agents (system, user, assistant format)
+    token_ids: List[int]  # The token IDs for the response
+    top_logprob_ids: List[List[int]]  # The top-k token predictions at each position
+    top_logprob_logprobs: List[List[float]]  # The corresponding log probabilities
+    metadata: Dict[str, Any]  # Information about tool usage, prompts, and generation process
 ```
 
-Once the run is complete it will write the results to a [feather file](https://pandas.pydata.org/docs/reference/api/pandas.read_feather.html) and print the path to the file to the terminal. The output will look like:
-
+Once the run is complete, it will save the results to a pickle file and print the path:
 ```bash
-Running 1 configs
-Wrote dataset to /path/to/output/dir/2025-03-02-14-29-27-m03d01_generate_bee_movie/df249742-3d4a-4a99-a2d9-896fbfac190f/dataset.feather
+Final output saved to /path/to/output/dir/artifact/dataset.pkl
 ```
 
-Explore the generations in a notebook with:
+You can explore the generated data in a notebook:
 ```python
+import pickle
 import pandas as pd
-df = pd.read_feather("/path/to/output/dir/2025-03-02-14-29-27-m03d01_generate_bee_movie/df249742-3d4a-4a99-a2d9-896fbfac190f/dataset.feather")
+
+# Load the dataset
+with open("/path/to/output/dir/artifact/dataset.pkl", "rb") as f:
+    data = pickle.load(f)
+
+rows = data["rows"]
+context = data["context"]
+
+# Convert to DataFrame for exploration
+df = pd.DataFrame([
+    {
+        "num_messages": len(row.messages),
+        "num_output_tokens": row.num_output_tokens,
+        "seed_prompt": row.metadata.get("seed_prompt", ""),
+        "conversation": "\n".join([f"{msg.role}: {msg.content}" for msg in row.messages])
+    }
+    for row in rows[:10]  # First 10 examples
+])
 ```
 
+### Advanced Configuration
 
+#### Custom Prompt Samplers
 
+You can create custom prompt samplers for specialized conversation types:
+
+```python
+from cartridges.synthesizers.self_study import PromptSampler
+
+class CustomPromptSampler(PromptSampler):
+    class Config(PromptSampler.Config):
+        domain_specific_prompts: List[str]
+    
+    def __call__(self, batch_idx: int, num_convos: int) -> tuple[str, List[str]]:
+        # Sample context chunk
+        context_chunk = self._sample_context_chunk()
+        
+        # Generate domain-specific seed prompts
+        seed_prompts = [
+            random.choice(self.config.domain_specific_prompts)
+            for _ in range(num_convos)
+        ]
+        
+        return context_chunk, seed_prompts
+```
+
+#### Tool Integration
+
+You can enhance the self-study process with tools that allow agents to dynamically retrieve additional context:
+
+```python
+from cartridges.tools.base import Tool
+
+# Define custom tools for information retrieval
+tools = [
+    SearchTool.Config(description="Search for specific information"),
+    SummaryTool.Config(description="Generate summaries of sections")
+]
+
+synthesizer_config = SelfStudySynthesizer.Config(
+    # ... other config ...
+    use_tools=True,
+    tools=tools
+)
+```
 
 ### Implementing a new data generation method
 To implement a new data generation method:
 
-1. Create a new file in the `cartridges/generate/{your_name}` directory (e.g., `generate_my_method.py`)
-2. Subclass `BaseGenerateConfig` from `cartridges.generate.base` 
-3. Implement the `_make_dataset` method that returns a `QADataset`
-4. Create a config file in `cartridges/configs/{your_name}/generate/` that uses your new class and run it in the same way as above.
+1. Create a new file in the `cartridges/synthesizers/` directory (e.g., `my_synthesizer.py`)
+2. Subclass `ConvoSynthesizer` from `cartridges.synthesizers.base` 
+3. Implement the `sample_convos` method that returns a list of `TrainingExample` objects
+4. Create a config that uses your new synthesizer class and run it in the same way as above.
 
 ### Using Tokasaurus for data generation
 We do most of our data generation with [Tokasaurus](https://github.com/jordan-benjamin/tokasaurus/tree/add-top-logprobs). 
@@ -192,14 +453,14 @@ client_config = TokasaurusClient.Config(
 
 
 ### Finding the generated dataset in WandB
-The data will also be saved to WandB as a feather file artifact. To find it go to the WandB artifact, go to the `cartridges` project in the UI and click on the "Artifacts" tab. 
+The data will also be saved to WandB as a pickle file artifact. To find it, go to the WandB project in the UI and click on the "Artifacts" tab. 
 You should see an entry on the left with the same name as you provided in the config. Click on it and select the version. (If you run the script multiple times, you'll see multiple versions.) 
 
 To grab the path to the artifact, copy the value in the "Full Name" field shown below.
 
 ![image](static/dataset-artifact.png)
 
-For example, here the full path is `hazy-research/cartridges/m03d17_generate_longhealth_p01:v0`. You'll need this path to train a Cartridge on the generated data. 
+For example, here the full path is `hazy-research/cartridges/m03d17_generate_longhealth_p01:v0`. You'll need this path to train a Cartridge on the generated data.
 
 
 

@@ -69,6 +69,8 @@ def list_nested_contexts(
 
 
 class HTMLElement(StructuredContext):
+
+    
     tag: str
 
     attributes: Optional[Dict[str, Any]] = None
@@ -167,10 +169,103 @@ class TexDocument(StructuredContext):
     author: str
     label: Optional[str] = None
 
+    class Config(BaseContextConfig):
+        # Provide one of the following
+        arxiv_src_url: Optional[str] = None
+        folder: Optional[str] = None
+        string: Optional[str] = None
+
+        # Required if arxiv_src_url or folder is provided
+        main_file: Optional[str] = "main.tex"
+
+
+        
+        def instantiate(self) -> "TexDocument":
+            assert sum([self.folder is not None, self.string is not None, self.arxiv_src_url is not None]) == 1, "Either folder or string or arxiv_src_url must be provided"
+            
+            if self.arxiv_src_url is not None:
+                return TexDocument.from_arxiv_src_url(self.arxiv_src_url, self.main_file)
+            elif self.folder is not None:
+                return TexDocument.from_folder(self.folder, self.main_file)
+            else:
+                return TexDocument.from_string(self.string)
+
+
     @property
     def text(self) -> str:
         return self.preface + "\n" + "\n".join([chapter.text for chapter in self.chapters])
+    
+    @classmethod
+    def from_arxiv_src_url(cls, arxiv_src_url: str, main_file: str = "main.tex") -> "TexDocument":
+        """
+        Given an arXiv source URL, this function downloads the source archive,
+        extracts it, resolves all \input and \include commands in the main LaTeX file,
+        and returns the combined content.
+        """
+        import os
+        import tarfile
+        import tempfile
+        import requests
 
+        # Download the tar archive from the provided URL
+        response = requests.get(arxiv_src_url, stream=True)
+        response.raise_for_status()  # Ensure the download was successful
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Save the downloaded tar file
+            tar_path = os.path.join(tmpdir, "source.tar")
+            with open(tar_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+            # Extract the tar file into the temporary directory
+            with tarfile.open(tar_path) as tar:
+                tar.extractall(path=tmpdir)
+
+            # Attempt to locate the main LaTeX file. We assume it is named 'main.tex'
+            main_tex_file = os.path.join(tmpdir, main_file)
+            if not os.path.exists(main_tex_file):
+                # Fallback: search for any .tex file in the extracted directory
+                for root, _, files in os.walk(tmpdir):
+                    for file in files:
+                        if file.endswith(".tex"):
+                            main_tex_file = os.path.join(root, file)
+                            break
+                    if os.path.exists(main_tex_file):
+                        break
+
+            combined_content = cls.from_folder(tmpdir, main_file=main_tex_file)
+        return combined_content
+
+    @classmethod
+    def from_folder(cls, path: str, main_file: str = "main.tex") -> "TexDocument":
+        import re
+
+        def resolve_input(file_path, base_dir):
+            """
+            Recursively resolve \input and \include commands in a LaTeX file.
+            """
+            content = []
+            input_pattern = re.compile(r'\\(input|include){([^}]+)}')
+
+            with open(file_path, 'r') as file:
+                for line in file:
+                    if line.strip().startswith("%"):
+                        continue
+                    match = input_pattern.search(line)
+                    if match:
+                        command, relative_path = match.groups()
+                        # Construct the full path of the file to be included
+                        included_file_path = os.path.join(base_dir, relative_path + '.tex' if not relative_path.endswith('.tex') else relative_path)
+                        # Recursively resolve inputs in the included file
+                        content.append(resolve_input(included_file_path, base_dir))
+                    else:
+                        content.append(line)
+
+            return ''.join(content)
+        
+        return cls.from_string(resolve_input(os.path.join(path, main_file), path))
+    
     @classmethod
     def from_string(
         cls, 
