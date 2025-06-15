@@ -21,10 +21,10 @@ The code is based on our paper *[Cartridges: Lightweight and general-purpose lon
 
 **Table of contents**
 - [Setup](#setup)
-- [Generating Training Data with Self-Study](#generating-training-data-with-self-study)
+- [Synthesizing Training Data with Self-Study](#synthesizing-training-data-with-self-study)
 - [Training a Cartridge](#training-a-Cartridge)
 - [Serving Cartridges](#serving-Cartridges)
-- [Analysis](#analysis)
+- [Acknowledgments and Citation](#acknowledgments-and-citation)
 
 
 ## Setup
@@ -72,7 +72,7 @@ Here are the steps:
 A `StructuredContext` represents your corpus in a format that the self-study process can work with. We provide several built-in context types. For our example, we'll use the `TexDocument` context type. 
 
 ```python 
-config = TexDocument.Config(
+context_config = TexDocument.Config(
     arxiv_src_url="https://arxiv.org/src/2506.06266",
     main_file="main.tex"
 )
@@ -92,7 +92,7 @@ Self-study requires an inference server to generate the synthetic conversations.
 Option A: Modal Deployment (Tokasaurus)
 </summary>
 
-We found it easiest to run data generation with Modal because it provides serverless horizontal scaling.
+We found it easy to run data generation with Modal's serverless horizontal scaling.
 
 For cloud deployment, you can deploy on Modal:
 ```bash
@@ -103,7 +103,7 @@ Then configure with the modal URL:
 ```python
 from cartridges.clients.tokasaurus_batch import TokasaurusBatchClient
 
-client = TokasaurusBatchClient.Config(
+client_config = TokasaurusBatchClient.Config(
     url="https://your-modal-deployment-url.modal.run",
     model_name="meta-llama/Llama-3.2-3B-Instruct"
 )
@@ -136,7 +136,7 @@ tksrs model=meta-llama/Llama-3.2-3B-Instruct kv_cache_num_tokens='(512 * 1024)' 
 ```python
 from cartridges.clients.tokasaurus_batch import TokasaurusBatchClient
 
-client = TokasaurusBatchClient.Config(
+client_config = TokasaurusBatchClient.Config(
     port=8001,  # Default Tokasaurus port
     model_name="meta-llama/Llama-3.2-3B-Instruct"
 )
@@ -159,7 +159,7 @@ Then configure with the modal URL:
 ```python
 from cartridges.clients.sglang import SGLangClient
 
-client = SGLangClient.Config(
+client_config = SGLangClient.Config(
     url="https://your-modal-deployment-url.modal.run",
     model_name="meta-llama/Llama-3.2-3B-Instruct"
 )
@@ -176,45 +176,14 @@ Option D: Local deployment (SGLang)
 ```python
 from cartridges.clients.sglang import SGLangClient
 
-client = SGLangClient.Config(
+client_config = SGLangClient.Config(
     model_name="meta-llama/Llama-3.2-3B-Instruct",
     url="http://localhost:8000",
 )
 ```
 </details>
 
-
-### Step 3: Configure the Synthesizer
-
-
-**Synthesizer Configuration**:
-```python
-from cartridges.synthesizers.self_study import SelfStudySynthesizer, SlicePromptSamplerWithChunks
-
-synthesizer_config = SelfStudySynthesizer.Config(
-    client=client,
-    tokenizer="meta-llama/Llama-3.2-3B-Instruct",
-    max_rounds=1,  # Number of conversation rounds
-    
-    # Configure the prompt sampler
-    prompt_sampler=SlicePromptSamplerWithChunks.Config(
-        # The 
-        slices=["structuring", "summarization", "question", "use_case", "creative"],
-        min_chunk_size=512,   # Minimum context chunk size in tokens
-        max_chunk_size=4096,  # Maximum context chunk size in tokens
-        desc="Below is a research paper on test-time training for long contexts."
-    ),
-    
-    # Chain-of-thought reasoning
-    prob_cot_a=0.2,  # Probability of using CoT for agent A
-    
-    # Tool usage (optional)
-    use_tools=False,
-    tools=[]
-)
-```
-
-### Step 4: Putting it all together
+### Step 3: Configuring the Synthesizer and Putting it all together
 
 We are now going to put all of the pieces together in a `SynthesizeConfig` object that configures the entire self-study process.
 
@@ -239,21 +208,21 @@ from cartridges.utils import WandBConfig
 from cartridges.tasks.longhealth.context import LongHealthStructuredContextConfig
 
 
-client = TokasaurusBatchClient.Config(
+client_config = TokasaurusBatchClient.Config(
     url="https://hazyresearch--tksrs-entry-capsules-3b-1xh100-min0-max64-serve.modal.run",
     ports=None,
     model_name="meta-llama/Llama-3.2-3B-Instruct",
 )
 
-context = TexDocument.Config(
+context_config = TexDocument.Config(
     arxiv_src_url="https://arxiv.org/src/2506.06266",
     main_file="main.tex"
 )
 
 config = SynthesizeConfig(
-    context=context,
+    context=context_config,
     synthesizer=SelfStudySynthesizer.Config(
-        client=client,
+        client=client_config,
         tokenizer="meta-llama/Llama-3.2-3B-Instruct",
         max_rounds=1,
         prompt_sampler=SlicePromptSamplerWithChunks.Config(
@@ -282,13 +251,23 @@ if __name__ == "__main__":
     pydrantic.main([config])
 ```
 
-### Running the Synthesis
+### Step 4: Running the Synthesis
 
 Once you've created the file, run it with: 
 ```bash
 python your_synthesis_script.py
 ```
-### Output Format
+
+Once the run is complete, it will save the results to a pickle file and print the path:
+```bash
+Final output saved to /path/to/output/dir/artifact/dataset.pkl
+```
+
+<details>
+<summary>
+Output format
+
+</summary>
 
 ```python 
 class TrainingExample(BaseModel):
@@ -298,13 +277,15 @@ class TrainingExample(BaseModel):
     top_logprob_logprobs: List[List[float]]  # The corresponding log probabilities
     metadata: Dict[str, Any]  # Information about tool usage, prompts, and generation process
 ```
+</details>
 
-Once the run is complete, it will save the results to a pickle file and print the path:
-```bash
-Final output saved to /path/to/output/dir/artifact/dataset.pkl
-```
 
-You can explore the generated data in a notebook:
+
+<details>
+<summary>
+Exploring synthesized dataset in a DataFrame
+</summary>
+
 ```python
 import pickle
 import pandas as pd
@@ -328,9 +309,35 @@ df = pd.DataFrame([
 ])
 ```
 
-### Advanced Configuration
+</details>
 
-#### Custom Prompt Samplers
+<!-- 
+You can explore the generated data in a notebook:
+```python
+import pickle
+import pandas as pd
+
+# Load the dataset
+with open("/path/to/output/dir/artifact/dataset.pkl", "rb") as f:
+    data = pickle.load(f)
+
+rows = data["rows"]
+context = data["context"]
+
+# Convert to DataFrame for exploration
+df = pd.DataFrame([
+    {
+        "num_messages": len(row.messages),
+        "num_output_tokens": row.num_output_tokens,
+        "seed_prompt": row.metadata.get("seed_prompt", ""),
+        "conversation": "\n".join([f"{msg.role}: {msg.content}" for msg in row.messages])
+    }
+    for row in rows[:10]  # First 10 examples
+])
+``` -->
+
+
+<!-- #### Custom Prompt Samplers
 
 You can create custom prompt samplers for specialized conversation types:
 
@@ -352,7 +359,7 @@ class CustomPromptSampler(PromptSampler):
         ]
         
         return context_chunk, seed_prompts
-```
+``` -->
 
 #### Tool Integration
 
@@ -373,51 +380,16 @@ synthesizer_config = SelfStudySynthesizer.Config(
     tools=tools
 )
 ```
-
+<!-- 
 ### Implementing a new data generation method
 To implement a new data generation method:
 
 1. Create a new file in the `cartridges/synthesizers/` directory (e.g., `my_synthesizer.py`)
 2. Subclass `ConvoSynthesizer` from `cartridges.synthesizers.base` 
 3. Implement the `sample_convos` method that returns a list of `TrainingExample` objects
-4. Create a config that uses your new synthesizer class and run it in the same way as above.
+4. Create a config that uses your new synthesizer class and run it in the same way as above. -->
 
-### Using Tokasaurus for data generation
-We do most of our data generation with [Tokasaurus](https://github.com/jordan-benjamin/tokasaurus/tree/add-top-logprobs). 
-
-If you have access to GPUs, you can run a server with:
-
-1. Clone the repo: 
-```bash
-git clone https://github.com/jordan-benjamin/tokasaurus
-cd tokasaurus
-```
-2. Checkout the `add-top-logprobs` branch: `git checkout --track origin/add-top-logprobs`
-3. Install the package: `uv pip install -e .`
-4. Start a server with:
-```bash
-tksrs model=meta-llama/Llama-3.2-3B-Instruct kv_cache_num_tokens='(512 * 1024)' max_top_logprobs=5
-```
-5. Update the config file to use a `TokasaurusClient` config:
-```python
-client_config = TokasaurusClient.Config(
-    port=8001, # this should point to the port where the server is running
-)
-```
-
-Alternatively, you can simply deploy a server on modal (or ask Sabri to deploy one for you):
-```
-modal deploy scratch/sabri/modal/deploy_llama_3b_modal.py
-```
-Then you update the config file to use the modal url:
-```python
-client_config = TokasaurusClient.Config(
-    url="https://hazyresearch--tokasaurus-llama-3b-dp4-serve.modal.run/v1",
-    model_name="llama-3.2-3b-instruct"  # this argument does not matter
-)
-```
-
-
+<!-- 
 ### Finding the generated dataset in WandB
 The data will also be saved to WandB as a pickle file artifact. To find it, go to the WandB project in the UI and click on the "Artifacts" tab. 
 You should see an entry on the left with the same name as you provided in the config. Click on it and select the version. (If you run the script multiple times, you'll see multiple versions.) 
@@ -427,19 +399,19 @@ To grab the path to the artifact, copy the value in the "Full Name" field shown 
 ![image](static/dataset-artifact.png)
 
 For example, here the full path is `hazy-research/cartridges/m03d17_generate_longhealth_p01:v0`. You'll need this path to train a Cartridge on the generated data.
-
+ -->
 
 
 ## Training a Cartridge 
 
-To try launching a first experiment, you can try running on   
-```
-python cartridges/configs/sabri/train/m03d17_train_longhealth_p01.py
-```
+**Quickstart**: Take a look at the script at `scripts/longhealth_train.py` for an example of how to generate training data with self-study. 
 
 See `cartridges.train.TrainConfig` for the schema of the main config we use for training. 
 
-Here is an example of a config file: 
+Below we provide an example of a config file prefaced with notes describing each part of the config:
+
+- *`dataset`*  Th
+- *`
 
 ```python 
 import os
@@ -451,66 +423,63 @@ from cartridges.initialization.strategies.first_n_tokens import KVCacheInitFromF
 from cartridges.train import EvalDatasetConfig, GenerateDatasetConfig, TrainConfig
 from cartridges.config import HFModelConfig
 from cartridges.datasets import CartridgeDataset
-from cartridges.tasks.longhealth import LongHealthEvalDataset, LongHealthMultipleChoiceGenerateDataset
+from cartridges.tasks.longhealth import LongHealthMultipleChoiceGenerateDataset
 from cartridges.utils import WandBConfig
 
 file_name = Path(__file__).stem
 config = TrainConfig(
-    name=f"{file_name}",
     model=HFModelConfig(
-        pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct"
+        pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
+        model_cls=LlamaForCausalLM,
+        attn_implementation="einsum",
     ),
-    dataset=CartridgeDataset.Config(
-        data_sources=[
-            # This is the path to the generated dataset we created above
-            ("hazy-research/cartridges/m03d17_generate_longhealth_p01:v0", None),
-        ],  
+    kv_cache_initializer=KVCacheInitFromFirstNTokensOfContext.Config(max_tokens=2048),
+    
+    lr=2e-2,
+    loss_type="logits",
+    epochs=2,
+    global_batch_size=bs,
+    local_batch_size=4,
+    use_batch_sampler=True,
+
+    dataset=CartridgeTrainDataset.Config(
+        # path should point to the output of the synthesis script we ran above
+        data_sources=[("/path/to/output/dir/artifact/dataset.pkl", None)]
+        max_sequence_length=1024,
         is_wandb=True,
         label_type="logits",
         top_k_logits=20,
     ),
-    generate_every_n_steps=64,
+
+    context=LongHealthStructuredContextConfig(patient_ids=patient_ids),
+    
+    save_every_n_steps=512,
+    generate_every_n_steps=512,
+    generate_max_new_tokens=512,
     generate_datasets=[
         GenerateDatasetConfig(
-            name_for_wandb="multiple_choice_generations",
             dataset=LongHealthMultipleChoiceGenerateDataset.Config(
-                patient_ids=["patient_01"],
-                max_questions=128,
-                cot=True
-            )
-        ),
-    ],
-    eval_every_n_steps=16,
-    eval_datasets=[
-        EvalDatasetConfig(
-            name_for_wandb="generated_questions",
-            batch_size=16,
-            dataset=CartridgeDataset.Config(
-                data_sources=[
-                    # This is the path to another test dataset we created with gpt4o using
-                    # the approach as above
-                    ("hazy-research/cartridges/m03d12_longhealth_p01_basic_qa_test:v0", None),
-                ],
-                is_wandb=True,
-                label_type="tokens",
+                patient_ids=patient_ids, 
+                cot=True,
             ),
+            name_for_wandb=f"longhealth_mc",
+            num_samples=8,
+            num_samples_final=8,
+            batch_size=16,
+            temperature=0.3
         )
     ],
-    generate_max_new_tokens=512,
-    kv_cache_initializer=KVCacheInitFromFirstNTokensOfContext.Config(
-        max_tokens=2048
-    ),
-    loss_type="logits",
-    save_every_n_steps=64,
-    epochs=1,
-    lr=5e-3,
+    eval_every_n_steps=256,
+    eval_datasets=[],
+    distributed_backend="gloo",
+
     wandb=WandBConfig(
         project="cartridges",
-        tags=["cache_tuning", "development"],
+        tags=["train", "longhealth", f"patients{patients_str}"],
         entity="hazy-research",
     ),
     output_dir=os.environ["CARTRIDGES_OUTPUT_DIR"],
-    train_batch_size=6,
+    name="train-cartridges"
 )
 
 if __name__ == "__main__":
@@ -521,23 +490,47 @@ if __name__ == "__main__":
 To launch a data parallel training run, you can run:
 
 ```bash
-torchrun --standalone --nproc_per_node=2 cartridges/configs/train/m03d09_train_memorization_and_qa_no_sum.py
+torchrun --standalone --nproc_per_node=2 path/to/file.py
 ```
 
 ## Serving Cartridges
 
-### Chatting with a Cartridge 
+We describe two ways to serve and chat with a trained Cartridge: a simple, but slow way that just uses a pure PyTorch generation loop, and a faster one that uses a Tokasaurus server.
 
-If you have access to some idle GPUs on a cluster you can SSH into, just launch a streamlit app and make sure the port is forwarded to your local: 
+### Serving with Tokasuaurus [Fastest and recommended]
+We've implemented (h/t @geoffreyangus) an integration with [Tokasaurus](https://github.com/ScalingIntelligence/tokasaurus), a simple LLM inference server optimized for high throughput. 
+
+To run the Tokasaurus server, you will need to install Tokasaurus from source, switch to the branch `geoff/cartridges`, and then follow the instructions [here](https://github.com/ScalingIntelligence/tokasaurus/tree/geoff/cartridges?tab=readme-ov-file#cartridges) to make API calls to the server.
+
+```python
+client = TokasaurusClient(
+    url="https://your-modal-deployment-url.modal.run",
+    model_name="meta-llama/Llama-3.2-3B-Instruct"
+)
+```
+
 ```bash
 streamlit run cartridges/analysis/dashboards/chat_w_cache.py
 ```
-Our training scripts log the cache to WandB and the streamlit app just pulls it from there. So, no need  to run the app on the same machine you trained the model.
 
-If you don't have GPUs, you can also deploy the app on Modal with: 
+### Serving with Basic PyTorch [Easiest, but slow]
+
 ```bash
-modal serve scratch/sabri/modal/streamlit_chat_w_cache.py
+streamlit run cartridges/analysis/dashboards/chat_w_cache.py
 ```
 
+## Acknowledgments and Citation
+There are tons of people and organizations who have supported this project. Below we shout out a few, but check out the the paper for a full list.
 
+The compute for this project was provided by [Modal](https://modal.com/) — who made it super easy to scale out horizontally when running the synthetic data generation for self-study — and [Together](https://www.together.ai/) — who provided the compute for training the Cartridges on the synthetic data. [Prime Intellect](https://www.google.com/search?q=prime+intellect&oq=prime+intell&sourceid=chrome&ie=UTF-8&sei=dkNPaKfxNeq50PEPrdqiwA4), [Voltage Park](https://dashboard.voltagepark.com/), and [Azure](https://azure.microsoft.com/en-us/) through the HAI Grants program also contributed compute towards this project.
+
+
+```bibtex
+@article{eyuboglu2025cartridges,
+  title={Cartridges: Lightweight and general-purpose long context representations via self-study},
+  author={Eyuboglu, Sabri and Ehrlich, Ryan and Arora, Simran and Guha, Neel and Zinsley, Dylan and Liu, Emily and Tennien, Will and Rudra, Atri and Zou, James and Mirhoseini, Azalia and others},
+  journal={arXiv preprint arXiv:2506.06266},
+  year={2025}
+}
+```
 
