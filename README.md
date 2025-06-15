@@ -23,6 +23,7 @@ The code is based on our paper *[Cartridges: Lightweight and general-purpose lon
 - [Setup](#setup)
 - [Generating Training Data with Self-Study](#generating-training-data-with-self-study)
 - [Training a Cartridge](#training-a-Cartridge)
+- [Serving Cartridges](#serving-Cartridges)
 - [Analysis](#analysis)
 
 
@@ -523,7 +524,7 @@ To launch a data parallel training run, you can run:
 torchrun --standalone --nproc_per_node=2 cartridges/configs/train/m03d09_train_memorization_and_qa_no_sum.py
 ```
 
-## Analysis
+## Serving Cartridges
 
 ### Chatting with a Cartridge 
 
@@ -538,15 +539,5 @@ If you don't have GPUs, you can also deploy the app on Modal with:
 modal serve scratch/sabri/modal/streamlit_chat_w_cache.py
 ```
 
-### Exploring generations in WandB
 
-The documentation for the `wandb` query language, which you use to explore tables is shockingly bad. Here are some commands I use to look at the generations:
-```javascript
-// visualize one big table with all the generations across steps
-runs.history.concat["test/results_step"]
 
-// filter to a particular step
-runs.history.concat["test/results_step"].table.rows.concat.filter((row) => row["global_step"] == 0)
-runs.history.concat["eval_finance-ppl/table"].table.rows.concat.filter((row) => row["optimizer_step"] == 0)
-
-```
