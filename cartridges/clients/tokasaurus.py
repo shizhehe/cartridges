@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from openai import OpenAI
 
-from cartridges.clients.base import Client, Sample, SelectedToken, TopToken, ClientConfig, ClientResponse
+from cartridges.clients.base import Client, ClientConfig, ClientResponse
 from cartridges.clients.usage import Usage
 from cartridges.utils import get_logger
 
@@ -97,6 +97,20 @@ class TokasaurusClient(Client):
         """
         raise NotImplementedError("The `complete` method is not yet supported by Tokasuarus Client.")
 
+    def cartridge_complete(
+        self,
+        prompts: List[Union[str, List[int]]],
+        cartridges: List[Dict[str, str]],
+        temperature: float = 0.6,
+        stop: Optional[List[str]] = None,
+        max_completion_tokens: int = 1,
+        **kwargs
+    ) -> Sample:
+        """
+        Cartridge completion API. Raise a `NotImplementedError` as a placeholder.
+        """
+        raise NotImplementedError("The `cartridge_complete` method is not yet supported by Tokasuarus Client.")
+
     def chat(
         self,
         chats: List[Dict[str, Any]],
@@ -104,6 +118,7 @@ class TokasaurusClient(Client):
         temperature: float = 0.6,
         stop: Optional[List[str]] = None,
         top_logprobs: Optional[int] = None,
+        cartridges: Optional[List[Dict[str, str]]] = None,
         **kwargs
     ) -> ClientResponse:
         """
@@ -111,10 +126,17 @@ class TokasaurusClient(Client):
         """
         assert len(chats) > 0, "Messages cannot be empty."
 
-        if self.config.use_modal_endpoint:
-            fn = self._run_batch_modal
+        if cartridges is None:
+            if self.config.use_modal_endpoint:
+                fn = self._run_batch_modal
+            else:
+                fn = self._run_batch
         else:
-            fn = self._run_batch
+            if self.config.use_modal_endpoint:
+                fn = self._run_batch_modal_cartridge
+            else:
+                fn = self._run_batch_cartridge
+            kwargs["cartridges"] = cartridges
 
         return fn(
             chats=chats,
@@ -122,8 +144,9 @@ class TokasaurusClient(Client):
             max_completion_tokens=max_completion_tokens,
             stop=stop,
             top_logprobs=top_logprobs,
+            **kwargs
         )
-    
+
     def _run_batch_modal(
         self,
         chats: list[list[Message]],
@@ -235,6 +258,130 @@ class TokasaurusClient(Client):
             data = json.loads(line)
             samples.append(data)
         return self._parse_batch_response(response=samples)
+
+    def _run_batch_cartridge(
+        self,
+        chats: list[list[Message]],
+        cartridges: List[Dict[str, str]],
+        max_completion_tokens: int,
+        temperature: float = 0.6,
+        stop: Optional[List[str]] = None,
+        top_logprobs: Optional[int] = None,
+    ) -> list[ClientResponse]:
+        endpoint = "/v1/cartridge/chat/completions"
+        
+        id_to_item = {}
+        file_lines = []
+
+        for chat in chats:
+            item_id = str(uuid.uuid4())
+            body = {
+                    "model": "todo",  # Set by tokasarus
+                    "messages": chat,
+                    "cartridges": cartridges,
+                    # "cartridge_ids": [c['id'] for c in cartridges],
+                    "max_tokens": max_completion_tokens,
+                    "temperature": temperature,
+                }
+            
+            # if top_logprobs is not None:
+            #     body["logprobs"] = top_logprobs
+
+            assert stop is None
+
+            file_lines.append(json.dumps({
+                "custom_id": item_id,
+                "method": "POST",
+                "url": endpoint,
+                "body": body
+            }))
+            id_to_item[item_id] = chat
+
+        batch_input_file = self.client.files.create(
+            file="\n".join(file_lines).encode(),
+            purpose="batch"
+        )
+        
+        batch_info = self.client.batches.create(
+            input_file_id=batch_input_file.id,
+            endpoint=endpoint,
+            completion_window="24h",
+        )
+        
+        time.sleep(BATCH_INITIAL_WAIT)
+        
+        while True:
+            batch_info = self.client.batches.retrieve(batch_info.id)
+            print("Batch status:", batch_info.id, batch_info.status)
+            if batch_info.status == 'completed':
+                break
+            elif batch_info.status == 'in_progress':
+                time.sleep(BATCH_CHECK_INTERVAL)
+                continue
+            else:
+                raise ValueError(f"Invalid batch status: {batch_info.status}")
+
+        file_content = self.client.files.content(batch_info.output_file_id)
+        samples = []
+        for line in file_content.text.splitlines():
+            data = json.loads(line)
+            samples.append(data)
+        return self._parse_batch_response(response=samples)
+
+    def _run_batch_modal_cartridge(
+        self,
+        chats: list[list[Message]],
+        cartridges: List[Dict[str, str]],
+        max_completion_tokens: int,
+        temperature: float = 0.6,
+        stop: Optional[List[str]] = None,
+        top_logprobs: Optional[int] = None,
+    ) -> list[ClientResponse]:
+        import requests
+
+        url = self.config.url
+        if url.endswith("/v1"):
+            url = url[:-3] 
+        url += "/batch"
+
+        obj = {
+            "chats": chats,
+            "cartridges": cartridges,
+            "max_completion_tokens": max_completion_tokens,
+            "temperature": temperature,
+            "stop": stop,
+            "top_logprobs": top_logprobs,
+        }
+        self.logger.info(f"Running cartridge batch with {len(chats)} chats")
+
+        for i in range(MAX_RETRIES):
+            try:
+                response = requests.post(
+                    url, 
+                    json=obj, 
+                    timeout=REQUEST_TIMEOUT
+                )
+                
+                if response.status_code == 200:
+                    break
+                else:
+                    error_message = f"Cartridge batch failed with status code {response.status_code}. Response: {response.text}"
+                    self.logger.error(error_message)
+                    raise Exception(error_message)
+            except Exception as e:
+                self.logger.error(f"Cartridge batch failed with error {e}")
+                if i == MAX_RETRIES - 1:
+                    raise e
+                time.sleep(RETRY_WAIT)
+
+        response_json = response.json()
+        samples = [Sample(**sample) for sample in response_json['samples']]
+        usage = Usage(**response_json['usage'])
+
+        return ClientResponse(
+            samples=samples,
+            usage=usage,
+        )
 
     def _parse_batch_response(
         self,

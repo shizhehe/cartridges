@@ -500,7 +500,9 @@ We describe two ways to serve and chat with a trained Cartridge: a simple, but s
 ### Serving with Tokasuaurus [Fastest and recommended]
 We've implemented (h/t @geoffreyangus) an integration with [Tokasaurus](https://github.com/ScalingIntelligence/tokasaurus), a simple LLM inference server optimized for high throughput. 
 
-To run the Tokasaurus server, you will need to install Tokasaurus from source, switch to the branch `geoff/cartridges`, and then follow the instructions [here](https://github.com/ScalingIntelligence/tokasaurus/tree/geoff/cartridges?tab=readme-ov-file#cartridges) to make API calls to the server.
+To run the Tokasaurus server, you will need to (install Tokasaurus from source)[], switch to the branch `geoff/cartridges`, and then follow the instructions [here](https://github.com/ScalingIntelligence/tokasaurus/tree/geoff/cartridges?tab=readme-ov-file#cartridges) to make API calls to the server.
+
+We 
 
 ```python
 client = TokasaurusClient(
@@ -513,7 +515,7 @@ client = TokasaurusClient(
 streamlit run cartridges/analysis/dashboards/chat_w_cache.py
 ```
 
-### Serving with Basic PyTorch [Easiest, but slow]
+### Serving with Basic PyTorch [Easiest but slow]
 
 ```bash
 streamlit run cartridges/analysis/dashboards/chat_w_cache.py
