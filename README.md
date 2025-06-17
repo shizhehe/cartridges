@@ -36,8 +36,6 @@ git clone https://github.com/HazyResearch/cartridges && cd cartridges
 pip install uv
 uv pip install -e . 
 ```
-Note: there *might* be some missing dependencies -- I haven't checked recently. 
-If you run into missing dependencies, just add them to the `pyproject.toml` file and/or pip install them individually. 
 
 **Step 2:** Set some environment variables
 
@@ -72,6 +70,7 @@ Here are the steps:
 A `StructuredContext` represents your corpus in a format that the self-study process can work with. We provide several built-in context types. For our example, we'll use the `TexDocument` context type. 
 
 ```python 
+from cartridges.contexts.tex import TexDocument
 context_config = TexDocument.Config(
     arxiv_src_url="https://arxiv.org/src/2506.06266",
     main_file="main.tex"

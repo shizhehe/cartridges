@@ -1,5 +1,6 @@
 from __future__ import annotations
 from abc import ABC
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -15,7 +16,7 @@ import pandas as pd
 import tqdm
 import wandb
 
-from cartridges.synthesizers.base import ConvoSynthesizer
+from cartridges.synthesizers.base import AsyncConvoSynthesizer, ConvoSynthesizer
 from cartridges.utils import WandBConfig, prepare_wandb, get_logger
 from cartridges.structs import TrainingExample
 from cartridges.context import BaseContextConfig
@@ -36,7 +37,7 @@ class SynthesizeConfig(RunConfig):
     batch_size: int
 
     max_num_batches_in_parallel: int
-    parallelism_strategy: Literal["thread", "process"] = "thread"
+    parallelism_strategy: Literal["thread", "process", "async"] = "thread"
     handle_exceptions: bool = True
     thread_timeout: int = 4 * 60  # only allow two minutes between completed batches
 
@@ -73,42 +74,51 @@ class SynthesizeConfig(RunConfig):
         total_batches = math.ceil(self.num_samples / self.batch_size)
 
         all_rows: list[TrainingExample] = []
-        if self.max_num_batches_in_parallel > 1:
-
-            with (
-                concurrent.futures.ThreadPoolExecutor
-                if self.parallelism_strategy == "thread"
-                else concurrent.futures.ProcessPoolExecutor
-            )(max_workers=self.max_num_batches_in_parallel) as executor:
-                futures = [
-                    executor.submit(
-                        _process_batch,
-                        batch_idx=batch_idx,
-                        total_batches=total_batches,
-                        synthesizer=synthesizer,
-                        config=self,
-                    )
-                    for batch_idx in range(total_batches)
-                ]
-
-                try:
-                    for future in tqdm.tqdm(
-                        concurrent.futures.as_completed(futures),
-                        total=len(futures),
-                        desc="Waiting for requests to complete",
-                    ):
-                        batch_rows = future.result()
-                        all_rows += batch_rows
-                except TimeoutError as e:
-                    logger.info(f"Timeout error {e}, skipping remaining batches")
-        else:
-            for batch_idx in tqdm.tqdm(range(total_batches)):
-                all_rows += _process_batch(
-                    batch_idx=batch_idx,
+        if self.parallelism_strategy == "async":
+            assert isinstance(synthesizer, AsyncConvoSynthesizer), "Synthesizer must be async to use async parallelism"
+            all_rows = asyncio.run(
+                self._run_async_batches_with_queue(
                     synthesizer=synthesizer,
-                    config=self,
                     total_batches=total_batches,
                 )
+            )
+        else:
+            if self.max_num_batches_in_parallel > 1:
+
+                with (
+                    concurrent.futures.ThreadPoolExecutor
+                    if self.parallelism_strategy == "thread"
+                    else concurrent.futures.ProcessPoolExecutor
+                )(max_workers=self.max_num_batches_in_parallel) as executor:
+                    futures = [
+                        executor.submit(
+                            _process_batch,
+                            batch_idx=batch_idx,
+                            total_batches=total_batches,
+                            synthesizer=synthesizer,
+                            config=self,
+                        )
+                        for batch_idx in range(total_batches)
+                    ]
+
+                    try:
+                        for future in tqdm.tqdm(
+                            concurrent.futures.as_completed(futures),
+                            total=len(futures),
+                            desc="Waiting for requests to complete",
+                        ):
+                            batch_rows = future.result()
+                            all_rows += batch_rows
+                    except TimeoutError as e:
+                        logger.info(f"Timeout error {e}, skipping remaining batches")
+            else:
+                for batch_idx in tqdm.tqdm(range(total_batches)):
+                    all_rows += _process_batch(
+                        batch_idx=batch_idx,
+                        synthesizer=synthesizer,
+                        config=self,
+                        total_batches=total_batches,
+                    )
 
         t = time.time()
         logger.info(f"Generation done, starting to save {len(all_rows)} rows to artifact")
@@ -145,6 +155,101 @@ class SynthesizeConfig(RunConfig):
             )
 
         wandb.finish()
+
+    async def _run_async_batches_with_queue(
+        self, 
+        synthesizer: AsyncConvoSynthesizer, 
+        total_batches: int
+    ) -> list[TrainingExample]:
+        """Run batches using a queue for better control."""
+        all_rows: list[TrainingExample] = []
+        
+        # Create queue of batch indices
+        batch_queue = asyncio.Queue()
+        for batch_idx in range(total_batches):
+            batch_queue.put_nowait(batch_idx)
+        
+        # Results queue
+        results_queue = asyncio.Queue()
+        
+        async def worker(worker_id: int):
+            """Worker that processes batches from the queue."""
+            while True:
+                try:
+                    # Get batch with timeout
+                    batch_idx = await asyncio.wait_for(
+                        batch_queue.get(), 
+                        timeout=1.0
+                    )
+                except asyncio.TimeoutError:
+                    # No more batches
+                    break
+                
+                try:
+                    batch_rows = await _process_batch_async(
+                        batch_idx=batch_idx,
+                        total_batches=total_batches,
+                        synthesizer=synthesizer,
+                        config=self,
+                    )
+                    await results_queue.put((batch_idx, batch_rows))
+                except Exception as e:
+                    if self.handle_exceptions:
+                        logger.error(f"Worker {worker_id} error on batch {batch_idx}: {e}")
+                        await results_queue.put((batch_idx, []))
+                    else:
+                        raise
+                finally:
+                    batch_queue.task_done()
+        
+        # Start workers
+        workers = [
+            asyncio.create_task(worker(i))
+            for i in range(self.max_num_batches_in_parallel)
+        ]
+        
+        # Collect results with progress tracking
+        completed_batches = 0
+        with tqdm.tqdm(total=total_batches, desc="Processing batches") as pbar:
+            while completed_batches < total_batches:
+                try:
+                    batch_idx, batch_rows = await asyncio.wait_for(
+                        results_queue.get(),
+                        timeout=self.thread_timeout
+                    )
+                    all_rows.extend(batch_rows)
+                    completed_batches += 1
+                    pbar.update(1)
+                except asyncio.TimeoutError:
+                    logger.warning("Timeout waiting for batch results")
+                    break
+        
+        # Wait for all workers to finish
+        await asyncio.gather(*workers, return_exceptions=True)
+        
+        return all_rows
+
+async def _process_batch_async(
+    batch_idx: int,
+    total_batches: int,
+    synthesizer: AsyncConvoSynthesizer,
+    config: SynthesizeConfig,
+) -> list[TrainingExample]:
+    batch_size = min(
+        config.batch_size,
+        config.num_samples - batch_idx * config.batch_size,
+    )
+
+    try:
+        convos = await synthesizer.sample_convos(batch_idx, batch_size, total_batches)
+    except Exception as e:
+        if config.handle_exceptions:
+            logger.info(f"Error processing batch {batch_idx + 1}/{total_batches}: {e}")
+            return []
+        else:
+            raise e
+
+    return convos
 
 
 def _process_batch(

@@ -128,13 +128,11 @@ def serve():
 
     @web_app.post("/batch")
     async def batch(req: BatchRequest):
-        client = TokasaurusClient(
-            config=TokasaurusClient.Config(
+        client = TokasaurusClient.Config(
                 url=f"http://localhost:{PORT}/v1",
                 use_modal_endpoint=False,
                 model_name="meta-llama/Llama-3.2-3B-Instruct",
-            )
-        )
+        ).instantiate()
 
         # Use the cartridge_chat method directly
         response = client.cartridge_chat(

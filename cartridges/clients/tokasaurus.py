@@ -12,9 +12,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from openai import OpenAI
 
-from cartridges.clients.base import Client, ClientConfig, ClientResponse
-from cartridges.clients.usage import Usage
-from cartridges.utils import get_logger
+from capsules.clients.base import Client, Sample, SelectedToken, TopToken, ClientConfig, ClientResponse
+from capsules.clients.usage import Usage
+from capsules.utils import get_logger
 
 
 
