@@ -18,6 +18,7 @@ from pydrantic import ObjectConfig
 from transformers import AutoTokenizer
 
 from cartridges.context import StructuredContext, list_nested_contexts
+from cartridges.contexts.mcp.base import MCPContext
 from cartridges.structs import TrainingExample
 from cartridges.clients.base import Client, ClientConfig, ClientSample
 from cartridges.synthesizers.base import AsyncConvoSynthesizer, ConvoSynthesizer
@@ -90,7 +91,7 @@ class MCPSelfStudySynthesizer(AsyncConvoSynthesizer):
         # `prompt_sampler` is responsible for sampling the initial system prompt and the seed prompts
         # We combined them together since some strategies might involve dependencies
         # between the two
-        prompt_sampler: PromptSampler.Config
+        # prompt_sampler: PromptSampler.Config
         system_prompt_template: str = SYSTEM_PROMPT_TEMPLATE
 
         max_rounds: int = 1
@@ -110,7 +111,7 @@ class MCPSelfStudySynthesizer(AsyncConvoSynthesizer):
 
         use_tools: Optional[bool] = None  # DEPRECATED: Here for backwards compatibility
 
-    def __init__(self, config: Config, context: StructuredContext):
+    def __init__(self, config: Config, context: MCPContext):
         self.config = config
 
         if self.config.use_tools is not None:
@@ -130,20 +131,25 @@ class MCPSelfStudySynthesizer(AsyncConvoSynthesizer):
         ]
         self.tools = {tool.name: tool for tool in self.tools}
 
-        self.prompt_sampler = self.config.prompt_sampler.instantiate(
-            context=self.context,
-            tokenizer=self.tokenizer,
-            client=self.client,
-        )
+        # self.prompt_sampler = self.config.prompt_sampler.instantiate(
+        #     context=self.context,
+        #     tokenizer=self.tokenizer,
+        #     client=self.client,
+        # )
         random.seed(82)
 
     async def sample_convos(
         self, batch_idx: int, num_convos: int, total_batches: int
     ) -> list[TrainingExample]:
+
         # (1) Get initial system prompt and seed prompts
         # --- begin prompt sampling ---
         t0 = time.time()
-        subcorpus, seed_prompts = self.prompt_sampler(batch_idx, num_convos)
+        subcorpus = await self.context.sample_subcontext()
+        seed_prompts = [
+            SEED_PROMPT_REGISTRY[k]() 
+            for k in random.choices(list(SEED_PROMPT_REGISTRY.keys()), k=num_convos)
+        ]
         initial_system_prompt = self.config.system_prompt_template.format(
             subcorpus=subcorpus
         )
@@ -578,7 +584,7 @@ class SlicePromptSampler(PromptSampler):
     def __init__(
         self,
         config: Config,
-        context: StructuredContext,
+        context: MCPContext,
         tokenizer: AutoTokenizer,
     ):
         self.config = config
@@ -627,8 +633,6 @@ class SlicePromptSampler(PromptSampler):
             return  f"Below is a subsection from the corpus (located at `{path}`). {text}"
             
 
-
-
 class SlicePromptSamplerWithChunks(PromptSampler):
 
     class Config(PromptSampler.Config):
@@ -669,179 +673,8 @@ class SlicePromptSamplerWithChunks(PromptSampler):
             chunk = f"{self.config.desc}\n\n{chunk}"
         
         return chunk
-    
-
-CONTEXTUALIZED_CHUNK_TEMPLATE = """\
-<chunk>
-{summary}
-It is located at the following path in the corpus: `{path}`
-
-<text>
-{text}
-</text>
-</chunk>\
-"""
-    
-class SlicePromptSamplerWithContextualizedChunks(SlicePromptSamplerWithChunks):
-
-    class Config(PromptSampler.Config):
-        slices: List[SLICE_TYPES]
-        # min and max chunk size in tokens
-        min_chunk_size: int = 512
-        max_chunk_size: int = 2048
-
-        single_leaf: bool = False
-        
-
-        num_summaries: int = 1
-        summary_temperature: float = 0.6
-
-        force_cache: bool = False
-        
-    def __init__(
-        self,
-        config: Config,
-        context: StructuredContext,
-        tokenizer: AutoTokenizer,
-        client: Client,
-    ):
-        from cartridges.generate.tree_sampler import summarize_context_tree
-
-        self.config = config
-        self.context = context
-        self.tokenizer = tokenizer
-
-        self.leaves, self.weights, self.summaries = disk_cache(
-            self._summarize_context_tree,
-            cache_dir=os.path.join(os.environ["CARTRIDGES_OUTPUT_DIR"], "ctxual_summaries"),
-            force=self.config.force_cache,
-        )(
-            context=context,
-            tokenizer=tokenizer,
-            client=client,
-            max_tokens_per_section=self.config.max_chunk_size,
-            num_summaries=self.config.num_summaries,
-            summary_temperature=self.config.summary_temperature,
-        )
-
-        self.leaf_id_to_summaries = {
-            id(leaf): [s[i] for s in self.summaries] 
-            for i, leaf in enumerate(self.leaves)
-        }
-
-    @staticmethod
-    def _summarize_context_tree(
-        context: StructuredContext,
-        tokenizer: AutoTokenizer,
-        client: Client,
-        max_tokens_per_section: int,
-        num_summaries: int,
-        summary_temperature: float,
-    ):
-        tree = structured_context_to_context_tree(
-            context, 
-            tokenizer, 
-            max_tokens_per_section=max_tokens_per_section
-        )
-        
-        def summarize_once():
-            return summarize_context_tree(
-                tokenizer=tokenizer,
-                client=client,
-                tree=tree,
-                min_tokens_to_summarize=128,
-                max_tokens_to_summarize=16384,
-                max_tokens_in_summary=128,
-                downward_pass=True,
-                temperature=summary_temperature,
-            )
-
-        leaves: List[ContextTreeLeaf] = [
-            leaf for leaf in tree.leaves()
-        ]
-        summaries: List[List[str]] = []
-        weights: List[float] = [leaf.num_tokens for leaf in leaves]
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            futures = [executor.submit(summarize_once) for _ in range(num_summaries)]
-
-            for future in concurrent.futures.as_completed(futures):
-                summ_tree: ContextTree = future.result()
-                summaries.append([leaf.summary for leaf in summ_tree.leaves()])
-
-        return leaves, weights, summaries
-    
-    def _sample_initial_subcontext(self) -> str:
-        if self.config.single_leaf:
-            return self._sample_initial_subcontext_single()
-        else:
-            return self._sample_initial_subcontext_multiple()
-    
-    def _sample_initial_subcontext_multiple(self) -> str:
-        chunk_size = random.randint(self.config.min_chunk_size, self.config.max_chunk_size)
-
-        seed: ContextTreeLeaf = random.choices(self.leaves)[0]
-        ids: Set[int] = {id(seed)}
-
-        context = [
-            (seed.path(), seed.summary, seed.value)
-        ]
-
-        current_root: ContextTree = seed.parent_data.parent
-        token_count = seed.num_tokens
-        while token_count < chunk_size:
-            for leaf in current_root.leaves():
-                leaf: ContextTreeLeaf
-                if id(leaf) not in ids:
-                    if leaf.num_tokens + token_count <= chunk_size:
-                        text = leaf.value 
-                    else:
-                        tokens = self.tokenizer.encode(leaf.value)[:chunk_size - token_count]
-                        token_count += len(tokens)
-                        text = self.tokenizer.decode(tokens)
-                    summary = random.choice(self.leaf_id_to_summaries[id(leaf)])
-                    context.append((leaf.path(), summary, text))
-                    ids.add(id(leaf))
-                    break
-            else:
-                if current_root.parent_data is None:
-                    break
-                current_root = current_root.parent_data.parent
-
-        chunk_strs = []
-        for path, summary, text in sorted(context, key=lambda x: x[0]):
-            chunk_strs.append(
-                CONTEXTUALIZED_CHUNK_TEMPLATE.format(
-                    path=path,
-                    summary=summary,
-                    text=text,
-                )
-            )
-        chunk_str = "\n-----------\n".join(chunk_strs)
-        return chunk_str
-
-    
-    def _sample_initial_subcontext_single(self) -> str:
-        leaf_idx = random.choices(range(len(self.leaves)), weights=self.weights, k=1)[0]
-        summary = random.choice(self.summaries)[leaf_idx]
-        leaf = self.leaves[leaf_idx]
-
-        chunk_size = random.randint(self.config.min_chunk_size, self.config.max_chunk_size)
-        if leaf.num_tokens > chunk_size:
-            tokens = self.tokenizer.encode(leaf.value)
-            chunk_start = random.randint(0, len(tokens) - chunk_size)
-            chunk_end = chunk_start + chunk_size
-            chunk = self.tokenizer.decode(tokens[chunk_start:chunk_end])
-        else:
-            chunk = leaf.value
-
-        return CONTEXTUALIZED_CHUNK_TEMPLATE.format(
-            summary=summary,
-            path=leaf.path(),
-            text=chunk,
-        )
 
 # The COT instructions below are randomly sampled from the following list.
-
 COT_INSTRUCTIONS = [
     "If helpful, you can think before responding. Put your thinking between <thinking> and </thinking> tags. Then, provide your final response between <response> and </response> tags.",
     "Respond in the following format: <thinking>...</thinking> <response>...</response>",

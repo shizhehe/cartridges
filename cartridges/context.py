@@ -3,24 +3,25 @@ import os
 from typing import Any, Dict, List, Optional, TYPE_CHECKING, Union
 from abc import ABC
 
-from pydantic import BaseModel
 from pydrantic import BaseConfig
 
 
 if TYPE_CHECKING:
-    from cartridges.structs import Context
     from bs4 import Tag
+
+class Context(ABC):
+    pass
 
 class BaseContextConfig(BaseConfig, ABC):
     """This should be subclassed by different tasks to specify the parameters
     and method for instantiating a Context object.
     For example, see LongHealthContextConfig in tasks/longhealth/__init__.py
     """
-    def instantiate(self) -> Union[Context, StructuredContext]:
+    def instantiate(self) -> Context:
         raise NotImplementedError("Subclasses must implement this method")    
 
 
-class StructuredContext(BaseModel, ABC):
+class StructuredContext(Context, ABC):
     
     @property
     def text(self) -> str:

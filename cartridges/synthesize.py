@@ -16,6 +16,7 @@ import pandas as pd
 import tqdm
 import wandb
 
+from cartridges.contexts.mcp.base import MCPContext
 from cartridges.synthesizers.base import AsyncConvoSynthesizer, ConvoSynthesizer
 from cartridges.utils import WandBConfig, prepare_wandb, get_logger
 from cartridges.structs import TrainingExample
@@ -63,26 +64,21 @@ class SynthesizeConfig(RunConfig):
             self.wandb.name = self.name
             prepare_wandb(self.wandb, self.to_dict())
 
-        context = self.context.instantiate()
-
-        logger.info(f"Instantiating convo generator...")
-        synthesizer = self.synthesizer.instantiate(context=context)
-
-        if hasattr(synthesizer, "preprocess"):
-            synthesizer.preprocess()
-
         total_batches = math.ceil(self.num_samples / self.batch_size)
 
         all_rows: list[TrainingExample] = []
         if self.parallelism_strategy == "async":
-            assert isinstance(synthesizer, AsyncConvoSynthesizer), "Synthesizer must be async to use async parallelism"
             all_rows = asyncio.run(
-                self._run_async_batches_with_queue(
-                    synthesizer=synthesizer,
-                    total_batches=total_batches,
-                )
+                self._run_async_batches_with_queue(total_batches=total_batches)
             )
         else:
+            context = self.context.instantiate()
+
+            logger.info(f"Instantiating convo generator...")
+            synthesizer = self.synthesizer.instantiate(context=context)
+
+            if hasattr(synthesizer, "preprocess"):
+                synthesizer.preprocess()
             if self.max_num_batches_in_parallel > 1:
 
                 with (
@@ -137,7 +133,7 @@ class SynthesizeConfig(RunConfig):
             pickle.dump(
                 {
                     "rows": all_rows,
-                    "context": context,
+                    "context": self.context.to_dict(),
                 },
                 f,
             )
@@ -158,7 +154,6 @@ class SynthesizeConfig(RunConfig):
 
     async def _run_async_batches_with_queue(
         self, 
-        synthesizer: AsyncConvoSynthesizer, 
         total_batches: int
     ) -> list[TrainingExample]:
         """Run batches using a queue for better control."""
@@ -174,6 +169,15 @@ class SynthesizeConfig(RunConfig):
         
         async def worker(worker_id: int):
             """Worker that processes batches from the queue."""
+
+            context = self.context.instantiate()
+            logger.info(f"Instantiating convo generator...")
+            synthesizer = self.synthesizer.instantiate(context=context)
+            if hasattr(synthesizer, "preprocess"):
+                synthesizer.preprocess()
+            if isinstance(context, MCPContext):
+                await context.connect_to_server()
+                
             while True:
                 try:
                     # Get batch with timeout
@@ -201,6 +205,10 @@ class SynthesizeConfig(RunConfig):
                         raise
                 finally:
                     batch_queue.task_done()
+            
+            # SE (06/18): This is important for avoiding the "Attempted to exit cancel 
+            # scope in a different task than it was entered in" error.
+            await context.exit_stack.aclose()
         
         # Start workers
         workers = [

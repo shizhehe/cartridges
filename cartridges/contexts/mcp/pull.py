@@ -11,6 +11,8 @@ import os
 
 load_dotenv()  # load environment variables from .env
 
+    
+
 class MCPClient:
     def __init__(self):
         # Initialize session and client objects
