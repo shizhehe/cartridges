@@ -6,6 +6,7 @@ __pycache__/
 .vscode
 
 output/
+secrets/
 wandb/
 artifacts/
 outputs/

@@ -7,6 +7,7 @@ from pydrantic.variables import FormatStringVariable
 
 from cartridges.clients.tokasaurus_batch import TokasaurusBatchClient
 from cartridges.clients.sglang import SGLangClient
+from cartridges.contexts.mcp.gmail import GmailMCPContext
 from cartridges.contexts.mcp.slack import SlackMCPContext
 from cartridges.synthesize import SynthesizeConfig
 from cartridges.synthesizers.self_study_mcp import MCPSelfStudySynthesizer, SlicePromptSamplerWithChunks
@@ -18,6 +19,10 @@ ARXIV_ID = "2506.06266"
 context = SlackMCPContext.Config(
     bot_token=os.environ["SLACK_BOT_TOKEN"],
     team_id=os.environ["SLACK_TEAM_ID"]
+)
+
+context = GmailMCPContext.Config(
+    email="eyuboglu@stanford.edu"
 )
 
 client = TokasaurusBatchClient.Config(
