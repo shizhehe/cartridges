@@ -1,9 +1,7 @@
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import Literal, Optional
 
 import torch
-from cartridges.data.gradient import gradient_wiki_content
-from cartridges.structs import Context
 from cartridges.cache import AttnConfig, KVCacheFactory, TrainableCache
 from cartridges.initialization.tokenization_utils import tokenize_data_into_system_prompt
 from transformers import DynamicCache
@@ -17,7 +15,6 @@ class KVFromRandomVectors(KVCacheFactory):
 
     def initalize_kv_cache(
         self,
-        context: Context,
         tokenizer,
         model,
         attn_config: AttnConfig,
@@ -41,19 +38,19 @@ class KVFromRandomVectors(KVCacheFactory):
 class KVFromRandomText(KVCacheFactory):
     class Config(KVCacheFactory.Config):
         max_tokens: Optional[int]
+        text_source: Literal["gradient.txt"] = "gradient.txt"
 
     def initalize_kv_cache(
         self,
-        context: Context,
         tokenizer,
         model,
         attn_config: AttnConfig,
     ) -> TrainableCache:
-        gradient_wiki = gradient_wiki_content()
+        content = (Path(__file__).resolve().parent / "data" / self.config.text_source).read_text()
 
         input_ids = tokenize_data_into_system_prompt(
             tokenizer=tokenizer,
-            content=gradient_wiki,
+            content=content,
             max_tokens=self.config.max_tokens,
         )
         

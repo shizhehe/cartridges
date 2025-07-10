@@ -13,7 +13,6 @@ import os
 from transformers import PreTrainedTokenizerFast
 from pydrantic import ObjectConfig
 
-from cartridges.context import StructuredContext
 from cartridges.structs import TrainingExample
 from torch.utils.data import BatchSampler, Sampler
 from cartridges.utils import get_logger, wandb
@@ -144,7 +143,6 @@ class CartridgeTrainDataset(Dataset):
         # system_prompt: str | None = None
 
     data: list[TrainingExample]
-    context: StructuredContext
 
     def __init__(self, config: Config, tokenizer: PreTrainedTokenizerFast):
 
@@ -152,13 +150,12 @@ class CartridgeTrainDataset(Dataset):
 
         self.data = []
         self.datasets = []
-        context = None
 
         for source, limit in config.data_sources:
             if source.endswith(".pkl"):
                 pkl_path = source
                 if not Path(pkl_path).exists():
-                    modal_pkl_path = os.path.join("/root/Cartridges-datasets", os.path.relpath(source, "/"))
+                    modal_pkl_path = os.path.join("/root/cartridges-datasets", os.path.relpath(source, "/"))
                     if not Path(modal_pkl_path).exists():
                         raise FileNotFoundError(f"File {source} not found either locally or in modal")
                     pkl_path = modal_pkl_path
@@ -176,14 +173,9 @@ class CartridgeTrainDataset(Dataset):
 
             with open(pkl_path, "rb") as f:
                 data_dict = pickle.load(f)
-            assert data_dict.keys() == {"rows", "context"}
+            assert data_dict.keys() == {"rows"}
 
             self.data += data_dict["rows"][:limit]
-            if context is None:
-                context = data_dict["context"]
-
-        assert context is not None
-        self.context = context
 
         self.tokenizer = tokenizer
     
@@ -221,6 +213,10 @@ class CartridgeTrainDataset(Dataset):
             return self._getitem_tokens(index, row)
 
         assert isinstance(row, TrainingExample)
+
+        
+        # for message in row.messages:
+
         
         # truncate the input ids
         if (

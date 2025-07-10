@@ -4,6 +4,7 @@ from typing import Literal, Optional
 
 import numpy as np
 
+from cartridges.clients.base import TopLogprobs
 from cartridges.utils import get_logger
 
 
@@ -16,31 +17,22 @@ class TrainingExample:
     class Message:
         content: str
         role: Literal["user", "assistant", "system"]
-
+        token_ids: Optional[List[int]]
+        
+        top_logprobs: Optional[TopLogprobs] = None
+        mask: Optional[np.ndarray] = None
     """
     Attrs:
         messages: conversation as openai text.
-
-        top_logprobs_ids: [num_tokens - 1, k_top_logprobs]
-        top_logprobs_logprobs: [num_tokens - 1, k_top_logprobs]
-        token_ids: [num_tokens, k_top_logprobs]
-        num_output_token_ids: int
-
         metadata: arbitrary metadata
         type: type of this context convo
     """
-
     messages: list[TrainingExample.Message]
     system_prompt: str
 
-    num_output_tokens: int
     type: str
     metadata: dict
 
-    token_ids: Optional[np.ndarray] = None
-    top_logprob_ids: Optional[np.ndarray] = None
-    top_logprob_logprobs: Optional[np.ndarray] = None
-    mask: Optional[np.ndarray] = None
 
 
     def _repr_html_(self) -> str:

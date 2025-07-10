@@ -1,44 +1,43 @@
 from __future__ import annotations
+from abc import ABCMeta, abstractmethod
 import contextlib
 from dataclasses import dataclass, field
 import itertools
 import math
 from math import cos, pi
+import os
 from pathlib import Path
-from abc import ABCMeta, abstractmethod
+import re
 import time
 from typing import Literal, Optional
-import re
-import os
 
 import pandas as pd
+from pydrantic import BaseConfig, ObjectConfig, RunConfig
 import torch
+import torch.amp
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.optim as optim
 from torch.utils.data import DataLoader
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
-import torch.amp
+from tqdm.auto import tqdm
 from transformers import AutoTokenizer
 import wandb
-from tqdm.auto import tqdm
-from pydrantic import ObjectConfig, BaseConfig, RunConfig
 
+from cartridges.cache import AttnConfig, KVCacheFactory, TrainableCache
 from cartridges.datasets import (
-    CartridgeTrainDataset,
     CartridgeDatasetBatchLogitLabels,
     CartridgeDatasetBatchSampler,
+    CartridgeDatasetBatchTokenLabels,
     CartridgeGenerateDataset,
     CartridgeGenerateDatasetElement,
-    CartridgeDatasetBatchTokenLabels,
+    CartridgeTrainDataset,
 )
 from cartridges.models.config import ModelConfig
-from cartridges.cache import AttnConfig, KVCacheFactory, TrainableCache
-from cartridges.utils import WandBConfig, prepare_wandb, seed_everything, get_logger
+from cartridges.utils import WandBConfig, get_logger, prepare_wandb, seed_everything
 from cartridges.utils.wandb import download_artifacts, figure_to_wandb
-from cartridges.context import BaseContextConfig
 
 
 logger = get_logger(__name__)
@@ -91,7 +90,6 @@ class TrainConfig(RunConfig):
     model: ModelConfig
     wandb: Optional[WandBConfig] = None
     dataset: CartridgeTrainDataset.Config
-    context: BaseContextConfig
 
     # dataset for evaluating perplexity on other generations
     # NOTE: steps here is the number of **optimizer steps**, which we keep track of
@@ -248,8 +246,16 @@ def train(config: TrainConfig):
         f"Finished to loading datasets from disk, took {(time.time() - ds_load_start_time):.2}s"
     )
 
-    context = config.context.instantiate()
     model = config.model.instantiate().to(local_rank).to(torch.bfloat16)
+    attn_config=AttnConfig(
+        n_layers=model.config.num_hidden_layers,
+        n_heads=model.config.num_key_value_heads,
+        head_dim=(
+            model.config.head_dim
+            if hasattr(model.config, "head_dim")
+            else model.config.hidden_size // model.config.num_attention_heads
+        ),
+    )
     
 
     # TODO(RE: I believe this assertion is a fair one.
@@ -260,17 +266,10 @@ def train(config: TrainConfig):
     if not use_peft:
         load_start_time = time.time()
         logger.info("Using custom prefix tuning (TrainableCache)")
-        cache: (
-            TrainableCache
-        ) = config.kv_cache_initializer.instantiate().initalize_kv_cache(
-            context=context,  
-            tokenizer=tokenizer,
-            model=model,
-            attn_config=AttnConfig(
-                n_layers=model.config.num_hidden_layers,
-                n_heads=model.config.num_key_value_heads,
-                head_dim=model.config.hidden_size // model.config.num_attention_heads,
-            ),
+
+        initializer = config.kv_cache_initializer.instantiate()
+        cache: TrainableCache = initializer.initalize_kv_cache(
+            tokenizer=tokenizer, model=model, attn_config=attn_config,
         )
         logger.info(
             f"Done loading trainable cache, time: {(time.time() - load_start_time):.2f}s"
