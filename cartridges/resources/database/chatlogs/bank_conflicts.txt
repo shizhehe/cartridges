@@ -1,0 +1,148 @@
+Is it possible to avoid bank conflicts on hardware that has 32 banks and 64 threads? 
+
+
+ChatGPT said:
+
+Thought for 20 seconds
+Short version: You can’t make 64 independent thread accesses hit 32 single-ported banks without at least some over-subscription—but you can arrange things so that every bank sees at most two requests, which modern AMD/NVIDIA shared-memory/LDS blocks can handle in one cycle (they’re dual-ported). Anything beyond a 2-way hit will serialize, so the real game is keeping the pressure at ≤ 2-way and giving the hardware something it can dual-issue.
+
+1. Why the pigeon-hole math matters
+spec	value
+banks	32
+threads in the wave/warp	64
+bank width	32 bits (4 bytes)
+
+A bank can serve one 32-bit word per port, per cycle.
+64 threads issuing in the same cycle ⇒ 64 ÷ 32 = 2 requests per bank minimum. That’s baked in—the only question is whether those two requests are:
+
+the same address (broadcast; always free)
+
+different addresses (dual-ported; still free)
+
+> 2 different addresses (true conflict ⇒ extra cycles)
+
+So the best you can ever do is “2-way conflict-free”.
+
+2. Make the unavoidable 2-way hit painless
+(a) Use 32-bit-aligned, 32-bit-wide transactions
+If each thread only grabs 16 bits (bf16/half) the mapping becomes:
+
+ini
+Copy
+Edit
+bank = (addr / 2) % 32   // 16-bit words
+That’s four touches per bank ⇒ > 2 ⇒ serialisation.
+Packing two halves into a half2/bf16x2 (or a uint32_t) per thread restores the 2-way pattern:
+
+ini
+Copy
+Edit
+bank = (addr / 4) % 32   // 32-bit words
+On MI300/MI325 that single vector load is still a single ISA instruction (global_load_dword or ds_read_b32).
+
+(b) Split the 64-thread wave into two 32-thread “half waves”
+If you really need per-element (16-bit) access, load in two phases:
+
+cpp
+Copy
+Edit
+if (lane < 32) data0 = lds[src + lane];      // phase 0
+__syncthreads();                              // or wave_barrier
+if (lane >= 32) data1 = lds[src + lane + 32]; // phase 1
+Each phase is now 32 threads ⇒ one request per bank ⇒ conflict-free.
+Total latency cost: 1 extra instruction + 1 barrier, which is often cheaper than serialised LDS traffic inside a tight loop.
+
+3. Patterns that blow up to > 2-way conflicts
+access pattern (per 64-thread wave)	conflict level	note
+addr = base + lane (contiguous, 32-bit)	2-way (OK)	natural when you’re copying rows
+addr = base + lane * stride with stride a multiple of 32	2-way (OK)	each row maps to next row of banks
+addr = base + lane * stride with stride a power of 2 < 32	4-, 8-, 16-way (bad)	classic column-wise transpose bug
+16-bit or 8-bit element size, no vectorisation	4- and 8-way (bad)	use ld.*.b32/v4 variants
+
+If you see bubbles in profiler for lds_bank_conflict or lds_se0_cyc on ROCm, look for one of those patterns.
+
+4. Practical tricks for ThunderKittens/HIP kernels
+Vectorise your LDS loads/stores:
+
+cpp
+Copy
+Edit
+bf16x2 reg;
+reg = *reinterpret_cast<const bf16x2*>(&lds[idx]);   // ld/st.b32
+bf16x4 via ld.b128 is even better if alignment is 16 bytes.
+
+Pad shared tiles so that the second dimension isn’t a multiple of 32 words:
+
+cpp
+Copy
+Edit
+constexpr int pitch = TILE_COLS + 1;  // add 4 bytes padding
+lds[row * pitch + col]
+Use wave-synchronous loops: let only 32 lanes touch LDS while the other 32 do compute, then swap (double-buffer producer/consumer).
+
+Leverage swizzled/affine layouts ThunderKittens already supports: the XOR stride you’re trying to retire can still be handy for column access—just keep it to ≤ 2 hits per bank.
+
+5. Bottom line
+Absolute zero conflicts is impossible with 64 threads over 32 1-port banks, but the hardware’s dual ports mean you can hit the “it looks conflict-free” sweet spot as long as you:
+
+treat shared/LDS like 32-bit banks,
+
+avoid power-of-two strides that collapse onto the same bank,
+
+or stage your loads in two half-waves.
+
+Do that and your LDS traffic will run at the same throughput as on a perfect 32-thread/32-bank machine.
+
+
+
+
+
+
+
+
+You said:
+
+I see this on the PyTorch reference kernel when profiling it though
+
+ChatGPT said:
+
+Thought for 25 seconds
+That “0.00 Conflicts/access” read-out isn’t magic—-it just means the kernel never asked a single bank for more than two different 32-bit words in the same cycle.
+AMD’s counter treats
+
+≤ 2 requests / bank / cycle → no conflict (reported as 0)
+
+≥ 3 requests / bank / cycle → conflict (counter increments)
+
+Because every RDNA/CDNA LDS bank has two fully independent read/write ports, the hardware can dual-issue without stalling. The pigeon-hole argument I gave earlier (64 threads ↔ 32 banks ⇒ ≥ 2 hits/bank) still holds, but “2-way” traffic is exactly what the hardware is built to absorb, so the profiler quite literally calls it conflict-free.
+
+Why the PyTorch kernel gets a clean slate
+Vectorised 32-bit (or 128-bit) accesses
+PyTorch’s HIP kernels load bf16/half data as ld.shared_b32/b128, so each thread’s request is already a 32-bit bank-aligned word (or four of them in a burst). That maps one request onto each of the 32 banks twice—perfectly dual-ported.
+
+Staged loads, half-wave style
+For patterns that would otherwise need 16-bit columnar access, PyTorch has one 32-lane subgroup fetch two elements each, then swaps with the other 32 lanes via ds_permute/ds_bpermute. Each LDS cycle still sees only 32 transactions.
+
+Padding & swizzled layouts
+Tiles are usually laid out with pitches like cols + 1 or XOR swizzles, so column strides avoid power-of-two collisions.
+
+With those tricks every LDS access has ≤ 2 hits per bank, so ROCm’s lds_bank_conflict counter never fires, giving you the tidy 0.00 figure.
+
+Reproducing that behaviour in ThunderKittens
+What to do	Why it works
+Load/store in 32-bit chunks (bf16x2, half2, uint32_t, or ld/st.ds_b128 when 16-byte aligned)	Collapses four 16-bit threads into one 32-bit bank request, keeping demand at 2-way.
+Pad shared tiles: make the row pitch not a multiple of 32 words.	Breaks the “all columns hit the same bank” pattern.
+Two-phase wave access: let lanes 0–31 touch LDS while 32–63 compute, then swap.	Only 32 threads issue per cycle ⇒ one request per bank.
+Use ds_bpermute/lane shuffles to exchange data inside registers instead of extra LDS traffic.	Keeps LDS accesses perfectly regular and dual-ported.
+
+Put another way: Yes, you’ll still have two touches per bank, but the hardware and profiler both consider that ideal.
+
+So the PyTorch reading doesn’t contradict the earlier explanation—it’s just showing you what “2-way and under” looks like on the metric dial. If you copy those layout and vector-width choices into your kernel, you’ll see the same 0.00 Conflicts/access line.
+
+
+
+
+
+
+
+

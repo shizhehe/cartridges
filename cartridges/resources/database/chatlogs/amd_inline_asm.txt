@@ -1,0 +1,1696 @@
+You said:
+I am seeing 0 L1 reuse on my profiler for this AMD CDNA 64 thread/wavefront kernel. I am wondering if my loads are poorly coalesced? 
+
+Load from global to shared tiles:
+__device__ static inline void global_to_shared_b128(uint32_t lds_offset_bytes, float4* src_ptr) {
+    float4 temp;
+    uintptr_t ptr = reinterpret_cast<uintptr_t>(src_ptr);  // float4 indexing
+    uint32_t addr_lo = static_cast<uint32_t>(ptr & 0xFFFFFFFF);
+    uint32_t addr_hi = static_cast<uint32_t>(ptr >> 32);
+
+    asm volatile (
+        "flat_load_dwordx4 %0, [%1, %2]\n"
+        "s_waitcnt vmcnt(0)\n"
+        "s_mov_b32 m0, 0\n"
+        "ds_write_b128 %3, %0\n"
+        : "=v"(temp)                     // %0: output float4 (VGPR)
+        : "s"(addr_lo),                  // %1: 32-bit low address (SGPR)
+          "s"(addr_hi),                  // %2: 32-bit high address (SGPR)
+          "v"(lds_offset_bytes)         // %3: LDS offset
+        : "memory", "m0"
+    );
+}
+
+/**
+ * @brief Loads data from global memory into a shared memory tile.
+ *
+ * @tparam ST The type of the shared tile.
+ * @param[out] dst The destination shared memory tile.
+ * @param[in] src The source global memory array.
+ * @param[in] idx The coordinate of the tile in the global memory array.
+ */
+template<int axis, bool assume_aligned, ducks::st::all ST, ducks::gl::all GL, ducks::coord::tile COORD=coord<ST>, int N_THREADS=WARP_THREADS>
+__device__ static inline void load(ST &dst, const GL &src, const COORD &idx) {
+    using T = typename ST::dtype;
+    const int row_stride = src.template stride<axis>();
+    // we can handle this many rows each time we run a memcpy_async
+    constexpr int elem_per_memcpy = sizeof(float4)/sizeof(typename ST::dtype);
+    constexpr int memcpy_per_row = ST::cols / elem_per_memcpy;
+    constexpr int total_calls = (ST::cols * ST::rows + N_THREADS*elem_per_memcpy-1) / (N_THREADS*elem_per_memcpy); // round up
+
+    coord<> unit_coord = idx.template unit_coord<axis, 3>();
+    typename GL::dtype *src_ptr = (typename GL::dtype*)&src[unit_coord];
+
+    uint32_t dst_ptr = reinterpret_cast<uintptr_t>(&dst.data[0]);
+    int laneid = threadIdx.x % N_THREADS;
+
+    #pragma unroll
+    for(int i = 0; i < total_calls; i++) {
+        int load_idx = i * N_THREADS + laneid;
+        int row = load_idx / memcpy_per_row;
+        int col = (load_idx*elem_per_memcpy) % dst.cols;
+
+        // if (row < dst.rows) 
+        //     *(float4*)(&dst[{row, col}]) = *(float4*)&src_ptr[row * row_stride + col];
+        // int row = load_idx / (dst.cols / 8);
+        // int col = (load_idx % (dst.cols / 8)) * 8;
+        
+        int row_offset = row * row_stride;
+        if (row < dst.rows)
+            global_to_shared_b128(dst.idx(dst_ptr, {row, col}), (float4*)&src_ptr[row_offset + col]); 
+    }
+}
+template<ducks::st::all ST, ducks::gl::all GL, ducks::coord::tile COORD=coord<ST>>
+__device__ static inline void load(ST &dst, const GL &src, const COORD &idx) {
+    load<2, false, ST, GL, COORD, WARP_THREADS>(dst, src, idx);
+}
+
+Shard tiles:
+__device__ static inline void global_to_shared_b128(uint32_t lds_offset_bytes, float4* src_ptr) {
+    float4 temp;
+    uintptr_t ptr = reinterpret_cast<uintptr_t>(src_ptr);  // float4 indexing
+    uint32_t addr_lo = static_cast<uint32_t>(ptr & 0xFFFFFFFF);
+    uint32_t addr_hi = static_cast<uint32_t>(ptr >> 32);
+
+    asm volatile (
+        "flat_load_dwordx4 %0, [%1, %2]\n"
+        "s_waitcnt vmcnt(0)\n"
+        "s_mov_b32 m0, 0\n"
+        "ds_write_b128 %3, %0\n"
+        : "=v"(temp)                     // %0: output float4 (VGPR)
+        : "s"(addr_lo),                  // %1: 32-bit low address (SGPR)
+          "s"(addr_hi),                  // %2: 32-bit high address (SGPR)
+          "v"(lds_offset_bytes)         // %3: LDS offset
+        : "memory", "m0"
+    );
+}
+
+/**
+ * @brief Loads data from global memory into a shared memory tile.
+ *
+ * @tparam ST The type of the shared tile.
+ * @param[out] dst The destination shared memory tile.
+ * @param[in] src The source global memory array.
+ * @param[in] idx The coordinate of the tile in the global memory array.
+ */
+template<int axis, bool assume_aligned, ducks::st::all ST, ducks::gl::all GL, ducks::coord::tile COORD=coord<ST>, int N_THREADS=WARP_THREADS>
+__device__ static inline void load(ST &dst, const GL &src, const COORD &idx) {
+    using T = typename ST::dtype;
+    const int row_stride = src.template stride<axis>();
+    // we can handle this many rows each time we run a memcpy_async
+    constexpr int elem_per_memcpy = sizeof(float4)/sizeof(typename ST::dtype);
+    constexpr int memcpy_per_row = ST::cols / elem_per_memcpy;
+    constexpr int total_calls = (ST::cols * ST::rows + N_THREADS*elem_per_memcpy-1) / (N_THREADS*elem_per_memcpy); // round up
+
+    coord<> unit_coord = idx.template unit_coord<axis, 3>();
+    typename GL::dtype *src_ptr = (typename GL::dtype*)&src[unit_coord];
+
+    uint32_t dst_ptr = reinterpret_cast<uintptr_t>(&dst.data[0]);
+    int laneid = threadIdx.x % N_THREADS;
+
+    #pragma unroll
+    for(int i = 0; i < total_calls; i++) {
+        int load_idx = i * N_THREADS + laneid;
+        int row = load_idx / memcpy_per_row;
+        int col = (load_idx*elem_per_memcpy) % dst.cols;
+
+        // if (row < dst.rows) 
+        //     *(float4*)(&dst[{row, col}]) = *(float4*)&src_ptr[row * row_stride + col];
+        // int row = load_idx / (dst.cols / 8);
+        // int col = (load_idx % (dst.cols / 8)) * 8;
+        
+        int row_offset = row * row_stride;
+        if (row < dst.rows)
+            global_to_shared_b128(dst.idx(dst_ptr, {row, col}), (float4*)&src_ptr[row_offset + col]); 
+    }
+}
+template<ducks::st::all ST, ducks::gl::all GL, ducks::coord::tile COORD=coord<ST>>
+__device__ static inline void load(ST &dst, const GL &src, const COORD &idx) {
+    load<2, false, ST, GL, COORD, WARP_THREADS>(dst, src, idx);
+}
+
+My kernel:
+
+#include "kittens.cuh"
+#include "pyutils/pyutils.cuh"
+using namespace kittens;
+
+constexpr int BLOCK_SIZE = 128;  
+constexpr int K_STEP     = 32;
+constexpr int REG_BLOCK  = BLOCK_SIZE / 4; 
+
+constexpr int SUPER_M     = 4;      // CTAs stacked vertically
+constexpr int SUPER_N     = 2;      // (optional) CTAs stacked horizontally
+
+#define NUM_WARPS 4
+#define NUM_THREADS (kittens::WARP_THREADS * NUM_WARPS)
+
+#define M 8192
+#define K 8192
+#define N 8192
+
+using _gl_A = gl<bf16, -1, -1, -1, -1>;
+using _gl_B = gl<bf16, -1, -1, -1, -1>;
+using _gl_C = gl<float, -1, -1, -1, -1>;
+
+using G = kittens::group<4>;
+
+struct micro_globals {
+    _gl_A a;
+    _gl_B b;
+    _gl_C c;
+
+    dim3 grid()  { 
+        // return dim3( (N / BLOCK_SIZE + SUPER_N - 1) / SUPER_N,
+        //    (M / BLOCK_SIZE + SUPER_M - 1) / SUPER_M ); 
+        return dim3(N / BLOCK_SIZE, M / BLOCK_SIZE); 
+    } 
+    dim3 block() { return dim3(NUM_THREADS); } 
+    size_t dynamic_shared_memory() { return 32768; }
+};
+
+__global__ __launch_bounds__(NUM_THREADS, 1)
+void micro_tk(const micro_globals g) {
+
+    extern __shared__ alignment_dummy __shm[];
+    shared_allocator al((int*)&__shm[0]);
+    st_bf<BLOCK_SIZE, K_STEP> (&As) = al.allocate<st_bf<BLOCK_SIZE, K_STEP>>();
+    st_bf<BLOCK_SIZE, K_STEP> (&Bs) = al.allocate<st_bf<BLOCK_SIZE, K_STEP>>();
+
+    rt_fl<REG_BLOCK, REG_BLOCK, ducks::rt_layout::col> C_accum[4];
+    rt_fl<REG_BLOCK, REG_BLOCK> C_accum_row;
+    #pragma unroll
+    for (int i = 0; i < 4; i++) { zero(C_accum[i]); }
+
+    rt_bf<REG_BLOCK, K_STEP> a_reg_0, a_reg_1, b_reg_0, b_reg_1;
+
+    int row = blockIdx.y;
+    int col = blockIdx.x;
+
+    // int Rblocks = g.c.rows / REG_BLOCK, Cblocks = g.c.cols / K_STEP;
+    // int super_rows = (Rblocks/SUPER_M)*SUPER_M,
+    //     final_rows = Rblocks - super_rows,
+    //     super_repeat = SUPER_M*Cblocks;
+    // int task_id = 0*gridDim.x + blockIdx.x;
+    // if (task_id < super_rows * Cblocks) {
+    //     row = SUPER_M*(task_id/super_repeat) + task_id%SUPER_M;
+    //     col = (task_id%super_repeat)/SUPER_M;
+    // }
+    // else if (task_id < Rblocks*Cblocks) {
+    //     int remainder_id = task_id - super_rows*Cblocks;
+    //     row = super_rows +(remainder_id%final_rows);
+    //     col = remainder_id/final_rows ;
+    // }
+    // int id = warpgroup::groupid(); // producer sets as 0
+    // row = row*2 ;
+
+    int warp_id = kittens::warpid();
+    int warp_row = warp_id / 2;
+    int warp_col = warp_id % 2;
+
+    int num_tiles = K / K_STEP;
+    #pragma unroll
+    for (int tile = 0; tile < num_tiles; ++tile) {
+
+        G::load(As, g.a, {0, 0, row, tile});
+        G::load(Bs, g.b, {0, 0, col, tile});
+        __syncthreads();
+
+        load(a_reg_0, subtile_inplace<REG_BLOCK, K_STEP>(As, {warp_row, 0}));
+        load(b_reg_0, subtile_inplace<REG_BLOCK, K_STEP>(Bs, {warp_col, 0}));
+        load(a_reg_1, subtile_inplace<REG_BLOCK, K_STEP>(As, {warp_row + 2, 0}));
+        load(b_reg_1, subtile_inplace<REG_BLOCK, K_STEP>(Bs, {warp_col + 2, 0}));
+
+        mma_ABt(C_accum[0], a_reg_0, b_reg_0, C_accum[0]);
+        mma_ABt(C_accum[2], a_reg_1, b_reg_0, C_accum[2]);
+        mma_ABt(C_accum[1], a_reg_0, b_reg_1, C_accum[1]);
+        mma_ABt(C_accum[3], a_reg_1, b_reg_1, C_accum[3]);
+    }
+
+    #pragma unroll
+    for (int i = 0; i < 4; i++) {
+        int offset_row = i / 2;
+        int offset_col = i % 2;
+        
+        int global_row = row * 4 + offset_row * 2 + warp_row;  
+        int global_col = col * 4 + offset_col * 2 + warp_col;
+
+        swap_layout(C_accum_row, C_accum[i]);
+        store(g.c, C_accum_row, {0, 0, global_row, global_col});
+    }
+}
+
+void dispatch_micro(micro_globals g) {
+    unsigned long mem_size = g.dynamic_shared_memory();
+    hipFuncSetAttribute(
+        (void*)micro_tk,
+        hipFuncAttributeMaxDynamicSharedMemorySize,
+        mem_size
+    );
+
+    micro_tk<<<g.grid(), g.block(), mem_size>>>(g);
+    hipDeviceSynchronize();
+}
+
+PYBIND11_MODULE(tk_kernel, m) {
+    m.doc() = "tk_kernel python module";
+    py::bind_kernel<micro_tk>(m, "micro_tk", &micro_globals::a, &micro_globals::b, &micro_globals::c); 
+    py::bind_function<dispatch_micro>(m, "dispatch_micro", &micro_globals::a, &micro_globals::b, &micro_globals::c);
+}
+
+
+ChatGPT said:
+
+Thought for 1m 19s
+Why the profiler shows “0 % L1 reuse”
+
+The metric counts hits, not just accesses.
+ROC-Profiler considers a vL1 “reuse” (hit) only when a second VMEM request touches a line that is still resident in the vector-L1 data cache (vL1D). If every 128-bit load you issue fetches data that no other later load needs, the hit-rate is 0—even if the cache was used as the first landing point. On CDNA the vL1D is also write-through, so nothing ever “lives” there unless you read it again before it is evicted 
+rocm.docs.amd.com
+.
+
+Your copy kernel is a pure stream.
+Each element is:
+
+read once from HBM (flat_load_dwordx4)
+
+immediately written to LDS (ds_write_b128)
+
+later consumed from LDS, not from global.
+
+Consequently there is no second global read of the same line, so zero L1 hits is expected. Unless you intentionally re-load the same global line more than once per work-group, the vL1D can only miss.
+
+But are the loads at least well coalesced?
+The address-processing unit in the vL1D merges requests from the 64 lanes of a wavefront. ROC-Profiler’s Coalescing metric in the vL1 section tells you how well this happened 
+rocm.docs.amd.com
+. In your inner loop the address pattern for the first warp looks like this (with K=8192, elem_per_memcpy=8 BF16 values):
+
+lane	row	col	byte offset (= row × stride + col)
+0-3	0	0,8,16,24	0 … 24
+4-7	1	0,8,16,24	+16 KB jump
+8-11	2	0,8,16,24	+32 KB jump
+…	…	…	…
+
+Every four lanes you jump an entire row‐stride (≈16 KB), so the 64 lanes of a wavefront touch eight widely separated 64-B cache lines instead of one contiguous 512-B span. The address-coalescer therefore issues 8 separate L1 transactions per instruction and labels this only ~25 % coalesced.
+
+How to get both coalescing and real L1 reuse
+Goal	Practical tweaks
+Better coalescing	Make consecutive lanes read consecutive 32 B slices. E.g. map laneId → column first, then loop over rows: row = laneId; col = i*elem_per_memcpy; so all 64 lanes in a wavefront read
+row 0, cols 0-127 in a single instruction, then you move to row 1 in the next iteration.
+Actual L1 reuse	Re-use the same global line more than once per wavefront:
+• Double-buffer in LDS and compute 2–4 K-steps per load.
+• Fuse neighbouring CTAs that work on the same panel of A or B on the same CU (so they share the same vL1).
+Instruction choice	flat_load_dwordx4 is fine, but you can also try global_load_b128 vaddr (MUBUF form). Both are cached; the important part is keeping the addresses contiguous.
+LDS write bandwidth	ds_write_b128 is the right primitive; just ensure lds_offset_bytes is 16-byte aligned and that m0 is pre-set only once per wavefront, not in every call (the s_mov_b32 m0,0 inside the helper forces a SALU write every time).
+
+A minimal “row-contiguous” loader for one 128×32 BF16 tile with a 64-lane wavefront can look like:
+
+cpp
+Copy
+Edit
+int lane  = threadIdx.x & 63;          // 0‥63
+int row   = lane;                      // one full row per lane
+int col0  = 0;
+
+for (int c = 0; c < 32; c += 8) {      // 4× float4 per row
+    auto *gptr = (float4*)(src_ptr + row*stride + col0 + c);
+    uint32_t lds_off = dst_base + row*dst_pitch + c*2;   // bf16 = 2 B
+    global_to_shared_b128(lds_off, gptr);
+}
+With this pattern the texture-addresser collapses each flat_load_dwordx4 into one 64-B request (100 % coalesced), and if you keep the tile in LDS for multiple MFMA steps you will start seeing a non-zero L1 hit-rate.
+
+TL;DR
+0 % L1 reuse is expected because you never read the same global cache line twice.
+
+Your current lane-mapping causes poor address coalescing; group lanes so they read a contiguous slice of the matrix.
+
+Once the wavefront reads the same lines multiple times (e.g., by working on several K-steps per load or by CTA fusion), the profiler will show L1 hits.
+
+Try the row-contiguous load map first; the Coalescing metric should jump towards 100 %. If you then iterate over K_STEP more than once before re-loading, you will finally see the L1 hit-rate climb above zero.
+
+
+
+
+
+
+
+
+
+
+Sources
+You said:
+
+
+ChatGPT said:
+
+Thought for 16 seconds
+What the screenshot confirms
+Metric (Vector L1 section)	What it means	What we already suspected
+Rd: 196 608	one 128-bit (16 B) request per flat_load_dwordx4 across every lane	≈ num_waves × (tile_rows × tile_cols / 8) looks correct
+Hit: 0 %	All of those requests missed in vL1D and fell through to L2	you only read each cache line once, so a miss is inevitable
+Coales: 75 %	the addresser merged ¾ of the lane accesses into the same 64-B transaction	each 4-lane quartet hits the same row, the next quartet jumps an entire row-stride—so 8 TXNs per wavefront instead of the ideal 1
+
+The rest of the pipeline corroborates the picture:
+
+LDS Util 6 % – you stage the data there but immediately consume it, so the tile’s lifetime in LDS is short.
+
+L2 Hit 79 % – every line is fetched only once per CU, but at least most of them are already in the slice’s 8 MiB L2 because neighbouring work-groups hit them.
+
+Wave occupancy 6 – only six waves active on the whole GCD is very low for a memory-bound loop; per-CU that is < 1 wave, so any latency miss at L2 stalls the CU.
+
+Action plan
+Problem	Fix	How it helps
+0 % hit-rate	Reuse the global line before you evict it:
+• load a K-panel of A/B once, perform 2–4 K_STEPs before advancing, or
+• let multiple CTAs that work on the same K-panel share the CU (CTA-fusion).	a second read of the same 64-B line will be an L1 hit → non-zero reuse and less L2 pressure
+Poor coalescing (75 %)	Map lanes to contiguous columns first, rows second:
+row = laneId / (cols_per_lane); col = laneId % …
+With 64 lanes reading 8 × bf16 each you can hit the whole 512-B band in one request.	one L1 transaction per warp instead of eight → less bandwidth, smaller latency
+Low wave occupancy	• Cut register pressure (VGPRs 92) so the scheduler can launch extra waves.
+• If LDS size (32 768 B) is the limiter, halve BLOCK_SIZE to fit 2× waves per CU.	more in-flight warps hide the 470-cycle fabric + 160-cycle cache misses
+Unnecessary SALU per load	Move s_mov_b32 m0, 0 out of the inline helper; set m0 once per wavefront.	frees a SALU slot and removes 2-cycle dependency chain on every load
+Instruction form	Try global_load_b128 (MUBUF) with a buffer descriptor whose SBASE is the panel base and VOFFSET in VGPRs.	still cached, often 1–2 cycles cheaper than FLAT because address translation is done in SALU
+
+Minimal coalesced loader sketch
+cpp
+Copy
+Edit
+int lane  = threadIdx.x & 63;      // 0-63 in a wave
+int row   = lane;                  // each lane owns one row
+for (int c = 0; c < ST::cols; c += 8) {      // 8 bf16 = 16 B
+    float4* gptr = (float4*)(src_ptr + row*row_stride + c);
+    uint32_t lds_off = dst_base + row*dst_pitch + c*2;   // bf16=2 B
+    global_to_shared_b128(lds_off, gptr);
+}
+Every flat_load_dwordx4 now forms one 64-B L1 transaction → 100 % coalescing.
+
+Keep the tile in LDS for multiple MFMA passes to create genuine L1 hits.
+
+After applying the lane remap you should see Coales ≈ 100 %; after you reuse the panel you should finally see Hit > 0 % in the Vector L1 row and a corresponding drop in L2 traffic.
+
+
+
+
+
+
+
+
+You said:
+
+This is the Pytorch reference
+
+ChatGPT said:
+
+Thought for 11 seconds
+Below is a quick “side-by-side” reading of the two profiles and the concrete knobs you can turn to make your ThunderKittens kernel look more like the highly-tuned PyTorch one.
+
+Your TK kernel	PyTorch reference	Why it matters & what to copy
+Vector L1 hit-rate	0 %	66 %	PyTorch keeps each 64 B line resident and re-reads it 2–3 × before advancing the K-loop. You only read a line once and then discard it in LDS. ★ Action: make every global panel feed multiple MFMA steps (double-buffer in LDS or unroll K deeper).
+Coalescing	75 %	25 %	You already improved lane mapping, so VADDR merges 3 ⁄ 4 of the lanes into one transaction. PyTorch still strided (gather pattern) but because it re-uses lines the penalty is amortised. ★ Action: keep your 75 % but focus on reuse first; coalescing alone does not raise the hit-rate.
+LDS allocation / wave	32 768 B	64 000 B	Reference kernel stages a larger tile (two 128 × 32 panels, double-buffered). That bigger scratchpad is exactly what lets it re-enter the tile several times. ★ Action: grow your LDS tile (or add a second buffer) so each load covers ≥ 2 × K_STEP iterations.
+VGPRs / wave	92	128	More registers hold the extra accumulators that accrue during deeper unroll. Register pressure halves wave occupancy (3 vs 6) but that is fine because memory latency is largely hidden by cache hits. ★ Action: expect occupancy to drop a bit when you add reuse—don’t fight it unless you fall below ~2 waves / CU.
+Wave occupancy per GCD	6	3	Lower occupancy in PyTorch shows that reuse > massive in-flight count for GEMM.
+Vector L1 requests	196 608	180 224	Almost the same amount of traffic, but PyTorch turns two-thirds of them into hits, so only ~6 × fewer accesses propagate to L2/HBM.
+L2 hit-rate	79 %	80 %	Both kernels still see plenty of inter-CTA spatial locality, but PyTorch pushes even less down to L2.
+MFMA instructions	8 192	28 672	With deeper K unroll, the reference issues 3.5 × more MFMA per global load. That arithmetic intensity is the real win.
+
+Concrete steps to replicate the reference behaviour
+Double (or quadruple) your K-loop per load.
+
+cpp
+Copy
+Edit
+constexpr int K_STEP = 32;     // today
+constexpr int K_BLOCK = 4;     // work 4 K_STEPs per LDS fill
+
+for (int tile = 0; tile < K/K_STEP; tile += K_BLOCK) {
+    // 1️⃣ stage K_BLOCK consecutive panels of A & B into a 64-KB buffer
+    // 2️⃣ for k = 0 … K_BLOCK-1:
+    //        load a_reg_k,  b_reg_k   (from LDS - no global)
+    //        mma_ABt( C, a_reg_k, b_reg_k )
+}
+Requires either a larger single buffer or a simple ping-pong buffer of two 32-KB banks.
+
+Hold m0 once per wavefront.
+Remove s_mov_b32 m0,0 from global_to_shared_b128(); set it once at the beginning of the kernel (if (laneid==0) m0 = 0;).
+
+Leave your 75 % coalescing mapping.
+It is already better than the reference; with reuse you will profit from those larger transactions.
+
+Expect register pressure to rise.
+If VGPRs > 128 starts to starve occupancy (< 2 waves / CU) then:
+
+split the accumulator tile among warps (REG_BLOCK = 16 instead of 32); or
+
+stage partial results to LDS and accumulate in half precision.
+
+Profile again.
+After the change you should see
+
+Vector L1 hit > 40 %
+
+Vector L1 coales ≈ 75 % (unchanged)
+
+L2 read count drop ≥ 2 ×
+
+Effective TFLOPS rise.
+
+Rule of thumb for CDNA GEMM
+One global read should serve ≥ 4 MFMA<br>
+(≈ 32 floating-point MAC per byte fetched).
+
+That’s exactly what the PyTorch reference shows: 28 672 MFMA vs 180 224 L1 reads → 6.25 MFMA each. Bring your kernel closer to that ratio and the profiler will stop showing “0 % L1 hit”.
+
+
+
+
+
+
+
+
+You said:
+I need help improving my kernel:
+
+#include "kittens.cuh"
+#include "pyutils/pyutils.cuh"
+using namespace kittens;
+
+constexpr int BLOCK_SIZE = 128;  
+constexpr int K_STEP     = 32;
+constexpr int REG_BLOCK  = BLOCK_SIZE / 4; 
+
+#define NUM_WARPS 4
+#define NUM_THREADS (kittens::WARP_THREADS * NUM_WARPS)
+
+#define M 8192
+#define K 8192
+#define N 8192
+
+using _gl_A = gl<bf16, -1, -1, -1, -1>;
+using _gl_B = gl<bf16, -1, -1, -1, -1>;
+using _gl_C = gl<float, -1, -1, -1, -1>;
+
+using G = kittens::group<4>;
+
+struct micro_globals {
+    _gl_A a;
+    _gl_B b;
+    _gl_C c;
+
+    dim3 grid()  { return dim3(N / BLOCK_SIZE, M / BLOCK_SIZE); } 
+    dim3 block() { return dim3(NUM_THREADS); } 
+    size_t dynamic_shared_memory() { return 32768; }
+};
+
+__global__ __launch_bounds__(NUM_THREADS, 1)
+void micro_tk(const micro_globals g) {
+
+    extern __shared__ alignment_dummy __shm[];
+    shared_allocator al((int*)&__shm[0]);
+    st_bf<BLOCK_SIZE, K_STEP> (&As) = al.allocate<st_bf<BLOCK_SIZE, K_STEP>>();
+    st_bf<BLOCK_SIZE, K_STEP> (&Bs) = al.allocate<st_bf<BLOCK_SIZE, K_STEP>>();
+
+    rt_fl<REG_BLOCK, REG_BLOCK, ducks::rt_layout::col> C_accum[4];
+    rt_fl<REG_BLOCK, REG_BLOCK> C_accum_row;
+    #pragma unroll
+    for (int i = 0; i < 4; i++) { zero(C_accum[i]); }
+
+    rt_bf<REG_BLOCK, K_STEP> a_reg_0, a_reg_1, b_reg_0, b_reg_1;
+
+    int row = blockIdx.y;
+    int col = blockIdx.x;
+
+    int warp_id = kittens::warpid();
+    int warp_row = warp_id / 2;
+    int warp_col = warp_id % 2;
+
+    int num_tiles = K / K_STEP;
+    #pragma unroll
+    for (int tile = 0; tile < num_tiles; ++tile) {
+
+        G::load(As, g.a, {0, 0, row, tile});
+        G::load(Bs, g.b, {0, 0, col, tile});
+        __syncthreads();
+
+        load(a_reg_0, subtile_inplace<REG_BLOCK, K_STEP>(As, {warp_row, 0}));
+        load(b_reg_0, subtile_inplace<REG_BLOCK, K_STEP>(Bs, {warp_col, 0}));
+        load(a_reg_1, subtile_inplace<REG_BLOCK, K_STEP>(As, {warp_row + 2, 0}));
+        load(b_reg_1, subtile_inplace<REG_BLOCK, K_STEP>(Bs, {warp_col + 2, 0}));
+
+        mma_ABt(C_accum[0], a_reg_0, b_reg_0, C_accum[0]);
+        mma_ABt(C_accum[2], a_reg_1, b_reg_0, C_accum[2]);
+        mma_ABt(C_accum[1], a_reg_0, b_reg_1, C_accum[1]);
+        mma_ABt(C_accum[3], a_reg_1, b_reg_1, C_accum[3]);
+    }
+
+    #pragma unroll
+    for (int i = 0; i < 4; i++) {
+        int offset_row = i / 2;
+        int offset_col = i % 2;
+        
+        int global_row = row * 4 + offset_row * 2 + warp_row;  
+        int global_col = col * 4 + offset_col * 2 + warp_col;
+
+        swap_layout(C_accum_row, C_accum[i]);
+        store(g.c, C_accum_row, {0, 0, global_row, global_col});
+    }
+}
+
+void dispatch_micro(micro_globals g) {
+    unsigned long mem_size = g.dynamic_shared_memory();
+    hipFuncSetAttribute(
+        (void*)micro_tk,
+        hipFuncAttributeMaxDynamicSharedMemorySize,
+        mem_size
+    );
+
+    micro_tk<<<g.grid(), g.block(), mem_size>>>(g);
+    hipDeviceSynchronize();
+}
+
+PYBIND11_MODULE(tk_kernel, m) {
+    m.doc() = "tk_kernel python module";
+    py::bind_kernel<micro_tk>(m, "micro_tk", &micro_globals::a, &micro_globals::b, &micro_globals::c); 
+    py::bind_function<dispatch_micro>(m, "dispatch_micro", &micro_globals::a, &micro_globals::b, &micro_globals::c);
+}
+
+
+ChatGPT said:
+
+Thought for 5 seconds
+Below is a “surgical-strike” list of changes that move your kernel toward the behaviour you saw in the PyTorch profile ( ≈ 65 % vL1 hit-rate, deeper arithmetic intensity, fewer stalls). None of them invent new ThunderKittens syntax—everything plugs into what you already have.
+
+1 · Let each global panel feed 4 × more MFMA
+What to change
+cpp
+Copy
+Edit
+// NEW: bigger logical micro-tile
+constexpr int K_UNROLL   = 4;           // work on 4×32 = 128 columns of K
+static_assert(K % (K_STEP*K_UNROLL) == 0);
+
+st_bf<BLOCK_SIZE, K_STEP*K_UNROLL> (&As) = al.allocate<
+      st_bf<BLOCK_SIZE, K_STEP*K_UNROLL>>();
+st_bf<BLOCK_SIZE, K_STEP*K_UNROLL> (&Bs) = al.allocate<
+      st_bf<BLOCK_SIZE, K_STEP*K_UNROLL>>();
+cpp
+Copy
+Edit
+for (int tile = 0; tile < K; tile += K_STEP*K_UNROLL)
+{
+    // 1️⃣ stage 4 consecutive 32-wide panels at once
+    #pragma unroll
+    for (int kk = 0; kk < K_UNROLL; ++kk) {
+        G::load(As, g.a, {0, 0, row, tile/K_STEP + kk});
+        G::load(Bs, g.b, {0, 0, col, tile/K_STEP + kk});
+    }
+    __syncthreads();
+
+    // 2️⃣ consume them one after another → 4× more MFMA per global read
+    #pragma unroll
+    for (int kk = 0; kk < K_UNROLL; ++kk) {
+        load(a_reg_0, subtile_inplace<REG_BLOCK, K_STEP>(
+                           As, {warp_row,   kk}));
+        load(b_reg_0, subtile_inplace<REG_BLOCK, K_STEP>(
+                           Bs, {warp_col,   kk}));
+        load(a_reg_1, subtile_inplace<REG_BLOCK, K_STEP>(
+                           As, {warp_row+2, kk}));
+        load(b_reg_1, subtile_inplace<REG_BLOCK, K_STEP>(
+                           Bs, {warp_col+2, kk}));
+
+        mma_ABt(C_accum[0], a_reg_0, b_reg_0, C_accum[0]);
+        mma_ABt(C_accum[2], a_reg_1, b_reg_0, C_accum[2]);
+        mma_ABt(C_accum[1], a_reg_0, b_reg_1, C_accum[1]);
+        mma_ABt(C_accum[3], a_reg_1, b_reg_1, C_accum[3]);
+    }
+}
+Why it helps
+
+Four loads from HBM → one LDS fill → 4 × the MFMA work
+⇒ Vector-L1 line is re-read several times → non-zero hit rate.
+
+Back‐of-the-envelope: 128 × 16 = 2 048 bytes per operand in LDS; two buffers = 4 096 B, fits easily inside your 32 kB allotment.
+
+2 · Fix lane-to-column mapping for perfect coalescing
+Instead of letting lane ID march by row, make it march by column :
+
+cpp
+Copy
+Edit
+int lane  = threadIdx.x & 63;        // 0–63
+int lane_col = lane * 8;             // each lane moves 8 bf16 = 16 B
+int lane_row = 0;                    // set inside loop
+
+for (int r = 0; r < REG_BLOCK; ++r) {
+    lane_row = r;
+    float4* gptr = (float4*)
+        (&src_ptr[lane_row * row_stride + lane_col]);
+    uint32_t lds_off =
+        dst_base + (lane_row * dst_pitch + lane_col) * sizeof(bf16);
+    global_to_shared_b128(lds_off, gptr);
+}
+All 64 lanes now touch one contiguous 512 B span → 100 % coalescing (one 64 B request to vL1).
+
+3 · Set m0 once per wave, not every helper call
+cpp
+Copy
+Edit
+if ((threadIdx.x & 63) == 0) asm volatile("s_mov_b32 m0, 0\n");
+__syncthreads();
+Remove the s_mov_b32 from global_to_shared_b128.
+That kills 1 × SALU op and a 2-cycle dependency per load.
+
+4 · Tame the register explosion
+Going 4× deeper in K will roughly quadruple your accumulator VGPRs.
+If you start spilling:
+
+Change the register tile to 16 × 16 (REG_BLOCK = 32 / 2).
+You still compute the same CTA tile, just in two passes.
+
+Or keep 32 × 32 but call zero(C_accum[i]) only once per CTA and
+accumulate two steps into the same registers (the extra‐precision cost is small for bf16→fp32).
+
+Target: ≤ 128 VGPRs/wave so at least 4 waves can fit on most CDNA CUs.
+
+5 · Occupancy vs. latency hiding
+After the above you will probably see:
+
+vL1 hit ≈ 50-70 %
+
+Coalescing ≈ 100 %
+
+L2 traffic drop ≥ 2×
+
+Wave occupancy go down a bit (that’s fine; you are now compute-bound).
+
+If occupancy falls below 2 waves/CU, shrink BLOCK_SIZE from 128→96 (96×32 bf16 tile is still 12 kB per operand) and give the scheduler space for another wave.
+
+TL;DR
+Load 4 × K_STEP at once, do four MFMA rounds before the next HBM touch.
+
+Remap lanes → contiguous columns for perfect coalescing.
+
+Move m0 init outside the hot loop.
+
+Keep VGPRs ≤ 128 by tiling or two-pass accumulation.
+
+Implementing the first two bullets alone should turn the “0 % vL1 hit” into 50-70 % and bump throughput by 1.5-2 × on MI300/MI250-class parts.
+
+
+
+
+
+
+
+
+You said:
+Memory access fault by GPU node-2 (Agent handle: 0x64b1623b4230) on address 0x70d268a00000. Reason: Unknown.
+Aborted (core dumped)
+
+
+ChatGPT said:
+
+Thought for 18 seconds
+That “ Memory access fault by GPU … ” almost always means you wrote (or read) past a valid allocation on the device.
+The change we just made doubles the shared-memory footprint, but the kernel still tells HIP that it only needs 32 KiB. The allocator gives you 32 KiB, you happily write ~64 KiB, and the first line that spills past the end of the LDS segment trips the GPU watchdog and kills the wave.
+
+What changed
+Before	After (K_UNROLL = 4)
+st_bf<128, 32> = 128 × 32 bf16 = 8 KiB per operand → 2 operands = 16 KiB	st_bf<128, 128> = 128 × 128 bf16 = 32 KiB per operand → 2 operands = 64 KiB
+dynamic_shared_memory() = 32 768	still 32 768 → mismatch!
+
+So every CTA writes 32 KiB past the end of its LDS window.
+
+One-line fix
+cpp
+Copy
+Edit
+size_t dynamic_shared_memory() { return 65536; }   // 64 KiB
+and keep
+
+cpp
+Copy
+Edit
+hipFuncSetAttribute(
+    (void*)micro_tk,
+    hipFuncAttributeMaxDynamicSharedMemorySize,
+    65536);
+(if you don’t pass the same value to hipFuncSetAttribute, HIP caps you at the default 32 KiB).
+
+Does 64 KiB fit?
+CDNA / MI2xx / MI3xx parts provide 64 KiB LDS per CU; a single CTA can legally reserve all of it.
+
+If you later add a second ping-pong buffer you’ll go above 64 KiB → you will need to halve BLOCK_SIZE or the unroll factor so the total stays ≤ 64 KiB.
+
+Safety checklist for this kind of crash
+Compare requested vs. used shared memory (hipFuncGetAttributes, profiler).
+
+Check global bounds before every store:
+
+cpp
+Copy
+Edit
+if (global_row   < g.c.rows &&
+    global_col   < g.c.cols) { … }
+Put one of these guards in temporarily; if the kernel stops crashing you know the fault was a stray global write.
+
+Verify alignment for vectorised loads (flat_load_dwordx4 demands the address be 16-byte aligned).
+
+Use --gpu-memcheck (ROCm 6+) or rocgdb with set debug lds-check on for LDS overruns.
+
+Try the 64 KiB reservation first; that should eliminate the access fault and let you re-run the profiler to see if the vL1 hit-rate and TFLOPS climb as expected.
+
+
+
+
+
+
+
+
+You said:
+#include "kittens.cuh"
+#include "pyutils/pyutils.cuh"
+using namespace kittens;
+
+constexpr int BLOCK_SIZE = 64;  
+constexpr int K_STEP     = 32;
+constexpr int REG_BLOCK  = BLOCK_SIZE / 4; 
+
+#define NUM_WARPS 4
+#define NUM_THREADS (kittens::WARP_THREADS * NUM_WARPS)
+
+#define M 8192
+#define K 8192
+#define N 8192
+
+using _gl_A = gl<bf16, -1, -1, -1, -1>;
+using _gl_B = gl<bf16, -1, -1, -1, -1>;
+using _gl_C = gl<float, -1, -1, -1, -1>;
+
+using G = kittens::group<4>;
+
+struct micro_globals {
+    _gl_A a;
+    _gl_B b;
+    _gl_C c;
+
+    dim3 grid()  { return dim3(N / BLOCK_SIZE, M / BLOCK_SIZE); } 
+    dim3 block() { return dim3(NUM_THREADS); } 
+    size_t dynamic_shared_memory() { return 32768*2; }
+};
+
+__global__ __launch_bounds__(NUM_THREADS, 1)
+void micro_tk(const micro_globals g) {
+
+    extern __shared__ alignment_dummy __shm[];
+    shared_allocator al((int*)&__shm[0]);
+    // st_bf<BLOCK_SIZE, K_STEP> (&As) = al.allocate<st_bf<BLOCK_SIZE, K_STEP>>();
+    // st_bf<BLOCK_SIZE, K_STEP> (&Bs) = al.allocate<st_bf<BLOCK_SIZE, K_STEP>>();
+    constexpr int K_UNROLL   = 4;           // work on 4×32 = 128 columns of K
+    static_assert(K % (K_STEP*K_UNROLL) == 0);
+
+    st_bf<BLOCK_SIZE, K_STEP*K_UNROLL> (&As) = al.allocate<st_bf<BLOCK_SIZE, K_STEP*K_UNROLL>>();
+    st_bf<BLOCK_SIZE, K_STEP*K_UNROLL> (&Bs) = al.allocate<st_bf<BLOCK_SIZE, K_STEP*K_UNROLL>>();
+
+    rt_fl<REG_BLOCK, REG_BLOCK, ducks::rt_layout::col> C_accum[4];
+    rt_fl<REG_BLOCK, REG_BLOCK> C_accum_row;
+    #pragma unroll
+    for (int i = 0; i < 4; i++) { zero(C_accum[i]); }
+
+    rt_bf<REG_BLOCK, K_STEP> a_reg_0, a_reg_1, b_reg_0, b_reg_1;
+
+    int row = blockIdx.y;
+    int col = blockIdx.x;
+
+    int warp_id = kittens::warpid();
+    int warp_row = warp_id / 2;
+    int warp_col = warp_id % 2;
+
+    // int num_tiles = K / K_STEP;
+    // #pragma unroll
+    // for (int tile = 0; tile < num_tiles; ++tile) {
+
+    //     G::load(As, g.a, {0, 0, row, tile});
+    //     G::load(Bs, g.b, {0, 0, col, tile});
+    //     __syncthreads();
+
+    //     load(a_reg_0, subtile_inplace<REG_BLOCK, K_STEP>(As, {warp_row, 0}));
+    //     load(b_reg_0, subtile_inplace<REG_BLOCK, K_STEP>(Bs, {warp_col, 0}));
+    //     load(a_reg_1, subtile_inplace<REG_BLOCK, K_STEP>(As, {warp_row + 2, 0}));
+    //     load(b_reg_1, subtile_inplace<REG_BLOCK, K_STEP>(Bs, {warp_col + 2, 0}));
+
+    //     mma_ABt(C_accum[0], a_reg_0, b_reg_0, C_accum[0]);
+    //     mma_ABt(C_accum[2], a_reg_1, b_reg_0, C_accum[2]);
+    //     mma_ABt(C_accum[1], a_reg_0, b_reg_1, C_accum[1]);
+    //     mma_ABt(C_accum[3], a_reg_1, b_reg_1, C_accum[3]);
+    // }
+    for (int tile = 0; tile < K; tile += K_STEP*K_UNROLL)
+    {
+        #pragma unroll
+        for (int kk = 0; kk < K_UNROLL; ++kk) {
+            G::load(As, g.a, {0, 0, row, tile/K_STEP + kk});
+            G::load(Bs, g.b, {0, 0, col, tile/K_STEP + kk});
+        }
+        __syncthreads();
+
+        // 2️⃣ consume them one after another → 4× more MFMA per global read
+        #pragma unroll
+        for (int kk = 0; kk < K_UNROLL; ++kk) {
+            load(a_reg_0, subtile_inplace<REG_BLOCK, K_STEP>(As, {warp_row,   kk}));
+            load(b_reg_0, subtile_inplace<REG_BLOCK, K_STEP>(Bs, {warp_col,   kk}));
+            load(a_reg_1, subtile_inplace<REG_BLOCK, K_STEP>(As, {warp_row+2, kk}));
+            load(b_reg_1, subtile_inplace<REG_BLOCK, K_STEP>(Bs, {warp_col+2, kk}));
+
+            mma_ABt(C_accum[0], a_reg_0, b_reg_0, C_accum[0]);
+            mma_ABt(C_accum[2], a_reg_1, b_reg_0, C_accum[2]);
+            mma_ABt(C_accum[1], a_reg_0, b_reg_1, C_accum[1]);
+            mma_ABt(C_accum[3], a_reg_1, b_reg_1, C_accum[3]);
+        }
+    }
+
+    #pragma unroll
+    for (int i = 0; i < 4; i++) {
+        int offset_row = i / 2;
+        int offset_col = i % 2;
+        
+        int global_row = row * 4 + offset_row * 2 + warp_row;  
+        int global_col = col * 4 + offset_col * 2 + warp_col;
+
+        swap_layout(C_accum_row, C_accum[i]);
+        store(g.c, C_accum_row, {0, 0, global_row, global_col});
+    }
+}
+
+void dispatch_micro(micro_globals g) {
+    unsigned long mem_size = g.dynamic_shared_memory();
+    hipFuncSetAttribute(
+        (void*)micro_tk,
+        hipFuncAttributeMaxDynamicSharedMemorySize,
+        mem_size
+    );
+
+    micro_tk<<<g.grid(), g.block(), mem_size>>>(g);
+    hipDeviceSynchronize();
+}
+
+PYBIND11_MODULE(tk_kernel, m) {
+    m.doc() = "tk_kernel python module";
+    py::bind_kernel<micro_tk>(m, "micro_tk", &micro_globals::a, &micro_globals::b, &micro_globals::c); 
+    py::bind_function<dispatch_micro>(m, "dispatch_micro", &micro_globals::a, &micro_globals::b, &micro_globals::c);
+}
+
+
+ChatGPT said:
+
+Thought for 16 seconds
+Below is a quick sanity-check of the 64 × 128, K-unroll = 4 version you just posted, followed by the three tweaks I’d do next. Everything stays inside your existing ThunderKittens helpers—no new syntax.
+
+1 · Shared-memory accounting
+Operand tile	Size (bf16 = 2 B)	Allocated LDS
+As 64 × 128	16 KiB	32 KiB total
+Bs 64 × 128	16 KiB	
+
+You now reserve 65 536 B per CTA:
+
+cpp
+Copy
+Edit
+size_t dynamic_shared_memory() { return 32768*2; }   // 64 KiB
+✔️ Safety – no more bounds overrun
+
+❌ Occupancy – each CDNA CU owns 64 KiB LDS, so exactly one CTA can launch per CU.
+Four warps (256 threads) give you 4 waves/CU at most, which is thin for latency hiding.
+
+Quick win
+If you don’t need ping-pong buffering yet, halve the request:
+
+cpp
+Copy
+Edit
+size_t dynamic_shared_memory() { return 32768; }      // 32 KiB
+That lets ROCm place two CTAs per CU (≈ 8 waves) without any other change. Keep the line with hipFuncSetAttribute identical.
+
+2 · Coalescing: still 3 ⁄ 4 not 100 %
+The inner load() helper still walks rows first (lane 0 reads row 0 col 0, lane 1 reads row 0 col 8, …).
+That causes the 75 % coalescing you saw earlier.
+
+The fix is purely in address mapping—no data-layout change:
+
+cpp
+Copy
+Edit
+/* in global_to_shared copy helper, right before issuing flat_load_dwordx4 */
+int lane   = threadIdx.x & 63;           // 0‥63
+int lane_col  = lane * 8;                // 8 bf16 per lane
+int lane_row  = /* loop variable, 0‥63 (REG_BLOCK) */;
+
+float4* gptr = (float4*)(src_ptr + lane_row*row_stride + lane_col);
+uint32_t lds_off = dst_base +
+        (lane_row*dst_pitch + lane_col) * sizeof(bf16);
+
+global_to_shared_b128(lds_off, gptr);
+Do that (a) in load() for A and B, (b) once per row inside the #pragma unroll loop.
+After recompiling, the profiler should show Coales ≈ 100 % and the Vector-L1 read count drop from 8 transactions per warp to one.
+
+3 · Initialising m0 only once
+Move
+
+cpp
+Copy
+Edit
+if ((threadIdx.x & 63) == 0) asm volatile("s_mov_b32 m0, 0");
+__syncthreads();
+to the beginning of the kernel and delete the s_mov_b32 inside global_to_shared_b128.
+That saves a SALU instruction and removes a 2-cycle dep chain on every 128-bit copy.
+
+Checklist before you profile again
+Item	Target value
+dynamic SMEM / CTA	32 KiB (unless you add a second buffer)
+Vector L1 : Hit %	> 40 %
+Vector L1 : Coales %	≈ 100 %
+VGPRs / wave	≤ 128 (use hipobjdump -dr)
+Active waves / CU	≥ 6
+
+Once those numbers line up you should see the TFLOPS climb ~1.5–2 × over the original 0-hit version. If the hit-rate is still low, the next knob is double-buffering in LDS (keep K_UNROLL = 4 but alternate As/Bs banks), which needs the full 64 KiB reservation.
+
+
+
+
+
+
+
+
+You said:
+No I'm getting this: 
+
+
+Memory access fault by GPU node-2 (Agent handle: 0x580565e70230) on address 0x78a604a00000. Reason: Unknown.
+Aborted (core dumped)
+
+also what does "if ((threadIdx.x & 63) == 0) asm volatile("s_mov_b32 m0, 0");" do
+
+
+ChatGPT said:
+
+Thought for 28 seconds
+Why you’re crashing again
+You removed the s_mov_b32 m0, 0 inside global_to_shared_b128() but have not yet executed one before the first ds_write_b128.
+If m0 still contains the value from a previous kernel (or is uninitialised) the LDS offset becomes garbage and the very first LDS write flies outside the 64 KiB window → GPU raises a “memory access fault”.
+
+m0 is a scalar (SGPR) shared by the whole wavefront and is consulted by every DS instruction to form the final 32-bit address
+
+ini
+Copy
+Edit
+addr = m0:ds_offset_hi | vaddr(11:0)
+So it must be initialised once per wave before the first LDS access.
+
+Two safe ways to set m0
+Keep the original line in the helper (simplest, only costs one SALU per copy):
+
+cpp
+Copy
+Edit
+asm volatile(
+    "flat_load_dwordx4 %0, [%1, %2]\n"
+    "s_waitcnt vmcnt(0)\n"
+    "s_mov_b32 m0, 0\n"           // put it back
+    "ds_write_b128 %3, %0\n"
+    : "=v"(temp) : "s"(addr_lo), "s"(addr_hi), "v"(lds_offset_bytes)
+    : "memory", "m0");
+Set it once at kernel start (faster, but you must keep the barrier):
+
+cpp
+Copy
+Edit
+// one thread per wavefront does the write
+if ((threadIdx.x & 63) == 0) asm volatile("s_mov_b32 m0, 0");
+__syncthreads();           // ensure every lane sees m0 = 0
+Place the snippet before the first call to G::load().
+
+If you choose option 2, make sure every work-group launches exactly as many
+wavefronts as you expect (here 4). If you later switch to a dynamic number of
+warps, initialise m0 with if (threadIdx.x == 0) so it always happens.
+
+What that line actually does
+cpp
+Copy
+Edit
+if ((threadIdx.x & 63) == 0)
+    asm volatile("s_mov_b32 m0, 0");
+threadIdx.x & 63 is lane-ID inside a 64-thread wavefront.
+Only lane 0 of each wave executes the SALU move.
+
+s_mov_b32 m0, 0 writes the scalar register m0—the high 16 bits of
+every LDS address used by ds_* instructions.
+Setting it to zero means all LDS accesses originate at address 0 inside the
+work-group’s 64 KiB window.
+
+Because m0 is an SGPR, once lane 0 writes it, every other lane in the same
+wave sees the updated value; but you need a barrier (__syncthreads() or
+at least __threadfence_block()) so that VALU instructions that follow are
+scheduled after the SALU has completed.
+
+Quick checklist
+Put m0 = 0 back (either per-copy or once per wave as above).
+
+Re-run; the “Memory access fault” should disappear.
+
+Check profiler:
+
+Vector L1 Hit should now be > 0 %
+
+Coalescing should approach 100 % if you also applied the lane-remap.
+
+If you still fault after restoring m0, enable ROCm GPU memcheck:
+
+bash
+Copy
+Edit
+rocgdb --args your_program
+(gdb) set debug lds-check on
+(gdb) run
+It will pinpoint the exact ds_write or global load that overruns.
+
+
+
+
+
+
+
+
+You said:
+Is ""s_mov_b32 m0, 0"" needed at all? 
+
+
+ChatGPT said:
+
+Thought for 24 seconds
+Short answer
+Yes — every wavefront that executes a raw ds_* instruction must have m0 pre-loaded with the base of the LDS window it is allowed to touch.
+
+If the compiler generated the ds_write_b128 for you it would insert that write automatically, but because you issued the instruction inside inline-asm the burden is on you. Without a valid m0 the DS unit interprets the high bits of the address as garbage and an out-of-range write trips the GPU memory-fault handler.
+
+What m0 is and why DS instructions need it
+m0 is an SGPR (scalar register) shared by all 64 lanes of a wavefront.
+
+For LDS/GDS instructions the effective 32-bit address is
+
+cpp
+Copy
+Edit
+addr[31:16] = m0[15:0]          // high 16 bits  (CU-local)
+addr[15:0]  = vaddr + imm12     // low 16 bits  (per lane)
+vaddr is the VGPR you pass as the “address” operand; imm12 is the
+12-bit offset encoded in the opcode.
+
+m0 therefore selects the 64-KiB window within the 64 KiB LDS that the work-group owns, while vaddr+imm gives the byte displacement inside that window.
+
+If m0 was never initialised, whatever stale value happened to be in the register becomes the high bits → the first ds_write_b128 flies off into unmapped LDS and you get the “Memory access fault by GPU … Reason: Unknown”.
+
+When do you have to write it yourself?
+How the DS instruction appears	Who sets m0
+You call __lds_write128() / __builtin_amdgcn_ds_write_b128()	Clang/LLVM emits s_mov_b32 m0, 0 in the function prologue once per kernel.
+You embed ds_write_b128 inside inline asm	You must set m0 (once per wavefront is enough).
+
+Because your helper wraps the bare assembly form, the compiler has no idea that LDS is being touched and does not emit the prologue write.
+
+Two safe patterns
+1 · Set it in the helper (simplest)
+cpp
+Copy
+Edit
+asm volatile(
+  "flat_load_dwordx4 %0, [%1, %2]\n"
+  "s_waitcnt vmcnt(0)\n"
+  "s_mov_b32 m0, 0\n"          // <-- keep this
+  "ds_write_b128 %3, %0\n"
+  : "=v"(temp)
+  : "s"(addr_lo), "s"(addr_hi), "v"(lds_offset_bytes)
+  : "memory", "m0");
+Pros: bullet-proof no matter where the helper is called.
+Cons: costs one SALU move every time you copy 16 B.
+
+2 · Set it once per wavefront (faster)
+cpp
+Copy
+Edit
+// at the top of the kernel, before **any** LDS instruction
+if ((threadIdx.x & 63) == 0)          // lane-0 of each wave
+    asm volatile("s_mov_b32 m0, 0");
+__syncthreads();                      // ensure the write is visible
+Remove the s_mov_b32 from the helper.
+Pros: only one SALU instruction per wavefront; DS copies are lighter.
+Cons: you must keep the barrier so that all lanes start with m0 = 0, and you must know the wavefront layout (here 64-lane waves).
+
+“Can I ever omit it?”
+Only if all of the following are true:
+
+You never touch LDS via inline asm.
+
+Your kernel contains at least one compiler-generated DS instruction (so LLVM has already put m0 = 0 in the prologue).
+
+You are sure no later inline-asm snippet or library code overwrites m0 before your own DS instructions execute.
+
+In practice, once you start sprinkling inline DS ops the safest rule is:
+
+Always set m0 yourself exactly once per wavefront, right before the LDS traffic starts.
+
+It costs two instructions (the s_mov_b32 and a barrier), and it removes an entire class of mysterious “memory access fault” crashes.
+
+
+
+
+
+
+
+
+You said:
+No the memory crash is from the logic here. Also I'm not sure if K_UNROLL is the right way to increase reuse
+
+#include "kittens.cuh"
+#include "pyutils/pyutils.cuh"
+using namespace kittens;
+
+constexpr int BLOCK_SIZE = 64;  
+constexpr int K_STEP     = 32;
+constexpr int REG_BLOCK  = BLOCK_SIZE / 4; 
+
+#define NUM_WARPS 4
+#define NUM_THREADS (kittens::WARP_THREADS * NUM_WARPS)
+
+#define M 8192
+#define K 8192
+#define N 8192
+
+using _gl_A = gl<bf16, -1, -1, -1, -1>;
+using _gl_B = gl<bf16, -1, -1, -1, -1>;
+using _gl_C = gl<float, -1, -1, -1, -1>;
+
+using G = kittens::group<4>;
+
+struct micro_globals {
+    _gl_A a;
+    _gl_B b;
+    _gl_C c;
+
+    dim3 grid()  { return dim3(N / BLOCK_SIZE, M / BLOCK_SIZE); } 
+    dim3 block() { return dim3(NUM_THREADS); } 
+    size_t dynamic_shared_memory() { return 32768*2; }
+};
+
+__global__ __launch_bounds__(NUM_THREADS, 1)
+void micro_tk(const micro_globals g) {
+
+    extern __shared__ alignment_dummy __shm[];
+    shared_allocator al((int*)&__shm[0]);
+    constexpr int K_UNROLL   = 4;           // work on 4×32 = 128 columns of K
+    static_assert(K % (K_STEP*K_UNROLL) == 0);
+
+    st_bf<BLOCK_SIZE, K_STEP*K_UNROLL> (&As) = al.allocate<st_bf<BLOCK_SIZE, K_STEP*K_UNROLL>>();
+    st_bf<BLOCK_SIZE, K_STEP*K_UNROLL> (&Bs) = al.allocate<st_bf<BLOCK_SIZE, K_STEP*K_UNROLL>>();
+
+    rt_fl<REG_BLOCK, REG_BLOCK, ducks::rt_layout::col> C_accum[4];
+    rt_fl<REG_BLOCK, REG_BLOCK> C_accum_row;
+    #pragma unroll
+    for (int i = 0; i < 4; i++) { zero(C_accum[i]); }
+
+    rt_bf<REG_BLOCK, K_STEP> a_reg_0, a_reg_1, b_reg_0, b_reg_1;
+
+    int row = blockIdx.y;
+    int col = blockIdx.x;
+
+    int warp_id = kittens::warpid();
+    int warp_row = warp_id / 2;
+    int warp_col = warp_id % 2;
+
+    for (int tile = 0; tile < K; tile += K_STEP*K_UNROLL)
+    {
+        #pragma unroll
+        for (int kk = 0; kk < K_UNROLL; ++kk) {
+            G::load(As, g.a, {0, 0, row, tile/K_STEP + kk});
+            G::load(Bs, g.b, {0, 0, col, tile/K_STEP + kk});
+        }
+        __syncthreads();
+
+        // 2️⃣ consume them one after another → 4× more MFMA per global read
+        #pragma unroll
+        for (int kk = 0; kk < K_UNROLL; ++kk) {
+            load(a_reg_0, subtile_inplace<REG_BLOCK, K_STEP>(As, {warp_row,   kk}));
+            load(b_reg_0, subtile_inplace<REG_BLOCK, K_STEP>(Bs, {warp_col,   kk}));
+            load(a_reg_1, subtile_inplace<REG_BLOCK, K_STEP>(As, {warp_row+2, kk}));
+            load(b_reg_1, subtile_inplace<REG_BLOCK, K_STEP>(Bs, {warp_col+2, kk}));
+
+            mma_ABt(C_accum[0], a_reg_0, b_reg_0, C_accum[0]);
+            mma_ABt(C_accum[2], a_reg_1, b_reg_0, C_accum[2]);
+            mma_ABt(C_accum[1], a_reg_0, b_reg_1, C_accum[1]);
+            mma_ABt(C_accum[3], a_reg_1, b_reg_1, C_accum[3]);
+        }
+    }
+
+    #pragma unroll
+    for (int i = 0; i < 4; i++) {
+        int offset_row = i / 2;
+        int offset_col = i % 2;
+        
+        int global_row = row * 4 + offset_row * 2 + warp_row;  
+        int global_col = col * 4 + offset_col * 2 + warp_col;
+
+        swap_layout(C_accum_row, C_accum[i]);
+        store(g.c, C_accum_row, {0, 0, global_row, global_col});
+    }
+}
+
+void dispatch_micro(micro_globals g) {
+    unsigned long mem_size = g.dynamic_shared_memory();
+    hipFuncSetAttribute(
+        (void*)micro_tk,
+        hipFuncAttributeMaxDynamicSharedMemorySize,
+        mem_size
+    );
+
+    micro_tk<<<g.grid(), g.block(), mem_size>>>(g);
+    hipDeviceSynchronize();
+}
+
+PYBIND11_MODULE(tk_kernel, m) {
+    m.doc() = "tk_kernel python module";
+    py::bind_kernel<micro_tk>(m, "micro_tk", &micro_globals::a, &micro_globals::b, &micro_globals::c); 
+    py::bind_function<dispatch_micro>(m, "dispatch_micro", &micro_globals::a, &micro_globals::b, &micro_globals::c);
+}
+
+
+ChatGPT said:
+
+Thought for 1m 2s
+Below is a targeted debug checklist plus a quick discussion of other, safer reuse patterns in case the wide-K unroll is not the direction you want to take.
+
+1 Why you are still tripping the “memory-access fault”
+The symptom means “the wave tried to read or write outside the 64 KiB LDS window or used an uninitialised value in the address bits”.
+
+1.1 Double-check the LDS footprint
+c
+Copy
+Edit
+st_bf<64,128>    // rows × cols  (bf16)
+bytes = 64*128*2 = 16 384
+As + Bs          = 32 768 B           // just 32 KiB
+dynamic_shared_memory() = 65 536 B    // you ask for 64 KiB
+So in theory you are within the limit. Two things can still push you past 64 KiB:
+
+Hidden cost	Why it appears
+Alignment padding in shared_allocator	If the allocator always 64-byte-aligns each block it can add up to 63 B per allocation.
+Extra static LDS	Any __shared__ object elsewhere in the TU counts against the same 64 KiB bank.
+
+Use the tool to confirm:
+
+bash
+Copy
+Edit
+hipobjdump -elfmicro micro_tk | grep -i "groupsegment_size"
+If you see GROUPSEGMENT_SIZE = 0x10010 ( > 0x10000 ), the kernel is indeed asking for more than 64 KiB.
+
+Fix: set dynamic_shared_memory() to 32 768 for now.
+You still stage 16 KiB + 16 KiB, so 32 KiB is enough and lets ROCm launch two CTAs per CU.
+
+1.2 m0 must be initialised exactly once per wavefront
+Because your DS writes live inside inline-asm, the compiler does not emit the prologue write.
+Put this at the very top of the kernel and keep it there:
+
+cpp
+Copy
+Edit
+if ((threadIdx.x & 63) == 0)      // lane 0 of each wavefront
+    asm volatile("s_mov_b32 m0, 0");
+__syncthreads();                  // all lanes must see it before DS ops
+Remove every other s_mov_b32 m0,0 from helpers.
+If you skip this step the first ds_write_b128 is using garbage high-address bits and can hit unmapped LDS.
+
+1.3 Guard the global edges for now
+Until the math is proven, slap a temporary bounds check around the global loads and stores:
+
+cpp
+Copy
+Edit
+if (row  < M/BLOCK_SIZE && col  < K/K_STEP) { … }      // for loads
+if (global_row < M/REG_BLOCK && global_col < N/REG_BLOCK) { … }  // for store
+If the kernel stops crashing you know some corner case is still overshooting.
+
+Running once under ROCm GPU memcheck will tell you exactly which DS or flat-load faulted:
+
+bash
+Copy
+Edit
+rocgdb --args python your_driver.py
+(gdb) set debug lds-check on
+(gdb) run
+2 Is K_UNROLL = 4 the “right” way to get reuse?
+It works but it is not the only (or necessarily the best) way. You have three mainstream options:
+
+Strategy	Reuse per global panel	LDS growth	Occupancy impact	Notes
+Wide-K tile (what you do now)	4×	linear in K_UNROLL	moderate (LDS bigger, VGPRs bigger)	Simple; all warps cooperate on the same LDS tile.
+Double-buffer in K	2× (can be 3–4× with late-prefetch)	+1 extra 16 KiB buffer	minimal (ping-pong, buffers alternate)	Keeps tile 64×32; prefect for ILP pipeline: <br/>load panel k+1 while computing k.
+CTA-fusion (“super-tile”)	2 – 4× across neighbouring CTAs	none	CU has two CTAs that share vL1 so reuse lives in L1 not LDS	You launch two CTAs that work on the same K but different (M,N) quadrants; no extra LDS.
+
+So if 64 KiB LDS per CTA is already constraining occupancy, you may prefer ping-pong double-buffering:
+
+cpp
+Copy
+Edit
+constexpr int K_STEP = 32;
+for (int tile = 0; tile < K; tile += K_STEP) {
+    // preload panel k into As_curr / Bs_curr
+    G::load(As_curr, … tile …);
+    G::load(Bs_curr, … tile …);
+
+    __syncthreads();          // make sure copy finished
+
+    // compute with As_prev / Bs_prev while load fills curr
+    if (tile > 0) {
+        do_mma_with(As_prev, Bs_prev);
+    }
+
+    swap(As_curr, As_prev);   // ping-pong
+    swap(Bs_curr, Bs_prev);
+}
+Reuse per panel = 2× (each line stays in vL1 and is used twice).
+
+LDS needed = 2 × 16 KiB = 32 KiB (same as you have now).
+
+Arithmetic intensity almost matches K_UNROLL = 4 but VGPRs and register pressure are lower because you never hold four sets of MFMA operands at once.
+
+3 After each change, look at five profiler counters
+Counter (Vector L1 row)	Good target	Meaning
+Rd	~ (#panels × 64)	total 128-bit reads
+Hit (%)	40 – 70 %	shows your reuse
+Coales (%)	100 %	all 64 lanes merged into one TXN
+VGPR/wave	≤ 128	avoid spills & leave room for ≥ 4 waves
+Waves/CU	≥ 6	hide L2 latency
+
+If Coales < 100 % swap your lane mapping (columns first).
+If Hit % is still 0 after m0+bounds are fixed, your extra reuse is not kicking in—revisit unroll / double-buffer logic.
+
+TL;DR
+Request only 32 KiB LDS unless you really need 64 KiB.
+
+Set m0 = 0 once per wavefront – mandatory for inline DS ops.
+
+Decide between wide-K unroll vs ping-pong double-buffer; both give reuse, but the latter keeps LDS small and occupancy high.
+
+Re-profile and watch Hit %, Coales %, and VGPR/wave.
+
+These steps should eliminate the GPU fault and make it clear which reuse scheme gives you the best TFLOPS on MI2-class hardware.
+
+
+
+
+
+
+
+
+You said:
+why can't i use one shared load call though? Why is it in a for loop
+
+
+ChatGPT said:
+
+Thought for 9 seconds
+Why you see a for (kk …) loop around the G::load() call
+G::load() is designed to copy exactly one 64 × 32 (BLOCK × K_STEP) panel from HBM into shared memory.
+When you decide to work on a fatter K-stripe (128 columns instead of 32) you now need four such panels placed side-by-side:
+
+Copy
+Edit
+64×32  |  64×32  |  64×32  |  64×32
+ ^ kk=0   ^ kk=1   ^ kk=2   ^ kk=3
+Hence:
+
+cpp
+Copy
+Edit
+for (int kk = 0; kk < K_UNROLL; ++kk)          // K_UNROLL = 4
+    G::load(As, g.a, {0, 0, row, tile/K_STEP + kk});
+Each trip through the loop tells G::load:
+
+“start 32 columns further to the right in matrix A/B”, and
+
+“stash the result 32 columns further to the right inside As/Bs”.
+
+With the loop unrolled by the compiler, the four calls become four back-to-back, co-operatively vectorised 128-bit transactions, each handled by all threads in the CTA. You end up with one contiguous 64 × 128 tile in LDS.
+
+Why a single huge copy call is less attractive
+Attempt	What would have to change	Trade-offs
+One monster inline-asm copy
+(load 8 KiB in a single instruction)	• Need flat_load_dwordx512 (512 × 32 = 16 KB) – doesn’t exist.
+• Even global_load_b256 tops out at 256 bits (32 B).	GPU vector unit only issues up to 16 B (V_MAX_LOAD_DWORDX4). You must issue many such instructions anyway; the loop just makes that explicit.
+One “memcpy_async” style helper
+(threads each move bigger chunks)	Could roll bespoke kernel logic, but somebody has to compute per-lane bases and iterate rows.	You still have to iterate over rows and columns; hiding it behind one big helper call just buries the loop inside that helper.
+DMA-engine (SDMA) launch	Possible on NVIDIA (cp.async) but AMD CDNA has no per-kernel SDMA.
+All LDS fills come through the wavefront’s vector lanes.	Adds latency; still limited by max 128-bit element per lane.
+
+So a short, unrolled for that fires four perfectly coalesced flat_load_dwordx4 groups is exactly what the hardware wants – you give each lane 16 B work at a time, all lanes hit consecutive addresses, the vector-L1 merges them into one 64 B transaction, and after four such bursts the entire 64 × 128 tile is resident in LDS.
+
+Can I hide the loop?
+Sure, you could write:
+
+cpp
+Copy
+Edit
+template<int K_UNROLL>
+__device__ inline void load_K_unroll(st_bf<BLOCK_SIZE, K_STEP*K_UNROLL>& As,
+                                     const _gl_A& src,
+                                     int row, int tile_base)
+{
+    #pragma unroll
+    for (int kk = 0; kk < K_UNROLL; ++kk)
+        G::load(As, src, {0, 0, row, tile_base + kk});
+}
+and then call load_K_unroll<4>(As, g.a, row, tile/K_STEP);.
+Functionally it is the same four back-to-back instructions – the loop just lives inside the helper instead of your kernel body.
+
+Key point
+Reuse is created because you keep the 64 × 128 tile in LDS and iterate over kk again during the compute phase. Whether the four LDS copies are expressed as an explicit for loop or hidden in a helper does not change performance; what matters is:
+
+Each copy instruction touches a contiguous 64 B span → 100 % coalescing.
+
+You reuse the tile multiple times before evicting it → non-zero L1 hit-rate.
+
+As long as those two properties hold, the loop form is perfectly fine (and often clearer to read and profile).
+
+
+
+
+
+
+
+
+You said:
+This is slower than when I started:
+
+#include "kittens.cuh"
+#include "pyutils/pyutils.cuh"
+using namespace kittens;
+
+constexpr int BLOCK_SIZE = 128;  
+constexpr int K_STEP     = 32;
+constexpr int REG_BLOCK  = BLOCK_SIZE / 4; 
+
+#define NUM_WARPS 4
+#define NUM_THREADS (kittens::WARP_THREADS * NUM_WARPS)
+
+#define M 8192
+#define K 8192
+#define N 8192
+
+using _gl_A = gl<bf16, -1, -1, -1, -1>;
+using _gl_B = gl<bf16, -1, -1, -1, -1>;
+using _gl_C = gl<float, -1, -1, -1, -1>;
+
+using G = kittens::group<4>;
+
+struct micro_globals {
+    _gl_A a;
+    _gl_B b;
+    _gl_C c;
+
+    dim3 grid()  { return dim3(N / BLOCK_SIZE, M / BLOCK_SIZE); } 
+    dim3 block() { return dim3(NUM_THREADS); } 
+    size_t dynamic_shared_memory() { return 32768*2; }
+};
+
+__global__ __launch_bounds__(NUM_THREADS, 1)
+void micro_tk(const micro_globals g) {
+
+    extern __shared__ alignment_dummy __shm[];
+    shared_allocator al((int*)&__shm[0]);
+    constexpr int K_UNROLL   = 4;           // work on 4×32 = 128 columns of K
+    static_assert(K % (K_STEP*K_UNROLL) == 0);
+
+    st_bf<BLOCK_SIZE, K_STEP*K_UNROLL> (&As) = al.allocate<st_bf<BLOCK_SIZE, K_STEP*K_UNROLL>>();
+    st_bf<BLOCK_SIZE, K_STEP*K_UNROLL> (&Bs) = al.allocate<st_bf<BLOCK_SIZE, K_STEP*K_UNROLL>>();
+
+    rt_fl<REG_BLOCK, REG_BLOCK, ducks::rt_layout::col> C_accum[4];
+    rt_fl<REG_BLOCK, REG_BLOCK> C_accum_row;
+    #pragma unroll
+    for (int i = 0; i < 4; i++) { zero(C_accum[i]); }
+
+    rt_bf<REG_BLOCK, K_STEP> a_reg_0, a_reg_1, b_reg_0, b_reg_1;
+
+    int row = blockIdx.y;
+    int col = blockIdx.x;
+
+    int warp_id = kittens::warpid();
+    int warp_row = warp_id / 2;
+    int warp_col = warp_id % 2;
+
+    int num_tiles = K / (K_STEP * K_UNROLL);
+    for (int tile = 0; tile < num_tiles; tile += 1)
+    {
+        G::load(As, g.a, {0, 0, row, tile});
+        G::load(Bs, g.b, {0, 0, col, tile});
+        __syncthreads();
+
+        #pragma unroll
+        for (int kk = 0; kk < K_UNROLL; ++kk) {
+            load(a_reg_0, subtile_inplace<REG_BLOCK, K_STEP>(As, {warp_row,   kk}));
+            load(b_reg_0, subtile_inplace<REG_BLOCK, K_STEP>(Bs, {warp_col,   kk}));
+            load(a_reg_1, subtile_inplace<REG_BLOCK, K_STEP>(As, {warp_row+2, kk}));
+            load(b_reg_1, subtile_inplace<REG_BLOCK, K_STEP>(Bs, {warp_col+2, kk}));
+
+            mma_ABt(C_accum[0], a_reg_0, b_reg_0, C_accum[0]);
+            mma_ABt(C_accum[2], a_reg_1, b_reg_0, C_accum[2]);
+            mma_ABt(C_accum[1], a_reg_0, b_reg_1, C_accum[1]);
+            mma_ABt(C_accum[3], a_reg_1, b_reg_1, C_accum[3]);
+        }
+    }
+
+    #pragma unroll
+    for (int i = 0; i < 4; i++) {
+        int offset_row = i / 2;
+        int offset_col = i % 2;
+        
+        int global_row = row * 4 + offset_row * 2 + warp_row;  
+        int global_col = col * 4 + offset_col * 2 + warp_col;
+
+        swap_layout(C_accum_row, C_accum[i]);
+        store(g.c, C_accum_row, {0, 0, global_row, global_col});
+    }
+}
+
+void dispatch_micro(micro_globals g) {
+    unsigned long mem_size = g.dynamic_shared_memory();
+    hipFuncSetAttribute(
+        (void*)micro_tk,
+        hipFuncAttributeMaxDynamicSharedMemorySize,
+        mem_size
+    );
+
+    micro_tk<<<g.grid(), g.block(), mem_size>>>(g);
+    hipDeviceSynchronize();
+}
+
+PYBIND11_MODULE(tk_kernel, m) {
+    m.doc() = "tk_kernel python module";
+    py::bind_kernel<micro_tk>(m, "micro_tk", &micro_globals::a, &micro_globals::b, &micro_globals::c); 
+    py::bind_function<dispatch_micro>(m, "dispatch_micro", &micro_globals::a, &micro_globals::b, &micro_globals::c);
+}
+
+
+ChatGPT said:
+
+Thought for 16 seconds
+The drop in speed is coming from two structural bottlenecks you introduced while chasing reuse:
+
+original (fast-er)	current kernel
+CTA tile	64 × 32 (8 KiB/op)	128 × 128 (32 KiB/op)
+Dynamic LDS / CTA	32 KiB	64 KiB
+Warps / CTA	4	4
+Active CTAs / CU	2 – 3 (≥ 8 waves)	1 (4 waves)
+VGPRs / wave	96 – 104	120 – 128 (32×32 C-tile)
+
+With one CTA per CU and only four waves in flight, every 300-cycle L2 miss stalls the core, so the extra arithmetic you hoped to gain from K-unroll is eaten by latency.
+
+1 Restore occupancy first
+Cut the LDS request back to 32 KiB
+
+cpp
+Copy
+Edit
+size_t dynamic_shared_memory() { return 32768; }  // 0x8000
+A single 128-column panel of A + B is 16 KiB + 16 KiB = 32 KiB.
+(If your allocator adds ≤ 64 B padding, it still fits.)
+
+Or keep 64 KiB but split the tile into 8 warps
+
+cpp
+Copy
+Edit
+#define NUM_WARPS 8
+rt_fl<REG_BLOCK/2, REG_BLOCK/2> …        // halve register tile
+8 warps ⇒ 8 waves ⇒ the CU is again able to hide L2 latency.
+
+2 Trim the register footprint
+A 32 × 32 fp32 accumulator takes 1024 floats = 4 KiB = 64 VGPRs per warp.
+Four of them = 256 VGPRs, but CDNA caps you at 256 per wave → spills!
+
+cpp
+Copy
+Edit
+constexpr int REG_BLOCK = BLOCK_SIZE / 8;   // 16 when BLOCK = 128
+16 × 16 tile = 256 floats = 16 VGPRs; four accumulators = 64 VGPRs.
+
+Keeps total per-wave footprint < 128 VGPRs so 4–8 waves fit.
+
+3 Keep K-reuse without a huge tile
+A lighter-weight way is ping-pong double-buffering:
+
+cpp
+Copy
+Edit
+st_bf<BLOCK_SIZE, K_STEP> (&As0) = al.allocate<…32 KiB…>();
+st_bf<BLOCK_SIZE, K_STEP> (&As1) = al.allocate<…32 KiB…>();
+auto *As = &As0, *As_next = &As1;
+
+for (int tile = 0; tile < K/K_STEP; ++tile) {
+    // preload next panel while computing current
+    G::load(*As_next, g.a, {0,0,row, tile+1});
+    G::load(Bs_next,    g.b, {0,0,col, tile+1});
+
+    __syncthreads();          // make sure copy finished
+
+    // compute on *As
+    load_subtiles_and_mma(*As, *Bs);
+
+    swap(As, As_next);        // ping-pong buffers
+}
+LDS footprint still 32 KiB (two 16 KiB panels).
+
+Each global line is consumed twice → ≈ 50 % vL1 hit-rate.
+
+Occupancy unaffected; no big VGPR spike.
+
+4 Sanity checklist before timing again
+text
+Copy
+Edit
+hipfuncattrs micro_tk
+  GROUP_SEGMENT_SIZE = 0x8000   (≤ 0x10000)
+  VGPR_COUNT         = ≤ 128    (no spills)
+  SGPR_M0_INIT       = present  (one per wave)
+rocprof --stats …
+  Vector L1  Hit %   = 40–70
+  Vector L1  Coales %= 100
+  Active Waves/CU    ≥ 6
+If Hit % is still zero your loads are not re-using the tile; verify that
+the same wavefront reads each line at least twice before the tile is
+evicted.
+
+TL;DR
+Your slowdown is occupancy-loss: 64 KiB LDS + 4 warps ⇒ 4 waves/CU.
+
+Shrink LDS to 32 KiB or launch 8 warps to restore ≥ 8 waves/CU.
+
+Reduce accumulator tile to 16 × 16 to keep VGPRs ≤ 128.
+
+Prefer ping-pong double-buffering over a megapanel if you want reuse
+without inflating LDS and registers.

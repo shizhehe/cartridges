@@ -1,0 +1,213 @@
+You said:
+What's the nvidia-smi equivalent on amd
+
+
+ChatGPT said:
+The AMD equivalent of nvidia-smi is:
+
+🛠 rocm-smi
+This is part of the ROCm (Radeon Open Compute) software stack.
+
+Example usage:
+bash
+Copy
+Edit
+rocm-smi
+This gives you information like:
+
+GPU utilization
+
+Temperature
+
+Power consumption
+
+Clock speeds
+
+Memory usage
+
+Fan speed
+
+PCIe bandwidth
+
+ECC errors
+
+For specific details:
+bash
+Copy
+Edit
+rocm-smi --showuse       # Show GPU usage
+rocm-smi --showmeminfo vram   # Show VRAM usage
+rocm-smi --showpower     # Show power consumption
+rocm-smi --showtemp      # Show temperature
+rocm-smi --showfan       # Show fan speed
+rocm-smi --showvoltage   # Show voltage
+rocm-smi --showclocks    # Show GPU and memory clocks
+To monitor a specific GPU:
+bash
+Copy
+Edit
+rocm-smi -d 0
+Just like nvidia-smi, this tool requires root privileges for some commands, depending on the system configuration.
+
+If you're on a system with multiple AMD GPUs, rocm-smi will show all of them unless you specify -d.
+
+Let me know if you're looking for the Python equivalent (e.g. for integration into monitoring scripts).
+
+
+
+
+
+
+
+
+You said:
+(base) tech_ops_amd_xqh@aac11-slurm-controller-p:~/simran/AMD-benchmarking-harness/kernels/TK/bf16fp32/sim_matmul$ rocm-smi
+ERROR:root:Driver not initialized (amdgpu not found in modules)
+
+
+ChatGPT said:
+The error you're seeing:
+
+ruby
+Copy
+Edit
+ERROR:root:Driver not initialized (amdgpu not found in modules)
+means that the AMD GPU driver (specifically the amdgpu kernel module) is not loaded or not present on your system.
+
+✅ Checklist to resolve:
+1. Check if the GPU is recognized at all:
+bash
+Copy
+Edit
+lspci | grep -i vga
+Look for a line like:
+
+python-repl
+Copy
+Edit
+... VGA compatible controller: Advanced Micro Devices, Inc. [AMD/ATI] ...
+If it doesn't show an AMD GPU, your system may not physically have one, or it's not exposed to the node (e.g., in a virtual machine or container).
+
+2. Check if the amdgpu kernel module is loaded:
+bash
+Copy
+Edit
+lsmod | grep amdgpu
+If this returns nothing, try loading it:
+
+bash
+Copy
+Edit
+sudo modprobe amdgpu
+If this fails, you likely need to install AMD ROCm drivers.
+
+3. Check if ROCm is installed correctly:
+Run:
+
+bash
+Copy
+Edit
+dpkg -l | grep rocm
+or
+
+bash
+Copy
+Edit
+/opt/rocm/bin/rocminfo
+If rocminfo says ROCk module is not loaded, then the low-level kernel driver isn’t active.
+
+🛠️ Fix (If ROCm is not properly installed):
+Follow ROCm installation instructions for your distro:
+
+ROCm 6.x for Ubuntu 22.04: https://rocm.docs.amd.com/projects/install/en/latest/how-to/index.html
+
+You’ll need:
+
+amdgpu-dkms (kernel driver)
+
+rocm-core, rocm-smi, etc.
+
+Install example:
+
+bash
+Copy
+Edit
+sudo apt install rocm-smi rocm-dkms
+👩‍💻 On SLURM clusters:
+Since you're on a SLURM controller node (aac11-slurm-controller-p), note:
+
+This node may not have GPUs attached (only compute nodes do).
+
+Try running rocm-smi inside an interactive SLURM job on a GPU node:
+
+bash
+Copy
+Edit
+srun --gres=gpu:1 --pty bash
+rocm-smi
+Let me know if you're trying this on a compute node or need help verifying driver installation.
+
+
+
+
+
+
+
+
+You said:
+(base) tech_ops_amd_xqh@aac11-slurm-controller-p:~/simran/AMD-benchmarking-harness/kernels/TK/bf16fp32/sim_matmul$ lspci | grep -i vga
+00:01.0 VGA compatible controller: Device 1234:1111 (rev 02)
+
+
+ChatGPT said:
+That output:
+
+yaml
+Copy
+Edit
+00:01.0 VGA compatible controller: Device 1234:1111 (rev 02)
+means the system is not showing any AMD GPU hardware. The Device 1234:1111 is a placeholder or emulated device — not a real AMD GPU. This strongly suggests one of the following:
+
+🔎 You're on the SLURM controller or login node
+These often:
+
+Do not have GPUs installed
+
+Are used only to submit jobs, not to run them
+
+So rocm-smi and GPU checks will fail here.
+
+✅ What to do next:
+To use rocm-smi and benchmark or monitor AMD GPUs:
+
+➤ Run on a GPU node:
+bash
+Copy
+Edit
+srun --gres=gpu:1 --pty bash
+Then inside that interactive job:
+
+bash
+Copy
+Edit
+rocm-smi
+This will likely work only on a compute node with AMD Instinct or similar GPUs.
+
+❓Want to check GPU visibility remotely?
+You can also try:
+
+bash
+Copy
+Edit
+scontrol show nodes | grep -i gpu
+to find GPU nodes.
+
+Let me know if you want help crafting a SLURM script or command to test GPU availability automatically across your cluster.
+
+
+
+
+
+
+
+

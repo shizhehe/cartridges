@@ -10,14 +10,6 @@ from dataclasses import dataclass, asdict
 
 
 @dataclass(slots=True)
-class ClientSample:
-    output_text: str
-    num_output_tokens: int
-
-    top_logprobs: Optional[TopLogprobs] = None
-
-
-@dataclass(slots=True)
 class ClientResponse:
     samples: List[ClientSample]
     usage: Usage
@@ -25,14 +17,19 @@ class ClientResponse:
     timings: Optional[List[Dict[str, Any]]] = None
     def to_dict(self):
         return asdict(self)
-    
+
+
+@dataclass(slots=True)
+class ClientSample:
+    text: str
+    token_ids: Optional[List[int]] = None
+
+    top_logprobs: Optional[TopLogprobs] = None
 
 @dataclass(slots=True)
 class TopLogprobs:
-    num_input_tokens: int # the first `num_input_tokens` are from the input 
-    token_ids: np.ndarray  # [num_tokens]
-    top_logprobs: np.ndarray  # [num_tokens, num_top_logprobs]
-    top_ids: np.ndarray  # [num_tokens, num_top_logprobs]
+    logprobs: np.ndarray  # [num_tokens, num_top_logprobs]
+    token_ids: np.ndarray  # [num_tokens, num_top_logprobs]
 
 
 class ClientConfig(ObjectConfig):
@@ -49,17 +46,9 @@ class ClientConfig(ObjectConfig):
 class Client(ABC):
     def __init__(self, config: ClientConfig):
         self.config = config
-    
-    @abstractmethod
-    def complete(
-        self, 
-        prompts: List[Union[str, List[int]]], 
-        **kwargs
-    ) -> ClientResponse:
-        raise NotImplementedError
 
     @abstractmethod
-    def chat(
+    async def chat(
         self, 
         chats: List[List[Dict[str, Any]]], 
         temperature: float = 0.6, 
@@ -67,6 +56,7 @@ class Client(ABC):
         max_completion_tokens: Optional[int] = None,
         frequency_penalty: float = 0.0,
         top_logprobs: int = 1,
-        logprobs_start_message: Optional[int] = None
+        logprobs_start_message: Optional[int] = None,
+        modal_upstream_id: Optional[str] = None,
     ) -> ClientResponse:
         raise NotImplementedError

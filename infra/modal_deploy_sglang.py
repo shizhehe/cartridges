@@ -30,7 +30,8 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 MODEL_PATH   = os.environ.get("MODEL_PATH",
-                              "meta-llama/Llama-3.2-3B-Instruct")          # or "Qwen/Qwen1.5-7B-Chat"
+                            #   "meta-llama/Llama-3.2-3B-Instruct")          # or "Qwen/Qwen1.5-7B-Chat"
+                            "Qwen/Qwen3-8B")
 MODEL_REV    = os.environ.get("MODEL_REV",  None)                        # optional HF revision / commit id
 GPU_TYPE     = os.environ.get("GPU_TYPE",  "h100")                       # "h100", "a100-80gb", …
 GPU_COUNT    = int(os.environ.get("GPU_COUNT", 1))                       # tensor-parallel shards
@@ -49,15 +50,16 @@ image = (
                               add_python="3.11")
     .apt_install("git")
     .pip_install(  # add sglang and some Python dependencies
-        "transformers==4.47.1",
+        "transformers",
         "numpy<2",
         "fastapi[standard]==0.115.4",
         "pydantic==2.9.2",
         "starlette==0.41.2",
-        "torch==2.4.0",
-        "sglang[all]==0.4.1",
+        "torch==2.7.1",
+        "sglang[all]>=0.4.7.post1",
         # as per sglang website: https://sgl-project.github.io/start/install.html
-        extra_options="--find-links https://flashinfer.ai/whl/cu124/torch2.4/flashinfer/",
+        # extra_options="--find-links https://flashinfer.ai/whl/cu124/torch2.4/flashinfer/",
+        force_build=True,
     )
     )
 
@@ -69,7 +71,7 @@ flashinfer_cache   = modal.Volume.from_name("flashinfer-cache",   create_if_miss
 # 3. Modal app & web-server Function
 # ---------------------------------------------------------------------------
 
-app = modal.App(f"sglang-{Path(MODEL_PATH).name.replace('/','-')}-{GPU_TYPE}")
+app = modal.App(f"sglang-{Path(MODEL_PATH).name.replace('/','-').lower()}-{GPU_COUNT}x{GPU_TYPE}")
 
 @app.function(                                              # one container = one SGLang shard
     image=image,
@@ -81,7 +83,7 @@ app = modal.App(f"sglang-{Path(MODEL_PATH).name.replace('/','-')}-{GPU_TYPE}")
     scaledown_window=1 * MINUTES,
     volumes={
         "/root/.cache/huggingface": hf_cache_vol,
-        "/root/.cache/flashinfer":  flashinfer_cache,
+        # "/root/.cache/flashinfer":  flashinfer_cache,
     },
     secrets=[modal.Secret.from_name("sabri-api-keys")]
 )

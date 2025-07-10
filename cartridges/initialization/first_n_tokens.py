@@ -31,7 +31,6 @@ class KVCacheInitFromFirstNTokensOfContext(KVCacheFactory):
 
     def initalize_kv_cache(
         self,
-        context: StructuredContext,
         tokenizer,
         model,
         attn_config: AttnConfig,

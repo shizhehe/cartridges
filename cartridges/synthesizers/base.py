@@ -2,7 +2,6 @@ import abc
 from pydrantic import ObjectConfig
 
 from cartridges.structs import TrainingExample
-from cartridges.context import StructuredContext
 
 import numpy as np
 
@@ -12,9 +11,8 @@ class ConvoSynthesizer(abc.ABC):
     class Config(ObjectConfig):
         _pass_as_config: bool = True
 
-    def __init__(self, config: Config, context:  StructuredContext):
+    def __init__(self, config: Config):
         self.config = config
-        self.context = context
 
     @abc.abstractmethod
     def sample_convos(

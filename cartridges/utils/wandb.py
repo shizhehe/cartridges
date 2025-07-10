@@ -18,7 +18,7 @@ import torch.distributed as dist
 
 
 class WandBConfig(BaseConfig):
-    project: str = "Cartridges"
+    project: str = "cartridges"
     entity: Optional[str] = None
     name: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
@@ -132,7 +132,7 @@ def unflatten(d: dict) -> dict:
 
 
 def fetch_wandb_runs(
-    project_name: str = "hazy-research/Cartridges",
+    project_name: str = "hazy-research/cartridges",
     filters: dict = None,
     wandb_run_ids: List[str] = None,
     step: Optional[int] = None,
@@ -227,7 +227,7 @@ def fetch_wandb_runs(
 def fetch_wandb_table(
     artifact_id: str,
     versions: Literal["latest", "all"] = "latest",
-    project_name: str = "Cartridges",
+    project_name: str = "cartridges",
     entity: str = "hazy-research",
 ) -> pd.DataFrame:
     """

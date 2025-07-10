@@ -1,0 +1,1459 @@
+User: 
+
+#include "kittens.cuh"
+#include "pyutils/pyutils.cuh"
+#include "utils.cpp"
+using namespace kittens;
+
+#define NUM_WARPS 8
+#define NUM_THREADS (kittens::WARP_THREADS * NUM_WARPS)
+
+constexpr int BLOCK_SIZE       = 256;  
+constexpr int K_STEP           = 256;
+constexpr int DOT_SLICE_SHARED = 64;
+constexpr int REG_BLOCK_M      = BLOCK_SIZE / 8; 
+constexpr int REG_BLOCK_N      = BLOCK_SIZE / 8;
+constexpr int DOT_SLICE        = 16;
+
+#define M 8192
+#define K 8192
+#define N 8192
+
+using _gl_A = gl<bf16, -1, -1, -1, -1>;
+using _gl_B = gl<bf16, -1, -1, -1, -1>;
+using _gl_C = gl<float, -1, -1, -1, -1>;
+
+using G = kittens::group<8>;
+
+struct micro_globals {
+    _gl_A a;
+    _gl_B b;
+    _gl_C c;
+    dim3 grid()  { return dim3(N / BLOCK_SIZE, M / BLOCK_SIZE); } 
+    dim3 block() { return dim3(NUM_THREADS); } 
+    size_t dynamic_shared_memory() { return 65536; }
+};
+
+__global__ __launch_bounds__(NUM_THREADS, 1)
+void micro_tk(const micro_globals g) {
+    extern __shared__ alignment_dummy __shm[];
+    shared_allocator al((int*)&__shm[0]);
+    st_bf<BLOCK_SIZE, DOT_SLICE_SHARED> (&As) = al.allocate<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>();
+    st_bf<BLOCK_SIZE, DOT_SLICE_SHARED> (&Bs) = al.allocate<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>();
+
+    rt_bf<REG_BLOCK_M, DOT_SLICE> a_reg_0, a_reg_1, b_reg_0, b_reg_1;
+    rt_fl<REG_BLOCK_M, REG_BLOCK_N, ducks::rt_layout::col> C_accum[8];
+    for (int i = 0; i < 8; i++) { zero(C_accum[i]); }
+
+    // Small register buffers for pipelining
+    constexpr int BUFFER_SIZE = 64;
+    float4 a_buffer_next[BUFFER_SIZE];
+    float4 b_buffer_next[BUFFER_SIZE];
+    int a_metadata[3], b_metadata[3];
+
+    const int row = blockIdx.y;
+    const int col = blockIdx.x;
+
+    const int warp_id = kittens::warpid();
+    const int warp_row = warp_id / 2;
+    const int warp_col = warp_id % 2;
+
+    const int num_tiles = K / K_STEP;
+    const int num_shared_slices = K_STEP / DOT_SLICE_SHARED;
+    const int num_slices = DOT_SLICE_SHARED / DOT_SLICE;
+
+    // Load first tile into shared memory
+    G::load(As, g.a, {0, 0, row, 0});
+    G::load(Bs, g.b, {0, 0, col, 0});
+
+
+    // Pre-load second tile into register bufers 
+    load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_A, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+        a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, 1}, As, a_metadata);
+    load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_B, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+        b_buffer_next, BUFFER_SIZE, g.b, {0, 0, col, 1}, Bs, b_metadata);
+
+    if (warp_col / 4 == 0) {
+        __builtin_amdgcn_s_barrier();
+    }
+    asm volatile("s_waitcnt vmcnt(0)");
+
+
+    // #pragma unroll 2
+    for (int tile = 0; tile < num_tiles; ++tile) {
+
+        for (int shared_slice = 0; shared_slice < num_shared_slices; ++shared_slice) {
+            const int next_k_offset = tile * num_shared_slices + shared_slice + 1;
+            const bool should_load = (next_k_offset < num_tiles * num_shared_slices);
+
+            // Start loading NEXT data to registers 
+            if (should_load) {
+                load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_A, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+                    a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, next_k_offset}, As, a_metadata);
+                
+                load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_B, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+                    b_buffer_next, BUFFER_SIZE, g.b, {0, 0, col, next_k_offset}, Bs, b_metadata);
+            }
+
+            __builtin_amdgcn_s_barrier();
+
+            
+            // Compute on CURRENT data in shared memory
+            // #pragma unroll 
+            for (int slice = 0; slice < num_slices; ++slice) {
+                kittens::load(a_reg_1, subtile_inplace<REG_BLOCK_M, DOT_SLICE>(As, {warp_row + 2, slice}));
+                kittens::load(b_reg_1, subtile_inplace<REG_BLOCK_M, DOT_SLICE>(Bs, {warp_col + 2, slice}));
+                kittens::load(a_reg_0, subtile_inplace<REG_BLOCK_M, DOT_SLICE>(As, {warp_row, slice}));
+                kittens::load(b_reg_0, subtile_inplace<REG_BLOCK_N, DOT_SLICE>(Bs, {warp_col, slice}));
+                mma_ABt(C_accum[0], a_reg_0, b_reg_0, C_accum[0]);
+                mma_ABt(C_accum[1], a_reg_0, b_reg_1, C_accum[1]);
+                mma_ABt(C_accum[2], a_reg_1, b_reg_0, C_accum[2]);
+                mma_ABt(C_accum[3], a_reg_1, b_reg_1, C_accum[3]);
+                
+            }
+            asm volatile("s_waitcnt vmcnt(1)");
+
+            // Now wait for loads and write to shared memory
+            if (should_load) {
+                store_registers_to_shared<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, NUM_THREADS>(
+                    a_buffer_next, As, a_metadata);
+                store_registers_to_shared<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, NUM_THREADS>(
+                    b_buffer_next, Bs, b_metadata);
+            }
+        }
+    }
+
+    if (warp_col / 4 == 1) {
+        __builtin_amdgcn_s_barrier();
+    }
+
+    store(g.c, C_accum[0], {0, 0, row * 4 + warp_row, col * 4 + warp_col});
+    store(g.c, C_accum[1], {0, 0, row * 4 + warp_row, col * 4 + warp_col + 2});
+    store(g.c, C_accum[2], {0, 0, row * 4 + warp_row + 2, col * 4 + warp_col});
+    store(g.c, C_accum[3], {0, 0, row * 4 + warp_row + 2, col * 4 + warp_col + 2});
+}
+
+void dispatch_micro(micro_globals g) {
+    unsigned long mem_size = g.dynamic_shared_memory();
+    hipFuncSetAttribute((void*)micro_tk, hipFuncAttributeMaxDynamicSharedMemorySize, mem_size);
+    micro_tk<<<g.grid(), g.block(), mem_size>>>(g);
+    hipDeviceSynchronize();
+}
+
+PYBIND11_MODULE(tk_kernel, m) {
+    m.doc() = "tk_kernel python module";
+    py::bind_kernel<micro_tk>(m, "micro_tk", &micro_globals::a, &micro_globals::b, &micro_globals::c); 
+    py::bind_function<dispatch_micro>(m, "dispatch_micro", &micro_globals::a, &micro_globals::b, &micro_globals::c);
+}
+
+How do I need to adjust the indexing to run the 8 C_accum mfmas?
+
+Walk me through it. Don't write code.
+
+
+Assistant: 
+
+Looking at your code, I can see you have 8 C_accum arrays allocated but you're only using 4 of them (indices 0-3). To use all 8, you need to understand how the indexing maps to the matrix multiplication tiles.
+Let me walk through the current setup and what needs to change:
+Current Setup
+
+Block dimensions: Each thread block computes a 256x256 output tile
+Warp assignment:
+
+8 warps total (NUM_WARPS = 8)
+Arranged in a 4x2 grid (warp_row = warp_id / 2, warp_col = warp_id % 2)
+Each warp computes a 64x128 region (since 256/4 = 64 in M dimension, 256/2 = 128 in N dimension)
+
+
+Register tile dimensions:
+
+REG_BLOCK_M = REG_BLOCK_N = 32 (256/8)
+Each warp needs to compute multiple 32x32 tiles to fill its 64x128 region
+
+
+
+Why You Need 8 MFMAs
+Each warp needs to compute:
+
+2 tiles in the M dimension (64/32 = 2)
+4 tiles in the N dimension (128/32 = 4)
+Total: 2×4 = 8 tiles per warp
+
+Current Indexing Issues
+Your current code only computes 4 tiles:
+
+C_accum[0]: (warp_row, warp_col)
+C_accum[1]: (warp_row, warp_col + 2)
+C_accum[2]: (warp_row + 2, warp_col)
+C_accum[3]: (warp_row + 2, warp_col + 2)
+
+This assumes each warp position represents a 64x64 region, but with only 2 warps in the N dimension, each warp actually handles 128 columns.
+Required Adjustments
+
+Loading pattern: You need to load 4 different B tiles for each A tile:
+
+b_reg_0, b_reg_1, b_reg_2, b_reg_3 (covering the 128-column span)
+a_reg_0, a_reg_1 (covering the 64-row span)
+
+
+MMA operations: All 8 combinations:
+
+C_accum[0] = a_reg_0 × b_reg_0
+C_accum[1] = a_reg_0 × b_reg_1
+C_accum[2] = a_reg_0 × b_reg_2
+C_accum[3] = a_reg_0 × b_reg_3
+C_accum[4] = a_reg_1 × b_reg_0
+C_accum[5] = a_reg_1 × b_reg_1
+C_accum[6] = a_reg_1 × b_reg_2
+C_accum[7] = a_reg_1 × b_reg_3
+
+
+Subtile indexing: When loading from shared memory:
+
+For A: load from rows (warp_row2) and (warp_row2 + 1)
+For B: load from columns (warp_col4), (warp_col4 + 1), (warp_col4 + 2), (warp_col4 + 3)
+
+
+Store indexing: When storing results:
+
+Map the 8 tiles to their correct positions in the 64x128 output region
+The pattern will be a 2x4 grid of 32x32 tiles
+
+
+
+The key insight is that your warp grid doesn't match the actual work distribution - you have a 4x2 warp arrangement but each warp needs to compute a 2x4 tile arrangement within its assigned region.
+
+
+User:
+
+help me replace this section: 
+
+for (int slice = 0; slice < num_slices; ++slice) {
+                kittens::load(a_reg_1, subtile_inplace<REG_BLOCK_M, DOT_SLICE>(As, {warp_row + 2, slice}));
+                kittens::load(b_reg_1, subtile_inplace<REG_BLOCK_M, DOT_SLICE>(Bs, {warp_col + 2, slice}));
+                kittens::load(a_reg_0, subtile_inplace<REG_BLOCK_M, DOT_SLICE>(As, {warp_row, slice}));
+                kittens::load(b_reg_0, subtile_inplace<REG_BLOCK_N, DOT_SLICE>(Bs, {warp_col, slice}));
+                mma_ABt(C_accum[0], a_reg_0, b_reg_0, C_accum[0]);
+                mma_ABt(C_accum[1], a_reg_0, b_reg_1, C_accum[1]);
+                mma_ABt(C_accum[2], a_reg_1, b_reg_0, C_accum[2]);
+                mma_ABt(C_accum[3], a_reg_1, b_reg_1, C_accum[3]);
+
+            }
+
+
+
+Assistant: 
+
+Looking at your code structure, here's how to replace that section to use all 8 C_accum arrays:
+First, you'll need to declare more register tiles since you need 4 B tiles (not just 2):
+cpprt_bf<REG_BLOCK_M, DOT_SLICE> a_reg_0, a_reg_1;
+rt_bf<REG_BLOCK_N, DOT_SLICE> b_reg_0, b_reg_1, b_reg_2, b_reg_3;
+Then replace the loop with:
+cppfor (int slice = 0; slice < num_slices; ++slice) {
+    // Load 2 A tiles (covering 64 rows)
+    kittens::load(a_reg_0, subtile_inplace<REG_BLOCK_M, DOT_SLICE>(As, {warp_row * 2, slice}));
+    kittens::load(a_reg_1, subtile_inplace<REG_BLOCK_M, DOT_SLICE>(As, {warp_row * 2 + 1, slice}));
+    
+    // Load 4 B tiles (covering 128 columns)
+    kittens::load(b_reg_0, subtile_inplace<REG_BLOCK_N, DOT_SLICE>(Bs, {warp_col * 4, slice}));
+    kittens::load(b_reg_1, subtile_inplace<REG_BLOCK_N, DOT_SLICE>(Bs, {warp_col * 4 + 1, slice}));
+    kittens::load(b_reg_2, subtile_inplace<REG_BLOCK_N, DOT_SLICE>(Bs, {warp_col * 4 + 2, slice}));
+    kittens::load(b_reg_3, subtile_inplace<REG_BLOCK_N, DOT_SLICE>(Bs, {warp_col * 4 + 3, slice}));
+    
+    // Compute all 8 tiles (2x4 grid)
+    mma_ABt(C_accum[0], a_reg_0, b_reg_0, C_accum[0]);
+    mma_ABt(C_accum[1], a_reg_0, b_reg_1, C_accum[1]);
+    mma_ABt(C_accum[2], a_reg_0, b_reg_2, C_accum[2]);
+    mma_ABt(C_accum[3], a_reg_0, b_reg_3, C_accum[3]);
+    mma_ABt(C_accum[4], a_reg_1, b_reg_0, C_accum[4]);
+    mma_ABt(C_accum[5], a_reg_1, b_reg_1, C_accum[5]);
+    mma_ABt(C_accum[6], a_reg_1, b_reg_2, C_accum[6]);
+    mma_ABt(C_accum[7], a_reg_1, b_reg_3, C_accum[7]);
+}
+The key changes:
+
+Load indices use warp_row * 2 instead of just warp_row (and warp_col * 4 instead of warp_col)
+Need 4 B register tiles to cover the full 128 columns
+All 8 MMA operations form a 2x4 grid of computations
+
+You'll also need to update the store operations at the end to write all 8 tiles to their correct positions.
+
+
+User: 
+
+help me update the outputs
+
+store(g.c, C_accum[0], {0, 0, row * 4 + warp_row, col * 4 + warp_col});
+    store(g.c, C_accum[1], {0, 0, row * 4 + warp_row, col * 4 + warp_col + 2});
+    store(g.c, C_accum[2], {0, 0, row * 4 + warp_row + 2, col * 4 + warp_col});
+    store(g.c, C_accum[3], {0, 0, row * 4 + warp_row + 2, col * 4 + warp_col + 2});
+
+
+Assistant: 
+
+
+Based on the new computation pattern where each warp computes a 2x4 grid of 32x32 tiles (covering 64x128), here's how to update the store operations:
+cpp// Base position for this warp's output region
+// row * 8 because BLOCK_SIZE/REG_BLOCK_M = 256/32 = 8 tiles per block in M
+// col * 8 because BLOCK_SIZE/REG_BLOCK_N = 256/32 = 8 tiles per block in N
+const int base_row = row * 8 + warp_row * 2;  // Each warp handles 2 tiles in M
+const int base_col = col * 8 + warp_col * 4;  // Each warp handles 4 tiles in N
+
+// Store all 8 tiles in a 2x4 pattern
+store(g.c, C_accum[0], {0, 0, base_row,     base_col});
+store(g.c, C_accum[1], {0, 0, base_row,     base_col + 1});
+store(g.c, C_accum[2], {0, 0, base_row,     base_col + 2});
+store(g.c, C_accum[3], {0, 0, base_row,     base_col + 3});
+store(g.c, C_accum[4], {0, 0, base_row + 1, base_col});
+store(g.c, C_accum[5], {0, 0, base_row + 1, base_col + 1});
+store(g.c, C_accum[6], {0, 0, base_row + 1, base_col + 2});
+store(g.c, C_accum[7], {0, 0, base_row + 1, base_col + 3});
+The key changes:
+
+Base row calculation: row * 8 + warp_row * 2 positions each warp's 64-row region
+Base col calculation: col * 8 + warp_col * 4 positions each warp's 128-column region
+The 8 stores form a 2x4 grid pattern matching how the MMA operations were performed
+No more +2 offsets since we're now using consecutive tile indices
+
+
+User: 
+
+some of it is a bit off:
+
+diff[:64, :64].max() tensor(0.0078, device='cuda:0')
+diff[64:128, 64:128].max() tensor(0.0078, device='cuda:0')
+diff[128:192, 128:192].max() tensor(2.2655, device='cuda:0')
+diff[192:256, 192:256].max() tensor(2.3556, device='cuda:0')
+diff[7168:7232, 7168:7232].max() tensor(0.0078, device='cuda:0')
+diff[7232:7296, 7232:7296].max() tensor(0.0077, device='cuda:0')
+diff[7296:7360, 7296:7360].max() tensor(2.1453, device='cuda:0')
+diff[7360:7424, 7360:7424].max() tensor(2.3965, device='cuda:0')
+
+
+Assistant: 
+
+Looking at the error pattern, I can see that tiles along the diagonal have issues when the tile row index is >= 2. This suggests the issue is with how warps are mapping to their computation regions.
+The problem is likely in how warp_row and warp_col are being used. Let me trace through:
+
+You have 8 warps in a 4x2 arrangement (4 rows, 2 columns)
+warp_row = warp_id / 2 gives values 0, 0, 1, 1, 2, 2, 3, 3
+warp_col = warp_id % 2 gives values 0, 1, 0, 1, 0, 1, 0, 1
+
+When warp_row >= 2, something goes wrong. Looking at your shared memory loads:
+cppkittens::load(a_reg_0, subtile_inplace<REG_BLOCK_M, DOT_SLICE>(As, {warp_row * 2, slice}));
+The issue is that As is st_bf<BLOCK_SIZE, DOT_SLICE_SHARED> which is 256x64. When divided into 32x16 tiles:
+
+M dimension: 256/32 = 8 tiles
+K dimension: 64/16 = 4 tiles
+
+So valid row indices for subtiles are 0-7. But when warp_row = 3, you're trying to access warp_row * 2 = 6 and warp_row * 2 + 1 = 7, which are valid. When warp_row = 2, you access indices 4 and 5, also valid.
+The real issue might be in the store indices. Let's check the math:
+
+base_row = row * 8 + warp_row * 2
+For warp_row = 2: contributes tiles at positions 4, 5
+For warp_row = 3: contributes tiles at positions 6, 7
+
+This seems correct too. The issue might be that your shared memory tile size doesn't match your computation pattern. You're loading 256x64 tiles from global to shared, but trying to compute 256x256 output tiles.
+Can you confirm:
+
+What's the size of your shared memory tiles (As and Bs)?
+Are you iterating through K dimension correctly with DOT_SLICE_SHARED = 64?
+
+The diagonal pattern in your errors suggests warps might be reading from incorrect K-slices when computing certain output positions.
+
+
+User: 
+
+#include "kittens.cuh"
+#include "pyutils/pyutils.cuh"
+#include "utils.cpp"
+using namespace kittens;
+
+#define NUM_WARPS 8
+#define NUM_THREADS (kittens::WARP_THREADS * NUM_WARPS)
+
+constexpr int BLOCK_SIZE       = 256;  
+constexpr int K_STEP           = 256;
+constexpr int DOT_SLICE_SHARED = 64;
+constexpr int REG_BLOCK_M      = BLOCK_SIZE / 8; 
+constexpr int REG_BLOCK_N      = BLOCK_SIZE / 8;
+constexpr int DOT_SLICE        = 16;
+
+#define M 8192
+#define K 8192
+#define N 8192
+
+using _gl_A = gl<bf16, -1, -1, -1, -1>;
+using _gl_B = gl<bf16, -1, -1, -1, -1>;
+using _gl_C = gl<float, -1, -1, -1, -1>;
+
+using G = kittens::group<8>;
+
+struct micro_globals {
+    _gl_A a;
+    _gl_B b;
+    _gl_C c;
+    dim3 grid()  { return dim3(N / BLOCK_SIZE, M / BLOCK_SIZE); } 
+    dim3 block() { return dim3(NUM_THREADS); } 
+    size_t dynamic_shared_memory() { return 65536; }
+};
+
+__global__ __launch_bounds__(NUM_THREADS, 1)
+void micro_tk(const micro_globals g) {
+    extern __shared__ alignment_dummy __shm[];
+    shared_allocator al((int*)&__shm[0]);
+    st_bf<BLOCK_SIZE, DOT_SLICE_SHARED> (&As) = al.allocate<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>();
+    st_bf<BLOCK_SIZE, DOT_SLICE_SHARED> (&Bs) = al.allocate<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>();
+
+    rt_bf<REG_BLOCK_M, DOT_SLICE> a_reg_0, a_reg_1;
+    rt_bf<REG_BLOCK_N, DOT_SLICE> b_reg_0, b_reg_1, b_reg_2, b_reg_3;
+    rt_fl<REG_BLOCK_M, REG_BLOCK_N, ducks::rt_layout::col> C_accum[8];
+    for (int i = 0; i < 8; i++) { zero(C_accum[i]); }
+
+    // Small register buffers for pipelining
+    constexpr int BUFFER_SIZE = 64;
+    float4 a_buffer_next[BUFFER_SIZE];
+    float4 b_buffer_next[BUFFER_SIZE];
+    int a_metadata[3], b_metadata[3];
+
+    const int row = blockIdx.y;
+    const int col = blockIdx.x;
+
+    const int warp_id = kittens::warpid();
+    const int warp_row = warp_id / 2;
+    const int warp_col = warp_id % 2;
+
+    const int num_tiles = K / K_STEP;
+    const int num_shared_slices = K_STEP / DOT_SLICE_SHARED;
+    const int num_slices = DOT_SLICE_SHARED / DOT_SLICE;
+
+    // Load first tile into shared memory
+    G::load(As, g.a, {0, 0, row, 0});
+    G::load(Bs, g.b, {0, 0, col, 0});
+
+
+    // Pre-load second tile into register bufers 
+    load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_A, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+        a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, 1}, As, a_metadata);
+    load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_B, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+        b_buffer_next, BUFFER_SIZE, g.b, {0, 0, col, 1}, Bs, b_metadata);
+
+    if (warp_col / 4 == 0) {
+        __builtin_amdgcn_s_barrier();
+    }
+    asm volatile("s_waitcnt vmcnt(0)");
+
+
+    // #pragma unroll 2
+    for (int tile = 0; tile < num_tiles; ++tile) {
+
+        for (int shared_slice = 0; shared_slice < num_shared_slices; ++shared_slice) {
+            const int next_k_offset = tile * num_shared_slices + shared_slice + 1;
+            const bool should_load = (next_k_offset < num_tiles * num_shared_slices);
+
+            // Start loading NEXT data to registers 
+            if (should_load) {
+                load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_A, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+                    a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, next_k_offset}, As, a_metadata);
+                
+                load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_B, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+                    b_buffer_next, BUFFER_SIZE, g.b, {0, 0, col, next_k_offset}, Bs, b_metadata);
+            }
+
+            __builtin_amdgcn_s_barrier();
+
+            
+            // Compute on CURRENT data in shared memory
+            // #pragma unroll 
+            for (int slice = 0; slice < num_slices; ++slice) {
+                // Load 2 A tiles (covering 64 rows)
+                kittens::load(a_reg_0, subtile_inplace<REG_BLOCK_M, DOT_SLICE>(As, {warp_row * 2, slice}));
+                kittens::load(a_reg_1, subtile_inplace<REG_BLOCK_M, DOT_SLICE>(As, {warp_row * 2 + 1, slice}));
+                
+                // Load 4 B tiles (covering 128 columns)
+                kittens::load(b_reg_0, subtile_inplace<REG_BLOCK_N, DOT_SLICE>(Bs, {warp_col * 4, slice}));
+                kittens::load(b_reg_1, subtile_inplace<REG_BLOCK_N, DOT_SLICE>(Bs, {warp_col * 4 + 1, slice}));
+                kittens::load(b_reg_2, subtile_inplace<REG_BLOCK_N, DOT_SLICE>(Bs, {warp_col * 4 + 2, slice}));
+                kittens::load(b_reg_3, subtile_inplace<REG_BLOCK_N, DOT_SLICE>(Bs, {warp_col * 4 + 3, slice}));
+                
+                // Compute all 8 tiles (2x4 grid)
+                mma_ABt(C_accum[0], a_reg_0, b_reg_0, C_accum[0]);
+                mma_ABt(C_accum[1], a_reg_0, b_reg_1, C_accum[1]);
+                mma_ABt(C_accum[2], a_reg_0, b_reg_2, C_accum[2]);
+                mma_ABt(C_accum[3], a_reg_0, b_reg_3, C_accum[3]);
+                mma_ABt(C_accum[4], a_reg_1, b_reg_0, C_accum[4]);
+                mma_ABt(C_accum[5], a_reg_1, b_reg_1, C_accum[5]);
+                mma_ABt(C_accum[6], a_reg_1, b_reg_2, C_accum[6]);
+                mma_ABt(C_accum[7], a_reg_1, b_reg_3, C_accum[7]);
+            }
+            asm volatile("s_waitcnt vmcnt(1)");
+
+            // Now wait for loads and write to shared memory
+            if (should_load) {
+                store_registers_to_shared<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, NUM_THREADS>(
+                    a_buffer_next, As, a_metadata);
+                store_registers_to_shared<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, NUM_THREADS>(
+                    b_buffer_next, Bs, b_metadata);
+            }
+        }
+    }
+
+    if (warp_col / 4 == 1) {
+        __builtin_amdgcn_s_barrier();
+    }
+
+    const int base_row = row * 8 + warp_row * 2;  // Each warp handles 2 tiles in M
+    const int base_col = col * 8 + warp_col * 4;  // Each warp handles 4 tiles in N
+
+    // Store all 8 tiles in a 2x4 pattern
+    store(g.c, C_accum[0], {0, 0, base_row,     base_col});
+    store(g.c, C_accum[1], {0, 0, base_row,     base_col + 1});
+    store(g.c, C_accum[2], {0, 0, base_row,     base_col + 2});
+    store(g.c, C_accum[3], {0, 0, base_row,     base_col + 3});
+    store(g.c, C_accum[4], {0, 0, base_row + 1, base_col});
+    store(g.c, C_accum[5], {0, 0, base_row + 1, base_col + 1});
+    store(g.c, C_accum[6], {0, 0, base_row + 1, base_col + 2});
+    store(g.c, C_accum[7], {0, 0, base_row + 1, base_col + 3});
+}
+
+void dispatch_micro(micro_globals g) {
+    unsigned long mem_size = g.dynamic_shared_memory();
+    hipFuncSetAttribute((void*)micro_tk, hipFuncAttributeMaxDynamicSharedMemorySize, mem_size);
+    micro_tk<<<g.grid(), g.block(), mem_size>>>(g);
+    hipDeviceSynchronize();
+}
+
+PYBIND11_MODULE(tk_kernel, m) {
+    m.doc() = "tk_kernel python module";
+    py::bind_kernel<micro_tk>(m, "micro_tk", &micro_globals::a, &micro_globals::b, &micro_globals::c); 
+    py::bind_function<dispatch_micro>(m, "dispatch_micro", &micro_globals::a, &micro_globals::b, &micro_globals::c);
+}
+
+
+
+
+Assistant: 
+
+Looking at your updated code and the error pattern, I can see the issue. The shared memory tiles As and Bs are both 256x64 (BLOCK_SIZE x DOT_SLICE_SHARED), but when you try to load B tiles for warps with warp_col = 1, you're accessing out of bounds.
+Here's the problem:
+
+Bs is 256x64, which means it has 256/32 = 8 rows and 64/16 = 4 columns of 32x16 subtiles
+When warp_col = 1, you try to load:
+
+b_reg_0 from column index warp_col * 4 = 4 (out of bounds!)
+b_reg_1 from column index warp_col * 4 + 1 = 5 (out of bounds!)
+etc.
+
+
+
+The issue is that your shared memory tile for B is only 64 wide, but you're trying to access it as if it were 256 wide.
+You have two options to fix this:
+Option 1: Change shared memory size
+Make Bs wider to match the 256x256 output:
+cppst_bf<BLOCK_SIZE, DOT_SLICE_SHARED> (&As) = al.allocate<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>();
+st_bf<DOT_SLICE_SHARED, BLOCK_SIZE> (&Bs) = al.allocate<st_bf<DOT_SLICE_SHARED, BLOCK_SIZE>>();  // Transposed!
+Option 2: Fix the indexing (keeping current shared memory size)
+Since Bs is only 64 wide, each warp should load from the same columns but different rows:
+cpp// For B tiles, both warp_col=0 and warp_col=1 need to access the same 4 column slices
+// but different row positions
+int b_row_offset = warp_col * 4;  // This spreads warps across rows of B
+
+kittens::load(b_reg_0, subtile_inplace<REG_BLOCK_N, DOT_SLICE>(Bs, {b_row_offset, slice}));
+kittens::load(b_reg_1, subtile_inplace<REG_BLOCK_N, DOT_SLICE>(Bs, {b_row_offset + 1, slice}));
+kittens::load(b_reg_2, subtile_inplace<REG_BLOCK_N, DOT_SLICE>(Bs, {b_row_offset + 2, slice}));
+kittens::load(b_reg_3, subtile_inplace<REG_BLOCK_N, DOT_SLICE>(Bs, {b_row_offset + 3, slice}));
+Given your current design, Option 2 makes more sense because you're loading 256x64 tiles from global memory in the K dimension, not the N dimension. The error pattern you're seeing (issues with higher-indexed warps) confirms this is an indexing problem with the B matrix access.
+
+User: 
+
+that made it more wrong
+
+
+Assistant: 
+
+
+You're right, my analysis was incorrect. Let me reconsider the problem.
+Looking at your shared memory setup:
+
+As is 256x64 (BLOCK_SIZE x DOT_SLICE_SHARED)
+Bs is 256x64 (BLOCK_SIZE x DOT_SLICE_SHARED)
+
+The issue is that you're trying to compute a 256x256 output tile, but your shared memory only holds 256x64 slices of A and B at a time. This means you need to accumulate over multiple K iterations.
+The real problem is in how you're interpreting the warp assignments. With 8 warps in a 4x2 arrangement, and shared memory tiles of 256x64:
+
+Each block computes 256x256 of output C
+But shared memory only holds 256x64 of A and B at a time
+You iterate through K in chunks of 64 (DOT_SLICE_SHARED)
+
+The error pattern suggests that when certain warps try to access their assigned portions, they're computing with mismatched A and B data.
+Let me reconsider the warp mapping. With 8 warps and a 256x256 output:
+
+If warps are in a 4x2 grid: each warp handles 64x128 of output
+But your shared memory B tile is only 64 wide!
+
+The fundamental issue is that your shared memory layout doesn't match your warp computation layout. You need to either:
+
+Keep the current shared memory size and change how warps are assigned work
+Change the shared memory layout to match the warp assignment
+
+Given your current setup, I think the issue is that all warps should be working on the same 256x64 K-slice, but computing different parts of the 256x256 output.
+Could you share what the original working version with 4 C_accum looked like? That would help me understand the intended computation pattern.
+
+
+User: 
+
+#include "kittens.cuh"
+#include "pyutils/pyutils.cuh"
+#include "utils.cpp"
+using namespace kittens;
+
+constexpr int BLOCK_SIZE       = 256;  
+constexpr int K_STEP           = 256;
+constexpr int DOT_SLICE_SHARED = 64;
+constexpr int REG_BLOCK        = BLOCK_SIZE / 4; 
+constexpr int DOT_SLICE        = 16;
+
+#define NUM_WARPS 8
+#define NUM_THREADS (kittens::WARP_THREADS * NUM_WARPS)
+
+#define M 8192
+#define K 8192
+#define N 8192
+
+using _gl_A = gl<bf16, -1, -1, -1, -1>;
+using _gl_B = gl<bf16, -1, -1, -1, -1>;
+using _gl_C = gl<float, -1, -1, -1, -1>;
+
+using G = kittens::group<8>;
+
+struct micro_globals {
+    _gl_A a;
+    _gl_B b;
+    _gl_C c;
+    dim3 grid()  { return dim3(N / BLOCK_SIZE, M / BLOCK_SIZE); } 
+    dim3 block() { return dim3(NUM_THREADS); } 
+    size_t dynamic_shared_memory() { return 65536; }
+};
+
+__global__ __launch_bounds__(NUM_THREADS, 1)
+void micro_tk(const micro_globals g) {
+    extern __shared__ alignment_dummy __shm[];
+    shared_allocator al((int*)&__shm[0]);
+    st_bf<BLOCK_SIZE, DOT_SLICE_SHARED> (&As) = al.allocate<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>();
+    st_bf<BLOCK_SIZE, DOT_SLICE_SHARED> (&Bs) = al.allocate<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>();
+
+    rt_bf<REG_BLOCK, DOT_SLICE> a_reg_0, b_reg;
+    rt_fl<REG_BLOCK, REG_BLOCK, ducks::rt_layout::col> C_accum[2];
+    for (int i = 0; i < 2; i++) { zero(C_accum[i]); }
+
+    // Small register buffers for pipelining
+    constexpr int BUFFER_SIZE = 64;
+    float4 a_buffer_next[BUFFER_SIZE];
+    float4 b_buffer_next[BUFFER_SIZE];
+    int a_metadata[3], b_metadata[3];
+
+    const int row = blockIdx.y;
+    const int col = blockIdx.x;
+
+    const int warp_id = kittens::warpid();
+    const int warp_row = warp_id / 2;
+    const int warp_col = warp_id % 2;
+
+    const int num_tiles = K / K_STEP;
+    const int num_shared_slices = K_STEP / DOT_SLICE_SHARED;
+    const int num_slices = DOT_SLICE_SHARED / DOT_SLICE;
+
+    // Load first tile into shared memory
+    G::load(As, g.a, {0, 0, row, 0});
+    G::load(Bs, g.b, {0, 0, col, 0});
+
+
+    // Pre-load second tile into register bufers 
+    load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_A, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+        a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, 1}, As, a_metadata);
+    load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_B, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+        b_buffer_next, BUFFER_SIZE, g.b, {0, 0, col, 1}, Bs, b_metadata);
+
+    if (warp_col / 4 == 0) {
+        __builtin_amdgcn_s_barrier();
+    }
+    asm volatile("s_waitcnt vmcnt(0)");
+
+
+    // #pragma unroll 2
+    for (int tile = 0; tile < num_tiles; ++tile) {
+
+        for (int shared_slice = 0; shared_slice < num_shared_slices; ++shared_slice) {
+            const int next_k_offset = tile * num_shared_slices + shared_slice + 1;
+            const bool should_load = (next_k_offset < num_tiles * num_shared_slices);
+
+            // Start loading NEXT data to registers 
+            if (should_load) {
+                load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_A, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+                    a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, next_k_offset}, As, a_metadata);
+                
+                load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_B, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+                    b_buffer_next, BUFFER_SIZE, g.b, {0, 0, col, next_k_offset}, Bs, b_metadata);
+            }
+
+            __builtin_amdgcn_s_barrier();
+
+            
+            // Compute on CURRENT data in shared memory
+            #pragma unroll 
+            for (int slice = 0; slice < num_slices; ++slice) {
+                kittens::load(a_reg_0, subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row, slice}));
+                kittens::load(b_reg, subtile_inplace<REG_BLOCK, DOT_SLICE>(Bs, {warp_col, slice}));
+                mma_ABt(C_accum[0], a_reg_0, b_reg, C_accum[0]);
+                kittens::load(b_reg, subtile_inplace<REG_BLOCK, DOT_SLICE>(Bs, {warp_col + 2, slice}));
+                mma_ABt(C_accum[1], a_reg_0, b_reg, C_accum[1]);
+            }
+            asm volatile("s_waitcnt vmcnt(1)");
+
+            // Now wait for loads and write to shared memory
+            if (should_load) {
+                store_registers_to_shared<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, NUM_THREADS>(
+                    a_buffer_next, As, a_metadata);
+                store_registers_to_shared<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, NUM_THREADS>(
+                    b_buffer_next, Bs, b_metadata);
+            }
+        }
+    }
+
+    if (warp_col / 4 == 1) {
+        __builtin_amdgcn_s_barrier();
+    }
+
+    store(g.c, C_accum[0], {0, 0, row * 4 + warp_row, col * 4 + warp_col});
+    store(g.c, C_accum[1], {0, 0, row * 4 + warp_row, col * 4 + warp_col + 2});
+}
+
+void dispatch_micro(micro_globals g) {
+    unsigned long mem_size = g.dynamic_shared_memory();
+    hipFuncSetAttribute((void*)micro_tk, hipFuncAttributeMaxDynamicSharedMemorySize, mem_size);
+    micro_tk<<<g.grid(), g.block(), mem_size>>>(g);
+    hipDeviceSynchronize();
+}
+
+PYBIND11_MODULE(tk_kernel, m) {
+    m.doc() = "tk_kernel python module";
+    py::bind_kernel<micro_tk>(m, "micro_tk", &micro_globals::a, &micro_globals::b, &micro_globals::c); 
+    py::bind_function<dispatch_micro>(m, "dispatch_micro", &micro_globals::a, &micro_globals::b, &micro_globals::c);
+}
+
+This is the original
+
+
+Assistant: 
+
+Now I see the issue! Looking at the original code, the key differences are:
+
+REG_BLOCK = BLOCK_SIZE / 4 = 64 in the original (vs REG_BLOCK_M/N = BLOCK_SIZE / 8 = 32 in your new version)
+Each warp computes 2 tiles of 64x64 each (using C_accum[0] and C_accum[1])
+The warp grid interpretation is different
+
+In the original:
+
+Each warp handles one 64x64 tile position in M dimension (since REG_BLOCK = 64)
+Each warp computes 2 tiles in N dimension (at warp_col and warp_col+2)
+With 8 warps in 4x2 arrangement, this covers 256x256 (4 warps * 64 = 256 in M, 2 warps * 2 tiles * 64 = 256 in N)
+
+In your new version with REG_BLOCK = 32, you need to adjust the logic completely. The issue is that you changed REG_BLOCK from 64 to 32 but kept the same warp arrangement logic.
+To fix your new version while keeping REG_BLOCK_M/N = 32:
+
+
+cpp// In the compute loop:
+for (int slice = 0; slice < num_slices; ++slice) {
+    // Each warp still loads from its grid position, but now handles 32x32 tiles
+    // warp_row ranges 0-3, each handling a 32-row section
+    kittens::load(a_reg_0, subtile_inplace<REG_BLOCK_M, DOT_SLICE>(As, {warp_row * 2, slice}));
+    kittens::load(a_reg_1, subtile_inplace<REG_BLOCK_M, DOT_SLICE>(As, {warp_row * 2 + 1, slice}));
+    
+    // warp_col is 0 or 1, but B is only 64 wide, so we need different logic
+    // Each slice has 4 columns of 16-wide tiles
+    kittens::load(b_reg_0, subtile_inplace<REG_BLOCK_N, DOT_SLICE>(Bs, {warp_row * 2, slice}));
+    kittens::load(b_reg_1, subtile_inplace<REG_BLOCK_N, DOT_SLICE>(Bs, {warp_row * 2 + 1, slice}));
+    kittens::load(b_reg_2, subtile_inplace<REG_BLOCK_N, DOT_SLICE>(Bs, {warp_row * 2 + 4, slice}));
+    kittens::load(b_reg_3, subtile_inplace<REG_BLOCK_N, DOT_SLICE>(Bs, {warp_row * 2 + 5, slice}));
+    
+    // Continue with 8 MMA operations...
+}
+But wait - this still doesn't make sense with the shared memory layout. The real issue is that your approach of having each warp compute a 2x4 grid of tiles doesn't align with how the data is laid out in shared memory.
+I think you should reconsider the design. Either:
+
+Keep REG_BLOCK = 64 like the original
+Or completely redesign how warps are assigned to computation
+
+The original design was elegant because each warp's computation aligned perfectly with the shared memory layout. Your new design is trying to do too much per warp given the shared memory constraints.
+
+
+User: 
+
+#include "kittens.cuh"
+#include "pyutils/pyutils.cuh"
+#include "utils.cpp"
+using namespace kittens;
+
+constexpr int BLOCK_SIZE       = 256;  
+constexpr int K_STEP           = 256;
+constexpr int DOT_SLICE_SHARED = 64;
+constexpr int REG_BLOCK        = BLOCK_SIZE / 4; 
+constexpr int DOT_SLICE        = 16;
+
+#define NUM_WARPS 8
+#define NUM_THREADS (kittens::WARP_THREADS * NUM_WARPS)
+
+#define M 8192
+#define K 8192
+#define N 8192
+
+using _gl_A = gl<bf16, -1, -1, -1, -1>;
+using _gl_B = gl<bf16, -1, -1, -1, -1>;
+using _gl_C = gl<float, -1, -1, -1, -1>;
+
+using G = kittens::group<8>;
+
+struct micro_globals {
+    _gl_A a;
+    _gl_B b;
+    _gl_C c;
+    dim3 grid()  { return dim3(N / BLOCK_SIZE, M / BLOCK_SIZE); } 
+    dim3 block() { return dim3(NUM_THREADS); } 
+    size_t dynamic_shared_memory() { return 65536; }
+};
+
+__global__ __launch_bounds__(NUM_THREADS, 1)
+void micro_tk(const micro_globals g) {
+    extern __shared__ alignment_dummy __shm[];
+    shared_allocator al((int*)&__shm[0]);
+    st_bf<BLOCK_SIZE, DOT_SLICE_SHARED> (&As) = al.allocate<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>();
+    st_bf<BLOCK_SIZE, DOT_SLICE_SHARED> (&Bs) = al.allocate<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>();
+
+    rt_bf<REG_BLOCK, DOT_SLICE> a_reg_0, b_reg;
+    rt_fl<REG_BLOCK, REG_BLOCK, ducks::rt_layout::col> C_accum[2];
+    for (int i = 0; i < 2; i++) { zero(C_accum[i]); }
+
+    // Small register buffers for pipelining
+    constexpr int BUFFER_SIZE = 64;
+    float4 a_buffer_next[BUFFER_SIZE];
+    float4 b_buffer_next[BUFFER_SIZE];
+    int a_metadata[3], b_metadata[3];
+
+    const int row = blockIdx.y;
+    const int col = blockIdx.x;
+
+    const int warp_id = kittens::warpid();
+    const int warp_row = warp_id / 2;
+    const int warp_col = warp_id % 2;
+
+    const int num_tiles = K / K_STEP;
+    const int num_shared_slices = K_STEP / DOT_SLICE_SHARED;
+    const int num_slices = DOT_SLICE_SHARED / DOT_SLICE;
+
+    // Load first tile into shared memory
+    G::load(As, g.a, {0, 0, row, 0});
+    G::load(Bs, g.b, {0, 0, col, 0});
+
+
+    // Pre-load second tile into register bufers 
+    load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_A, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+        a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, 1}, As, a_metadata);
+    load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_B, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+        b_buffer_next, BUFFER_SIZE, g.b, {0, 0, col, 1}, Bs, b_metadata);
+
+    if (warp_col / 4 == 0) {
+        __builtin_amdgcn_s_barrier();
+    }
+    asm volatile("s_waitcnt vmcnt(0)");
+
+
+    // #pragma unroll 2
+    for (int tile = 0; tile < num_tiles; ++tile) {
+
+        for (int shared_slice = 0; shared_slice < num_shared_slices; ++shared_slice) {
+            const int next_k_offset = tile * num_shared_slices + shared_slice + 1;
+            const bool should_load = (next_k_offset < num_tiles * num_shared_slices);
+
+            // Start loading NEXT data to registers 
+            if (should_load) {
+                load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_A, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+                    a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, next_k_offset}, As, a_metadata);
+                
+                load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_B, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+                    b_buffer_next, BUFFER_SIZE, g.b, {0, 0, col, next_k_offset}, Bs, b_metadata);
+            }
+
+            __builtin_amdgcn_s_barrier();
+
+            
+            // Compute on CURRENT data in shared memory
+            #pragma unroll 
+            for (int slice = 0; slice < num_slices; ++slice) {
+                kittens::load(a_reg_0, subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row, slice}));
+                kittens::load(b_reg, subtile_inplace<REG_BLOCK, DOT_SLICE>(Bs, {warp_col, slice}));
+                mma_ABt(C_accum[0], a_reg_0, b_reg, C_accum[0]);
+                kittens::load(b_reg, subtile_inplace<REG_BLOCK, DOT_SLICE>(Bs, {warp_col + 2, slice}));
+                mma_ABt(C_accum[1], a_reg_0, b_reg, C_accum[1]);
+            }
+            asm volatile("s_waitcnt vmcnt(1)");
+
+            // Now wait for loads and write to shared memory
+            if (should_load) {
+                store_registers_to_shared<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, NUM_THREADS>(
+                    a_buffer_next, As, a_metadata);
+                store_registers_to_shared<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, NUM_THREADS>(
+                    b_buffer_next, Bs, b_metadata);
+            }
+        }
+    }
+
+    if (warp_col / 4 == 1) {
+        __builtin_amdgcn_s_barrier();
+    }
+
+    store(g.c, C_accum[0], {0, 0, row * 4 + warp_row, col * 4 + warp_col});
+    store(g.c, C_accum[1], {0, 0, row * 4 + warp_row, col * 4 + warp_col + 2});
+}
+
+void dispatch_micro(micro_globals g) {
+    unsigned long mem_size = g.dynamic_shared_memory();
+    hipFuncSetAttribute((void*)micro_tk, hipFuncAttributeMaxDynamicSharedMemorySize, mem_size);
+    micro_tk<<<g.grid(), g.block(), mem_size>>>(g);
+    hipDeviceSynchronize();
+}
+
+PYBIND11_MODULE(tk_kernel, m) {
+    m.doc() = "tk_kernel python module";
+    py::bind_kernel<micro_tk>(m, "micro_tk", &micro_globals::a, &micro_globals::b, &micro_globals::c); 
+    py::bind_function<dispatch_micro>(m, "dispatch_micro", &micro_globals::a, &micro_globals::b, &micro_globals::c);
+}
+
+I want a version of this kernel where there are more C_accums. they are broken into smaller pieces.
+
+
+
+Assistant: 
+
+I understand now. You want to keep the same overall computation pattern but break the 64x64 register tiles into smaller pieces (like 32x32) and use more accumulators. Let me help you design this.
+In the original:
+
+Each warp computes 2 tiles of 64x64 (using 2 C_accums)
+REG_BLOCK = 64
+
+To break this into smaller pieces with 32x32 tiles:
+
+Each warp will compute 8 tiles of 32x32 (using 8 C_accums)
+REG_BLOCK = 32
+This gives the same total output: 2×(64×64) = 8×(32×32) = 8192 elements
+
+Here's how to modify the code:
+
+#include "kittens.cuh"
+#include "pyutils/pyutils.cuh"
+#include "utils.cpp"
+using namespace kittens;
+
+constexpr int BLOCK_SIZE       = 256;  
+constexpr int K_STEP           = 256;
+constexpr int DOT_SLICE_SHARED = 64;
+constexpr int REG_BLOCK        = 32;  // Changed from 64 to 32
+constexpr int DOT_SLICE        = 16;
+
+#define NUM_WARPS 8
+#define NUM_THREADS (kittens::WARP_THREADS * NUM_WARPS)
+
+#define M 8192
+#define K 8192
+#define N 8192
+
+using _gl_A = gl<bf16, -1, -1, -1, -1>;
+using _gl_B = gl<bf16, -1, -1, -1, -1>;
+using _gl_C = gl<float, -1, -1, -1, -1>;
+
+using G = kittens::group<8>;
+
+struct micro_globals {
+    _gl_A a;
+    _gl_B b;
+    _gl_C c;
+    dim3 grid()  { return dim3(N / BLOCK_SIZE, M / BLOCK_SIZE); } 
+    dim3 block() { return dim3(NUM_THREADS); } 
+    size_t dynamic_shared_memory() { return 65536; }
+};
+
+__global__ __launch_bounds__(NUM_THREADS, 1)
+void micro_tk(const micro_globals g) {
+    extern __shared__ alignment_dummy __shm[];
+    shared_allocator al((int*)&__shm[0]);
+    st_bf<BLOCK_SIZE, DOT_SLICE_SHARED> (&As) = al.allocate<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>();
+    st_bf<BLOCK_SIZE, DOT_SLICE_SHARED> (&Bs) = al.allocate<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>();
+
+    // Now we need 4 register tiles (2 for A, 2 for B) to cover the same area
+    rt_bf<REG_BLOCK, DOT_SLICE> a_reg_0, a_reg_1, b_reg_0, b_reg_1;
+    rt_fl<REG_BLOCK, REG_BLOCK, ducks::rt_layout::col> C_accum[8];
+    for (int i = 0; i < 8; i++) { zero(C_accum[i]); }
+
+    // Small register buffers for pipelining
+    constexpr int BUFFER_SIZE = 64;
+    float4 a_buffer_next[BUFFER_SIZE];
+    float4 b_buffer_next[BUFFER_SIZE];
+    int a_metadata[3], b_metadata[3];
+
+    const int row = blockIdx.y;
+    const int col = blockIdx.x;
+
+    const int warp_id = kittens::warpid();
+    const int warp_row = warp_id / 2;
+    const int warp_col = warp_id % 2;
+
+    const int num_tiles = K / K_STEP;
+    const int num_shared_slices = K_STEP / DOT_SLICE_SHARED;
+    const int num_slices = DOT_SLICE_SHARED / DOT_SLICE;
+
+    // Load first tile into shared memory
+    G::load(As, g.a, {0, 0, row, 0});
+    G::load(Bs, g.b, {0, 0, col, 0});
+
+    // Pre-load second tile into register buffers 
+    load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_A, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+        a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, 1}, As, a_metadata);
+    load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_B, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+        b_buffer_next, BUFFER_SIZE, g.b, {0, 0, col, 1}, Bs, b_metadata);
+
+    if (warp_col / 4 == 0) {
+        __builtin_amdgcn_s_barrier();
+    }
+    asm volatile("s_waitcnt vmcnt(0)");
+
+    for (int tile = 0; tile < num_tiles; ++tile) {
+        for (int shared_slice = 0; shared_slice < num_shared_slices; ++shared_slice) {
+            const int next_k_offset = tile * num_shared_slices + shared_slice + 1;
+            const bool should_load = (next_k_offset < num_tiles * num_shared_slices);
+
+            // Start loading NEXT data to registers 
+            if (should_load) {
+                load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_A, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+                    a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, next_k_offset}, As, a_metadata);
+                
+                load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_B, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+                    b_buffer_next, BUFFER_SIZE, g.b, {0, 0, col, next_k_offset}, Bs, b_metadata);
+            }
+
+            __builtin_amdgcn_s_barrier();
+
+            // Compute on CURRENT data in shared memory
+            #pragma unroll 
+            for (int slice = 0; slice < num_slices; ++slice) {
+                // Load A tiles - each warp loads 2 tiles vertically (covering 64 rows)
+                kittens::load(a_reg_0, subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row * 2, slice}));
+                kittens::load(a_reg_1, subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row * 2 + 1, slice}));
+                
+                // Load B tiles - load 2 sets of tiles horizontally
+                kittens::load(b_reg_0, subtile_inplace<REG_BLOCK, DOT_SLICE>(Bs, {warp_col * 2, slice}));
+                kittens::load(b_reg_1, subtile_inplace<REG_BLOCK, DOT_SLICE>(Bs, {warp_col * 2 + 1, slice}));
+                
+                // First set of 4 MMAs with first B position
+                mma_ABt(C_accum[0], a_reg_0, b_reg_0, C_accum[0]);
+                mma_ABt(C_accum[1], a_reg_0, b_reg_1, C_accum[1]);
+                mma_ABt(C_accum[2], a_reg_1, b_reg_0, C_accum[2]);
+                mma_ABt(C_accum[3], a_reg_1, b_reg_1, C_accum[3]);
+                
+                // Load second set of B tiles (offset by 4 in row dimension)
+                kittens::load(b_reg_0, subtile_inplace<REG_BLOCK, DOT_SLICE>(Bs, {warp_col * 2 + 4, slice}));
+                kittens::load(b_reg_1, subtile_inplace<REG_BLOCK, DOT_SLICE>(Bs, {warp_col * 2 + 5, slice}));
+                
+                // Second set of 4 MMAs with second B position
+                mma_ABt(C_accum[4], a_reg_0, b_reg_0, C_accum[4]);
+                mma_ABt(C_accum[5], a_reg_0, b_reg_1, C_accum[5]);
+                mma_ABt(C_accum[6], a_reg_1, b_reg_0, C_accum[6]);
+                mma_ABt(C_accum[7], a_reg_1, b_reg_1, C_accum[7]);
+            }
+            asm volatile("s_waitcnt vmcnt(1)");
+
+            // Now wait for loads and write to shared memory
+            if (should_load) {
+                store_registers_to_shared<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, NUM_THREADS>(
+                    a_buffer_next, As, a_metadata);
+                store_registers_to_shared<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, NUM_THREADS>(
+                    b_buffer_next, Bs, b_metadata);
+            }
+        }
+    }
+
+    if (warp_col / 4 == 1) {
+        __builtin_amdgcn_s_barrier();
+    }
+
+    // Store all 8 32x32 tiles
+    // Each warp outputs to a 64x128 region, divided into 8 32x32 tiles (2x4 arrangement)
+    const int base_row = row * 8 + warp_row * 2;  // 8 = BLOCK_SIZE/REG_BLOCK
+    const int base_col = col * 8 + warp_col * 4;  // Each warp handles 4 tiles horizontally
+    
+    // First row of outputs (corresponds to a_reg_0)
+    store(g.c, C_accum[0], {0, 0, base_row, base_col});
+    store(g.c, C_accum[1], {0, 0, base_row, base_col + 1});
+    store(g.c, C_accum[4], {0, 0, base_row, base_col + 2});
+    store(g.c, C_accum[5], {0, 0, base_row, base_col + 3});
+    
+    // Second row of outputs (corresponds to a_reg_1)
+    store(g.c, C_accum[2], {0, 0, base_row + 1, base_col});
+    store(g.c, C_accum[3], {0, 0, base_row + 1, base_col + 1});
+    store(g.c, C_accum[6], {0, 0, base_row + 1, base_col + 2});
+    store(g.c, C_accum[7], {0, 0, base_row + 1, base_col + 3});
+}
+
+void dispatch_micro(micro_globals g) {
+    unsigned long mem_size = g.dynamic_shared_memory();
+    hipFuncSetAttribute((void*)micro_tk, hipFuncAttributeMaxDynamicSharedMemorySize, mem_size);
+    micro_tk<<<g.grid(), g.block(), mem_size>>>(g);
+    hipDeviceSynchronize();
+}
+
+PYBIND11_MODULE(tk_kernel, m) {
+    m.doc() = "tk_kernel python module";
+    py::bind_kernel<micro_tk>(m, "micro_tk", &micro_globals::a, &micro_globals::b, &micro_globals::c); 
+    py::bind_function<dispatch_micro>(m, "dispatch_micro", &micro_globals::a, &micro_globals::b, &micro_globals::c);
+}
+
+The key changes I made:
+
+Changed REG_BLOCK from 64 to 32 - This makes each register tile 32x32 instead of 64x64
+Added more register tiles - Now using a_reg_0, a_reg_1, b_reg_0, b_reg_1 to load the data
+Modified the loading pattern:
+
+Each warp loads 2 A tiles vertically (covering 64 rows with 2×32)
+Each warp loads 4 B tiles horizontally (covering 128 columns with 4×32)
+This is done in two phases within the inner loop
+
+
+8 MMA operations - All combinations of 2 A tiles × 4 B tiles = 8 accumulations
+Updated store pattern - The 8 tiles are stored in a 2×4 arrangement to cover the same 64×128 output region that each warp is responsible for
+
+This design maintains the same overall computation as the original but breaks it into smaller 32×32 pieces, allowing you to use 8 C_accum arrays as requested.
+
+
+User: 
+
+diff[:64, :64].max() tensor(0.0078, device='cuda:0')
+diff[64:128, 64:128].max() tensor(5.0091, device='cuda:0')
+diff[128:192, 128:192].max() tensor(4.5784, device='cuda:0')
+diff[192:256, 192:256].max() tensor(0.0077, device='cuda:0')
+diff[7168:7232, 7168:7232].max() tensor(0.0078, device='cuda:0')
+diff[7232:7296, 7232:7296].max() tensor(4.8617, device='cuda:0')
+diff[7296:7360, 7296:7360].max() tensor(4.9185, device='cuda:0')
+diff[7360:7424, 7360:7424].max() tensor(0.0078, device='cuda:0')
+
+Assistant: 
+
+Looking at the error pattern, I can see that certain 64x64 blocks have large errors while others are correct. This suggests that some warps are computing correctly while others are not.
+The issue is in how I'm indexing the B matrix loads. The shared memory Bs is 256x64, which means:
+
+256 rows (8 tiles of 32 rows each)
+64 columns (4 tiles of 16 columns each when using DOT_SLICE=16)
+
+But I'm trying to load B tiles from row indices like warp_col * 2 + 4 and warp_col * 2 + 5, which can go up to 6 or 7 when warp_col = 1. This is within bounds for the 8 row tiles available.
+The real issue is that I'm misunderstanding the layout. In the original code, when loading B tiles for the second accumulator, it uses warp_col + 2, not warp_col * 2 + something.
+Let me trace through what should happen:
+
+Original: Each warp computes two 64x64 tiles horizontally
+New: Each warp should compute 8 32x32 tiles in a 2x4 arrangement
+
+The key insight is that the shared memory B matrix represents the transposed B data for the multiplication. When we do mma_ABt, we're multiplying A by B^T.
+Here's the corrected loading pattern:
+
+
+#include "kittens.cuh"
+#include "pyutils/pyutils.cuh"
+#include "utils.cpp"
+using namespace kittens;
+
+constexpr int BLOCK_SIZE       = 256;  
+constexpr int K_STEP           = 256;
+constexpr int DOT_SLICE_SHARED = 64;
+constexpr int REG_BLOCK        = 32;  // Changed from 64 to 32
+constexpr int DOT_SLICE        = 16;
+
+#define NUM_WARPS 8
+#define NUM_THREADS (kittens::WARP_THREADS * NUM_WARPS)
+
+#define M 8192
+#define K 8192
+#define N 8192
+
+using _gl_A = gl<bf16, -1, -1, -1, -1>;
+using _gl_B = gl<bf16, -1, -1, -1, -1>;
+using _gl_C = gl<float, -1, -1, -1, -1>;
+
+using G = kittens::group<8>;
+
+struct micro_globals {
+    _gl_A a;
+    _gl_B b;
+    _gl_C c;
+    dim3 grid()  { return dim3(N / BLOCK_SIZE, M / BLOCK_SIZE); } 
+    dim3 block() { return dim3(NUM_THREADS); } 
+    size_t dynamic_shared_memory() { return 65536; }
+};
+
+__global__ __launch_bounds__(NUM_THREADS, 1)
+void micro_tk(const micro_globals g) {
+    extern __shared__ alignment_dummy __shm[];
+    shared_allocator al((int*)&__shm[0]);
+    st_bf<BLOCK_SIZE, DOT_SLICE_SHARED> (&As) = al.allocate<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>();
+    st_bf<BLOCK_SIZE, DOT_SLICE_SHARED> (&Bs) = al.allocate<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>();
+
+    // Now we need 4 register tiles (2 for A, 2 for B) to cover the same area
+    rt_bf<REG_BLOCK, DOT_SLICE> a_reg_0, a_reg_1, b_reg_0, b_reg_1;
+    rt_fl<REG_BLOCK, REG_BLOCK, ducks::rt_layout::col> C_accum[8];
+    for (int i = 0; i < 8; i++) { zero(C_accum[i]); }
+
+    // Small register buffers for pipelining
+    constexpr int BUFFER_SIZE = 64;
+    float4 a_buffer_next[BUFFER_SIZE];
+    float4 b_buffer_next[BUFFER_SIZE];
+    int a_metadata[3], b_metadata[3];
+
+    const int row = blockIdx.y;
+    const int col = blockIdx.x;
+
+    const int warp_id = kittens::warpid();
+    const int warp_row = warp_id / 2;
+    const int warp_col = warp_id % 2;
+
+    const int num_tiles = K / K_STEP;
+    const int num_shared_slices = K_STEP / DOT_SLICE_SHARED;
+    const int num_slices = DOT_SLICE_SHARED / DOT_SLICE;
+
+    // Load first tile into shared memory
+    G::load(As, g.a, {0, 0, row, 0});
+    G::load(Bs, g.b, {0, 0, col, 0});
+
+    // Pre-load second tile into register buffers 
+    load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_A, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+        a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, 1}, As, a_metadata);
+    load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_B, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+        b_buffer_next, BUFFER_SIZE, g.b, {0, 0, col, 1}, Bs, b_metadata);
+
+    if (warp_col / 4 == 0) {
+        __builtin_amdgcn_s_barrier();
+    }
+    asm volatile("s_waitcnt vmcnt(0)");
+
+    for (int tile = 0; tile < num_tiles; ++tile) {
+        for (int shared_slice = 0; shared_slice < num_shared_slices; ++shared_slice) {
+            const int next_k_offset = tile * num_shared_slices + shared_slice + 1;
+            const bool should_load = (next_k_offset < num_tiles * num_shared_slices);
+
+            // Start loading NEXT data to registers 
+            if (should_load) {
+                load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_A, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+                    a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, next_k_offset}, As, a_metadata);
+                
+                load_global_to_registers<2, false, st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, _gl_B, coord<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>>, NUM_THREADS>(
+                    b_buffer_next, BUFFER_SIZE, g.b, {0, 0, col, next_k_offset}, Bs, b_metadata);
+            }
+
+            __builtin_amdgcn_s_barrier();
+
+ row dimension)
+                kittens::load(b_reg_0, subtile_inplace<REG_BLOCK, DOT_SLICE>(Bs, {warp_col * 2 + 4, slice}));
+                kittens::load(b_reg_1, subtile_inplace<REG_BLOCK, DOT_SLICE>(Bs, {warp_col * 2 + 5, slice}));
+                
+                // Second set of 4 MMAs with second B position
+                mma_ABt(C_accum[4], a_reg_0, b_reg_0, C_accum[4]);
+                mma_ABt(C_accum[5], a_reg_0, b_reg_1, C_accum[5]);
+                mma_ABt(C_accum[6], a_reg_1, b_reg_0, C_accum[6]);
+                mma_ABt(C_accum[7], a_reg_1, b_reg_1, C_accum[7]);
+            }
+            asm volatile("s_waitcnt vmcnt(1)");
+
+            // Now wait for loads and write to shared memory
+            if (should_load) {
+                store_registers_to_shared<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, NUM_THREADS>(
+                    a_buffer_next, As, a_metadata);
+                store_registers_to_shared<st_bf<BLOCK_SIZE, DOT_SLICE_SHARED>, NUM_THREADS>(
+                    b_buffer_next, Bs, b_metadata);
+            }
+        }
+    }
+
+    if (warp_col / 4 == 1) {
+        __builtin_amdgcn_s_barrier();
+    }
+
+    // Store all 8 32x32 tiles
+    // Each warp outputs to a 64x128 region, divided into 8 32x32 tiles (2x4 arrangement)
+    const int base_row = row * 8 + warp_row * 2;  // 8 = BLOCK_SIZE/REG_BLOCK
+    const int base_col = col * 8 + warp_col * 4;  // Each warp handles 4 tiles horizontally
+    
+    // First row of outputs (corresponds to a_reg_0)
+    store(g.c, C_accum[0], {0, 0, base_row, base_col});
+    store(g.c, C_accum[1], {0, 0, base_row, base_col + 1});
+    store(g.c, C_accum[4], {0, 0, base_row, base_col + 2});
+    store(g.c, C_accum[5], {0, 0, base_row, base_col + 3});
+    
+    // Second row of outputs (corresponds to a_reg_1)
+    store(g.c, C_accum[2], {0, 0, base_row + 1, base_col});
+    store(g.c, C_accum[3], {0, 0, base_row + 1, base_col + 1});
+    store(g.c, C_accum[6], {0, 0, base_row + 1, base_col + 2});
+    store(g.c, C_accum[7], {0, 0, base_row + 1, base_col + 3});
+}
+
+void dispatch_micro(micro_globals g) {
+    unsigned long mem_size = g.dynamic_shared_memory();
+    hipFuncSetAttribute((void*)micro_tk, hipFuncAttributeMaxDynamicSharedMemorySize, mem_size);
+    micro_tk<<<g.grid(), g.block(), mem_size>>>(g);
+    hipDeviceSynchronize();
+}
+
+PYBIND11_MODULE(tk_kernel, m) {
+    m.doc() = "tk_kernel python module";
+    py::bind_kernel<micro_tk>(m, "micro_tk", &micro_globals::a, &micro_globals::b, &micro_globals::c); 
+    py::bind_function<dispatch_micro>(m, "dispatch_micro", &micro_globals::a, &micro_globals::b, &micro_globals::c);
+}
+
+
+Analyzed data
+View analysis
+
+javascript
+
+// Looking at the error pattern - let me analyze which warps are computing incorrectly
+// diff[64:128, 64:128] - large error
+// diff[128:192, 128:192] - large error
+// These correspond to specific warp outputs
+
+// With 8 warps in 4x2 arrangement:
+// warp 0: row 0-63, col 0-127
+// warp 1: row 0-63, col 128-255  
+// warp 2: row 64-127, col 0-127
+// warp 3: row 64-127, col 128-255
+// warp 4: row 128-191, col 0-127
+// warp 5: row 128-191, col 128-255
+// warp 6: row 192-255, col 0-127
+// warp 7: row 192-255, col 128-255
+
+// The errors at [64:128, 64:128] and [128:192, 128:192] suggest war
+Output
+
+Result
+
+Actually, I think I see the issue now. In the original code with 64x64 tiles, the B loading pattern was:
+
+First B tile: warp_col
+Second B tile: warp_col + 2
+This works because with 4 64x64 tiles in a row (256/64 = 4), warp_col values of 0,1 map to tiles 0,1 and then adding 2 gives tiles 2,3.
+
+But with 32x32 tiles, we have 8 tiles in a row (256/32 = 8). The pattern needs to be different.
+
+Let me correct the kernel:
+
+
+#include "kittens.cuh"
+#include "pyutils/pyutils.cuh"
+#include "utils.cpp"
+using namespace kittens;
+
+constexpr int BLOCK_SIZE       = 256;  
+constexpr int K_STEP           = 256;
+constexpr int DOT_SLICE_SHARED = 64;
+constexpr int REG_BLOCK        = 32;  // Changed from 64 to 32
+constexpr int DOT_SLICE        = 16;
+
+#define NUM_WARPS 8
+#define NUM_THREADS (kittens::WARP_THREADS * NUM_WARPS)
+
+#define M 8192
+#define K 8192
+#define N 8192
+
+using _gl_A = gl<bf16, -1, -1, -1, -1>;
+using _gl_B = gl<bf16, -1, -1, -1, -1>;
+using _gl_C = gl<float, -1, -1, -1, -1>;
+
+using G = kittens::group<8>;
+
+struct
+
+
+Let me trace through more carefully. The issue is that I need to understand exactly what each warp should compute:
+
+In the original: Each warp computes a 64x128 region using two 64x64 tiles
+In the new version: Each warp should compute the same 64x128 region using eight 32x32 tiles
+
+Looking at the original code more carefully:
+
+It loads from Bs at positions {warp_col, slice} and {warp_col + 2, slice}
+Since Bs is 256x64 and tiles are 64x16, this means there are 4 row tiles in Bs
+warp_col is 0 or 1, so it accesses row tiles 0,2 or 1,3
+
+Wait, I think I've been misunderstanding the layout. Let me fix this properly:
+
+#include "kittens.cuh"
+#include "pyutils/pyutils.cuh"
+#include "utils.cpp"
+using namespace kittens;
+
+constexpr int BLOCK_SIZE       = 256;  
+constexpr int K_STEP           = 256;
+constexpr int DOT_SLICE_SHARED = 64;
+constexpr int REG_BLOCK        = 32;  // Changed from 64 to 32
+constexpr int DOT_SLICE        = 16;
+
+#define NUM_WARPS 8
+#define NUM_THREADS (kittens::WARP_THREADS * NUM_WARPS)
+
+#define M 8192
+#define K 8192
+#define N 8192
+
+using _gl_A = gl<bf16, -1, -1, -1, -1>;
+using _gl_B = gl<bf16, -1, -1, -1, -1>;
+using _gl_C = gl<float, -1, -1, -1, -1>;
+
+using G = kittens::group<8>;
+
+struct
+
+
+Now I need to also update the store pattern to match this computation layout:
+
+#include "kittens.cuh"
+#include "pyutils/pyutils.cuh"
+#include "utils.cpp"
+using namespace kittens;
+
+constexpr int BLOCK_SIZE       = 256;  
+constexpr int K_STEP           = 256;
+constexpr int DOT_SLICE_SHARED = 64;
+constexpr int REG_BLOCK        = 32;  // Changed from 64 to 32
+constexpr int DOT_SLICE        = 16;
+
+#define NUM_WARPS 8
+#define NUM_THREADS (kittens::WARP_THREADS * NUM_WARPS)
+
+#define M 8192
+#define K 8192
+#define N 8192
+
+using _gl_A = gl<bf16, -1, -1, -1, -1>;
+using _gl_B = gl<bf16, -1, -1, -1, -1>;
+using _gl_C = gl<float, -1, -1, -1, -1>;
+
+using G = kittens::group<8>;
+
+struct
+
+
+The key changes I made:
+
+The B tile loading now follows the pattern (warp_col + 2) * 2 for the second set, which mirrors the original pattern of warp_col + 2 but scaled for 32x32 tiles
+This ensures that warp_col=0 accesses B tiles 0,1,4,5 and warp_col=1 accesses B tiles 2,3,6,7
+
+This should now correctly compute the same result as the original but using 8 smaller accumulators instead of 2 larger ones.
+
+
+
+
+
+
