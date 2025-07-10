@@ -184,9 +184,18 @@ class CartridgeTrainDataset(Dataset):
         index: int,
         row: TrainingExample,
     ) -> CartridgeDatasetElementTokenLabels:
-        token_ids = torch.tensor(row.token_ids)
-        input_ids = token_ids
-        token_labels = token_ids
+        # TODO (SE): Support unique token ids
+        # if row.token_ids is not None:
+        #     token_ids = torch.tensor(row.token_ids)
+        #     input_ids = token_ids
+        # else: 
+        input_ids = self.tokenizer.apply_chat_template(
+            [{"role": m.role, "content": m.content} for m in row.messages],
+            add_generation_prompt=False,
+            return_tensors="pt",
+            chat_template=TEMPLATE,
+        ).squeeze(0)
+        token_labels = input_ids
 
         mask = torch.ones_like(input_ids, dtype=torch.bool)
         # SE(04/03): need to ensure that this is a boolean mask

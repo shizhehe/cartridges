@@ -98,10 +98,10 @@ class TokasaurusClient(Client):
                             )
                         response = await resp.content.read()
                 
-                print(f"batch/chat/completions took {time.time() - t0} seconds")
+                # print(f"batch/chat/completions took {time.time() - t0} seconds")
                 t0 = time.time()
                 response = pickle.loads(response)
-                print(f"pickle.loads took {time.time() - t0} seconds")
+                # print(f"pickle.loads took {time.time() - t0} seconds")
                 break
             except Exception as e:
                 logger.warning(f"Error sending request (retry {retry_idx + 1}/{self.config.max_retries}): {type(e).__name__}: {e}")
@@ -208,11 +208,9 @@ class TokasaurusClient(Client):
                 request["top_logprobs"] = top_logprobs
             return request
         response = await self._send_requests([_construct_request(chat) for chat in chats], modal_upstream_id)
-        print("done.")
         # SE (07/07): Running validation with ChatCompletion Pydantic model is very slow.
         # So we use model_construct to create the objects.
         responses: List[ChatCompletion] = [ChatCompletion.model_construct(**r) for r in response]
-        print("done2.")
         logger.info(f"[batch={modal_upstream_id}] Responses received")
         
         samples = []
