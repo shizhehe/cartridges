@@ -22,7 +22,7 @@ MAX_TOPK_LOGPROBS = int(os.environ.get("MAX_TOPK_LOGPROBS", 20))
 GPU_TYPE: Literal["H100", "H200", "B200", "A100-80GB"] = os.environ.get("GPU_TYPE", "H100")
 MIN_CONTAINERS = int(os.environ.get("MIN_CONTAINERS", 0))
 MAX_CONTAINERS = int(os.environ.get("MAX_CONTAINERS", 24))
-ALLOW_CONCURRENT_INPUTS = int(os.environ.get("ALLOW_CONCURRENT_INPUTS", 2))
+ALLOW_CONCURRENT_INPUTS = int(os.environ.get("ALLOW_CONCURRENT_INPUTS", 6))
 # --- END ARGS ---
 
 MINUTES = 60  # seconds

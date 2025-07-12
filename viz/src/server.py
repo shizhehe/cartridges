@@ -57,7 +57,6 @@ def serialize_training_example(example) -> Dict[str, Any]:
     try:
         messages = []
         for msg in example.messages:
-            print(msg)
             message_data = {
                 'content': msg.content,
                 'role': msg.role,
@@ -89,9 +88,37 @@ def serialize_training_example(example) -> Dict[str, Any]:
             'metadata': {}
         }
 
+def quick_check_dataset(file_path: str) -> Optional[int]:
+    """Quickly check if a pickle file is a valid dataset and return approximate size."""
+    try:
+        with open(file_path, 'rb') as f:
+            data = pickle.load(f)
+        
+        # Handle different data formats and get count without loading all examples
+        if isinstance(data, dict):
+            if 'rows' in data and isinstance(data['rows'], list):
+                return len(data['rows'])
+            elif 'examples' in data and isinstance(data['examples'], list):
+                return len(data['examples'])
+            elif 'data' in data and isinstance(data['data'], list):
+                return len(data['data'])
+            else:
+                # Try to find first list value
+                for value in data.values():
+                    if isinstance(value, list):
+                        return len(value)
+                return 0
+        elif isinstance(data, list):
+            return len(data)
+        else:
+            return 0
+    except Exception as e:
+        print(f"Error quick-checking dataset {file_path}: {e}")
+        return None
+
 @app.get("/api/datasets")
-def get_datasets(output_dir: Optional[str] = Query(None)):
-    """Discover and return available datasets."""
+def discover_datasets(output_dir: Optional[str] = Query(None)):
+    """Discover and return available datasets without loading full content."""
     
     # If no output_dir specified, try common locations
     search_paths = []
@@ -123,8 +150,8 @@ def get_datasets(output_dir: Optional[str] = Query(None)):
         for pkl_file in pkl_files:
             try:
                 # Quick check if it's a valid dataset
-                examples = load_dataset_from_pickle(pkl_file)
-                if examples:
+                size = quick_check_dataset(pkl_file)
+                if size is not None and size > 0:
                     file_path = Path(pkl_file)
                     dataset_name = file_path.stem
                     
@@ -139,13 +166,12 @@ def get_datasets(output_dir: Optional[str] = Query(None)):
                         'name': dataset_name,
                         'path': pkl_file,
                         'relative_path': relative_path,
-                        'size': len(examples),
+                        'size': size,
                         'directory': str(file_path.parent)
                     })
             except Exception as e:
                 print(f"Error checking {pkl_file}: {e}")
                 continue
-    print(len(datasets))
     
     return datasets
 
