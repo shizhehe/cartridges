@@ -10,7 +10,7 @@ from transformers import AutoTokenizer
 
 from cartridges.structs import TrainingExample
 from cartridges.data.tools import instantiate_tools
-from cartridges.clients.base import ClientConfig, ClientSample
+from cartridges.clients.base import ClientConfig, ClientSample, FlatTopLogprobs
 from cartridges.synthesizers.base import AsyncConvoSynthesizer, ConvoSynthesizer
 from cartridges.data.tools import Tool, ToolSet, ToolOutput
 from cartridges.data import MODEL_TO_TOOL_TEMPLATE, MODEL_TO_TOOL_CALL_PARSER, ToolCall, render_tool_template
