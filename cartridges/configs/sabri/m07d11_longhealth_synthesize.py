@@ -53,7 +53,7 @@ config = SynthesizeConfig(
         ],
     ),
     output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),
-    num_samples=4096, 
+    num_samples=16, 
     batch_size=16,    # Smaller batches 
     
     max_num_batches_in_parallel=256,

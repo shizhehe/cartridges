@@ -66,9 +66,11 @@ def serialize_training_example(example) -> Dict[str, Any]:
             
             # Handle logprobs if they exist
             if hasattr(msg, 'top_logprobs') and msg.top_logprobs is not None:
+                top_logprobs = msg.top_logprobs.reconstruct()
+                print(top_logprobs)
                 message_data['top_logprobs'] = {
-                    'logprobs': msg.top_logprobs.logprobs.tolist() if hasattr(msg.top_logprobs.logprobs, 'tolist') else msg.top_logprobs.logprobs,
-                    'token_ids': msg.top_logprobs.token_ids.tolist() if hasattr(msg.top_logprobs.token_ids, 'tolist') else msg.top_logprobs.token_ids
+                    'logprobs': top_logprobs.logprobs.tolist() if hasattr(top_logprobs.logprobs, 'tolist') else top_logprobs.logprobs,
+                    'token_ids': top_logprobs.token_ids.tolist() if hasattr(top_logprobs.token_ids, 'tolist') else top_logprobs.token_ids
                 }
             
             messages.append(message_data)
@@ -90,6 +92,7 @@ def serialize_training_example(example) -> Dict[str, Any]:
 
 def quick_check_dataset(file_path: str) -> Optional[int]:
     """Quickly check if a pickle file is a valid dataset and return approximate size."""
+    return 16
     try:
         with open(file_path, 'rb') as f:
             data = pickle.load(f)
@@ -150,8 +153,9 @@ def discover_datasets(output_dir: Optional[str] = Query(None)):
         for pkl_file in pkl_files:
             try:
                 # Quick check if it's a valid dataset
-                size = quick_check_dataset(pkl_file)
-                if size is not None and size > 0:
+                size_bytes = os.path.getsize(pkl_file)
+                size_gb = size_bytes / (1024 ** 3) if size_bytes is not None else None
+                if size_gb is not None and size_gb > 0:
                     file_path = Path(pkl_file)
                     dataset_name = file_path.stem
                     
@@ -166,7 +170,7 @@ def discover_datasets(output_dir: Optional[str] = Query(None)):
                         'name': dataset_name,
                         'path': pkl_file,
                         'relative_path': relative_path,
-                        'size': size,
+                        'size': size_gb,
                         'directory': str(file_path.parent)
                     })
             except Exception as e:
@@ -176,8 +180,8 @@ def discover_datasets(output_dir: Optional[str] = Query(None)):
     return datasets
 
 @app.get("/api/dataset/{dataset_path:path}")
-def get_dataset(dataset_path: str):
-    """Load and return a specific dataset."""
+def get_dataset_page(dataset_path: str, page: int = Query(0), page_size: int = Query(12)):
+    """Load and return a specific page of a dataset."""
     try:
         # Decode the path
         import urllib.parse
@@ -186,16 +190,26 @@ def get_dataset(dataset_path: str):
         if not os.path.exists(dataset_path):
             raise HTTPException(status_code=404, detail="Dataset not found")
         
+        # Load all examples (we'll optimize this further if needed)
         examples = load_dataset_from_pickle(dataset_path)
+        total_count = len(examples)
         
-        # Serialize examples
+        # Calculate pagination
+        start_idx = page * page_size
+        end_idx = min(start_idx + page_size, total_count)
+        
+        # Only serialize the requested page
+        page_examples = examples[start_idx:end_idx]
         serialized_examples = []
-        for example in examples:
+        for example in page_examples:
             serialized_examples.append(serialize_training_example(example))
         
         return {
             'examples': serialized_examples,
-            'count': len(serialized_examples),
+            'total_count': total_count,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': (total_count + page_size - 1) // page_size,
             'path': dataset_path
         }
     

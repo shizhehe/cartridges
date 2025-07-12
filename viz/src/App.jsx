@@ -5,19 +5,23 @@ function App() {
   const [datasets, setDatasets] = useState([])
   const [selectedDataset, setSelectedDataset] = useState(null)
   const [examples, setExamples] = useState([])
+  const [totalExamples, setTotalExamples] = useState(0)
   const [selectedExample, setSelectedExample] = useState(null)
   const [outputDir, setOutputDir] = useState('')
   const [tokenizerName, setTokenizerName] = useState('meta-llama/Llama-3.2-3B-Instruct')
   const [systemPromptExpanded, setSystemPromptExpanded] = useState(false)
   const [currentPage, setCurrentPage] = useState(0)
-  const [examplesPerPage] = useState(12)
+  const [examplesPerPage] = useState(128)
+  const [loadingDatasetPath, setLoadingDatasetPath] = useState(null)
 
   // Dataset discovery
   useEffect(() => {
     const discoverDatasets = async () => {
       try {
+        console.log('Fetching datasets...')
         const response = await fetch('/api/datasets')
         const data = await response.json()
+        console.log('Datasets received:', data)
         setDatasets(data)
       } catch (error) {
         console.error('Failed to discover datasets:', error)
@@ -26,15 +30,19 @@ function App() {
     discoverDatasets()
   }, [outputDir])
 
-  const loadDataset = async (datasetPath) => {
+  const loadDataset = async (datasetPath, page = 0) => {
+    setLoadingDatasetPath(datasetPath)
     try {
-      const response = await fetch(`/api/dataset/${encodeURIComponent(datasetPath)}`)
+      const response = await fetch(`/api/dataset/${encodeURIComponent(datasetPath)}?page=${page}&page_size=${examplesPerPage}`)
       const data = await response.json()
       setExamples(data.examples)
+      setTotalExamples(data.total_count)
       setSelectedDataset(datasetPath)
-      setCurrentPage(0) // Reset to first page when loading new dataset
+      setCurrentPage(page)
     } catch (error) {
       console.error('Failed to load dataset:', error)
+    } finally {
+      setLoadingDatasetPath(null)
     }
   }
 
@@ -299,19 +307,31 @@ function App() {
           />
         </div>
         <div className="flex flex-col gap-2">
+          {console.log('Rendering datasets:', datasets.length)}
           {datasets.map((dataset, idx) => (
             <div
               key={idx}
-              className={`p-3 border border-gray-300 rounded cursor-pointer transition-colors hover:bg-gray-200 ${
-                selectedDataset === dataset.path ? 'bg-blue-50 border-blue-400' : ''
-              }`}
-              onClick={() => loadDataset(dataset.path)}
+              className={`p-3 border border-gray-300 rounded transition-colors relative ${
+                loadingDatasetPath === dataset.path
+                  ? 'bg-blue-100 border-blue-400 cursor-wait' 
+                  : selectedDataset === dataset.path 
+                    ? 'bg-blue-50 border-blue-400 cursor-pointer' 
+                    : 'cursor-pointer hover:bg-gray-200'
+              } ${loadingDatasetPath ? 'pointer-events-none' : ''}`}
+              onClick={() => !loadingDatasetPath && loadDataset(dataset.path)}
             >
               <div className="font-bold text-sm text-gray-800">{dataset.name}</div>
               <div className="text-xs text-gray-600 my-1 truncate" title={dataset.path}>
                 {dataset.relative_path}
               </div>
-              <div className="text-xs text-gray-500">{dataset.size} examples</div>
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-gray-500">{dataset.size.toFixed(2)} GB</div>
+                {loadingDatasetPath === dataset.path && (
+                  <div className="flex items-center">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                  </div>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -323,19 +343,25 @@ function App() {
             <h2 className="text-xl font-semibold mb-2 text-gray-800">Select a dataset to explore</h2>
             <p>Choose a dataset from the sidebar to begin exploring training examples.</p>
           </div>
+        ) : loadingDatasetPath ? (
+          <div className="flex flex-col items-center justify-center h-full text-center text-gray-600">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+            <h2 className="text-xl font-semibold mb-2 text-gray-800">Loading Dataset...</h2>
+            <p>Please wait while we load the training examples.</p>
+          </div>
         ) : !selectedExample ? (
           <div>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-2xl font-semibold text-gray-800">Examples Overview</h2>
               <div className="text-sm text-gray-600">
-                {examples.length} total examples
+                {totalExamples} total examples
               </div>
             </div>
             
             {examples.length > 0 && (
               <>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {examples.slice(currentPage * examplesPerPage, (currentPage + 1) * examplesPerPage).map((example, idx) => (
+                  {examples.map((example, idx) => (
                     <div
                       key={currentPage * examplesPerPage + idx}
                       className="border border-gray-300 rounded-lg p-4 cursor-pointer transition-all hover:-translate-y-1 hover:shadow-lg"
@@ -358,21 +384,21 @@ function App() {
                   ))}
                 </div>
                 
-                {Math.ceil(examples.length / examplesPerPage) > 1 && (
+                {Math.ceil(totalExamples / examplesPerPage) > 1 && (
                   <div className="flex items-center justify-center gap-4 mt-6">
                     <button
-                      onClick={() => setCurrentPage(Math.max(0, currentPage - 1))}
-                      disabled={currentPage === 0}
+                      onClick={() => loadDataset(selectedDataset, Math.max(0, currentPage - 1))}
+                      disabled={currentPage === 0 || loadingDatasetPath}
                       className="px-4 py-2 bg-gray-100 border border-gray-300 rounded text-sm hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Previous
                     </button>
                     <span className="text-sm text-gray-600">
-                      Page {currentPage + 1} of {Math.ceil(examples.length / examplesPerPage)}
+                      Page {currentPage + 1} of {Math.ceil(totalExamples / examplesPerPage)}
                     </span>
                     <button
-                      onClick={() => setCurrentPage(Math.min(Math.ceil(examples.length / examplesPerPage) - 1, currentPage + 1))}
-                      disabled={currentPage === Math.ceil(examples.length / examplesPerPage) - 1}
+                      onClick={() => loadDataset(selectedDataset, Math.min(Math.ceil(totalExamples / examplesPerPage) - 1, currentPage + 1))}
+                      disabled={currentPage === Math.ceil(totalExamples / examplesPerPage) - 1 || loadingDatasetPath}
                       className="px-4 py-2 bg-gray-100 border border-gray-300 rounded text-sm hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Next
