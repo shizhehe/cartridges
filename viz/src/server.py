@@ -15,13 +15,14 @@ import uvicorn
 
 app = FastAPI(title="Dataset Visualization API", version="1.0.0")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["*"],
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
 
 def load_dataset_from_pickle(file_path: str) -> List[Dict[str, Any]]:
     """Load dataset from pickle file."""
@@ -56,6 +57,7 @@ def serialize_training_example(example) -> Dict[str, Any]:
     try:
         messages = []
         for msg in example.messages:
+            print(msg)
             message_data = {
                 'content': msg.content,
                 'role': msg.role,
@@ -88,7 +90,7 @@ def serialize_training_example(example) -> Dict[str, Any]:
         }
 
 @app.get("/api/datasets")
-async def get_datasets(output_dir: Optional[str] = Query(None)):
+def get_datasets(output_dir: Optional[str] = Query(None)):
     """Discover and return available datasets."""
     
     # If no output_dir specified, try common locations
@@ -126,20 +128,29 @@ async def get_datasets(output_dir: Optional[str] = Query(None)):
                     file_path = Path(pkl_file)
                     dataset_name = file_path.stem
                     
+                    # Calculate relative path from search_path
+                    try:
+                        relative_path = str(file_path.relative_to(search_path))
+                    except ValueError:
+                        # If relative_to fails, just use the filename
+                        relative_path = file_path.name
+                    
                     datasets.append({
                         'name': dataset_name,
                         'path': pkl_file,
+                        'relative_path': relative_path,
                         'size': len(examples),
                         'directory': str(file_path.parent)
                     })
             except Exception as e:
                 print(f"Error checking {pkl_file}: {e}")
                 continue
+    print(len(datasets))
     
     return datasets
 
 @app.get("/api/dataset/{dataset_path:path}")
-async def get_dataset(dataset_path: str):
+def get_dataset(dataset_path: str):
     """Load and return a specific dataset."""
     try:
         # Decode the path
@@ -166,10 +177,43 @@ async def get_dataset(dataset_path: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/health")
-async def health_check():
+def health_check():
     """Health check endpoint."""
+    print("Health check called!")
     return {'status': 'healthy'}
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8000))
-    uvicorn.run(app, host='0.0.0.0', port=port, reload=True)
+@app.post("/api/decode-tokens")
+def decode_tokens(request: Dict[str, Any]):
+    """Decode token IDs to text using the specified tokenizer."""
+    try:
+        tokenizer_name = request.get('tokenizer_name', 'meta-llama/Llama-3.2-3B-Instruct')
+        token_ids = request.get('token_ids', [])
+        
+        # Try to load the tokenizer
+        try:
+            from transformers import AutoTokenizer
+            tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
+        except Exception as e:
+            # Fallback to a default tokenizer
+            try:
+                tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B", trust_remote_code=True)
+            except Exception as e2:
+                return {'error': f'Failed to load any tokenizer: {str(e2)}'}
+        
+        # Decode tokens
+        decoded_tokens = []
+        for token_id in token_ids:
+            try:
+                decoded = tokenizer.decode([token_id], skip_special_tokens=False)
+                decoded_tokens.append(decoded)
+            except Exception:
+                decoded_tokens.append(f"[ID:{token_id},ERR]")
+        
+        return {'decoded_tokens': decoded_tokens}
+    
+    except Exception as e:
+        return {'error': str(e)}
+
+# if __name__ == '__main__':
+#     port = int(os.environ.get('PORT', 8000))
+#     uvicorn.run("server:app", host='0.0.0.0', port=port, reload=True)

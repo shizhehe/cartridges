@@ -17,10 +17,10 @@ client = TokasaurusClient.Config(
     model_name="Qwen/Qwen3-4b",
 )
 
-client = TokasaurusClient.Config(
-    url="http://0.0.0.0:10210",
-    model_name="Qwen/Qwen3-4b",
-)
+# client = TokasaurusClient.Config(
+#     url="http://0.0.0.0:10210",
+#     model_name="Qwen/Qwen3-4b",
+# )
 
 NUM_PATIENTS = 10
 patient_idxs = list(range(1, NUM_PATIENTS + 1))

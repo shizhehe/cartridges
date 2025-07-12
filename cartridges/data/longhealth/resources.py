@@ -1,7 +1,8 @@
 from typing import Dict, List, Optional, Tuple, Any
+import random
 
 from cartridges.utils import get_logger
-from cartridges.data.resources import BaseStructuredResource
+from cartridges.data.resources import BaseStructuredResource, sample_seed_prompts
 from cartridges.data.longhealth.utils import load_longhealth_dataset
 logger = get_logger(__name__)
 

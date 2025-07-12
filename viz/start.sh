@@ -12,8 +12,8 @@ if ! python3 -c "import fastapi, uvicorn" 2>/dev/null; then
 fi
 
 # Start the Python backend server
-echo "Starting FastAPI server on port 8000..."
-python3 src/server.py &
+echo "Starting FastAPI server on port 8001..."
+uvicorn src.server:app --host 0.0.0.0 --port 8001 --reload &
 BACKEND_PID=$!
 
 # Wait a moment for the backend to start
@@ -37,8 +37,6 @@ trap cleanup SIGINT SIGTERM
 echo "
 Dataset Visualization App is running!
 - Frontend: http://localhost:5173
-- Backend API: http://localhost:8000
-- API Docs: http://localhost:8000/docs
 
 Press Ctrl+C to stop both servers.
 "

@@ -1,24 +1,17 @@
-import requests
+import openai
 
-url = "https://fu-edh8vpwma2wnhmy8chmv8k.us-west.modal.direct/v1/chat/completions"
+openai.api_key = "your-api-key"
 
 for idx in range(10):
-    headers = {
-        "Content-Type": "application/json",
-        "X-Modal-Flash-Upstream": f"testing{idx%2}"
-    }
-    data = {
-        "model": "Qwen/Qwen3-0.6B",
-        "messages": [
+    response = openai.ChatCompletion.create(
+        model="Qwen/Qwen3-0.6B",
+        messages=[
             {"role": "user", "content": f"Hello, how are you? {idx}"}
         ],
-        "max_tokens": 100,
-        "logprobs": True,
-        "top_logprobs": 10
-    }
+        max_tokens=100,
+        logprobs=10
+    )
 
-    response = requests.post(url, headers=headers, json=data)
+    print(response.choices[0].message['content'])
 
-
-print(response.json())
 breakpoint()
