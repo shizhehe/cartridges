@@ -4,11 +4,17 @@ from typing import List, Literal, Optional
 
 import numpy as np
 
-from cartridges.clients.base import TopLogprobs
+from cartridges.clients.base import FlatTopLogprobs
 from cartridges.utils import get_logger
 
 
 logger = get_logger(__name__)
+
+
+@dataclass(slots=True)
+class TopLogprobs:
+    logprobs: np.ndarray  # [num_tokens, num_top_logprobs]
+    token_ids: np.ndarray  # [num_tokens, num_top_logprobs]
 
 
 @dataclass
@@ -19,8 +25,8 @@ class TrainingExample:
         role: Literal["user", "assistant", "system"]
         token_ids: Optional[List[int]]
         
-        top_logprobs: Optional[TopLogprobs] = None
-        mask: Optional[np.ndarray] = None
+        # Sparse dictionary of top logprobs for each token
+        top_logprobs: Optional[FlatTopLogprobs] = None
     """
     Attrs:
         messages: conversation as openai text.

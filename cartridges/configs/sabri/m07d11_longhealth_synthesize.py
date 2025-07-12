@@ -53,10 +53,10 @@ config = SynthesizeConfig(
         ],
     ),
     output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),
-    num_samples=16384, 
+    num_samples=16, 
     batch_size=16,    # Smaller batches 
     
-    max_num_batches_in_parallel=256,
+    max_num_batches_in_parallel=1,
 
     name=FormatStringVariable(f"{Path(__file__).stem}_{patients_str}_n{{num_samples}}"),
     run_id=FormatStringVariable("{name}"),

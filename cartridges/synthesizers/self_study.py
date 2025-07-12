@@ -59,6 +59,7 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
         max_completion_tokens_b: int = 1024
 
         num_top_logprobs: int = 20
+        min_prob_mass: float = 0.99
 
 
     def __init__(self, config: Config):
@@ -364,6 +365,7 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
             strict=True,
         ):
             
+            
             examples.append(
                 TrainingExample(
                     messages=[
@@ -371,7 +373,7 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
                             role=message["role"],
                             content=message["content"],
                             token_ids=message["resp_obj"].token_ids,
-                            top_logprobs=message["resp_obj"].top_logprobs,
+                            top_logprobs=message["resp_obj"].top_logprobs.flatten(threshold=self.config.min_prob_mass),
                         )
                         for message in chat
                     ],

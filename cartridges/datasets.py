@@ -222,6 +222,7 @@ class CartridgeTrainDataset(Dataset):
             return self._getitem_tokens(index, row)
 
         assert isinstance(row, TrainingExample)
+        breakpoint()
 
         
         # for message in row.messages:
