@@ -1,7 +1,7 @@
 import os
 from typing import List
-from cartridges.tools.base import ToolSet, Tool
-from cartridges.tools.mcp.tools import MCPToolSet
+from cartridges.data.tools import ToolSet, Tool
+from cartridges.data.mcp.tools import MCPToolSet
 from pydantic import BaseModel
 
 class Message(BaseModel):
@@ -34,7 +34,7 @@ class GmailToolSet(MCPToolSet):
             command="python",
             args=[
                 "-m",
-                "cartridges.tools.gmail.server"
+                "cartridges.resources.gmail.server"
             ],
             env={
                 "CARTRIDGES_DIR": os.environ.get("CARTRIDGES_DIR", os.getcwd()),

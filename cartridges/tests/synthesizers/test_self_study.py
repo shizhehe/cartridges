@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from cartridges.synthesizers.self_study import SelfStudySynthesizer
 from cartridges.tests.mocks import MockClient, MockTool, MockResource
-from cartridges.tools.base import ToolOutput
+from cartridges.data.tools import ToolOutput
 
 
 class TestSelfStudySynthesizerToolIntegration:
@@ -95,8 +95,8 @@ class TestSelfStudySynthesizerToolIntegration:
         """Test conversation sampling with tool usage enabled."""
         # Patch the tool call parser to return mock tool calls
         with patch('cartridges.synthesizers.self_study.MODEL_TO_TOOL_CALL_PARSER') as mock_parser_dict:
-            from cartridges.tools import ToolCall, FunctionCall
-            from cartridges.tools.base import ToolOutput
+            from cartridges.data import ToolCall, FunctionCall
+            from cartridges.data.tools import ToolOutput
             
             # Mock tool call parser
             def mock_parser(text):
@@ -161,7 +161,7 @@ class TestSelfStudySynthesizerToolIntegration:
         synthesizer.tools["mock_tool"].config.failure_message = "Tool execution failed"
         
         with patch('cartridges.synthesizers.self_study.MODEL_TO_TOOL_CALL_PARSER') as mock_parser_dict:
-            from cartridges.tools import ToolCall, FunctionCall
+            from cartridges.data import ToolCall, FunctionCall
             
             def mock_parser(text):
                 return [ToolCall(
@@ -223,7 +223,7 @@ class TestSelfStudySynthesizerToolIntegration:
     async def test_multiple_tool_calls_per_round(self, synthesizer):
         """Test handling of multiple tool calls in a single round."""
         with patch('cartridges.synthesizers.self_study.MODEL_TO_TOOL_CALL_PARSER') as mock_parser_dict:
-            from cartridges.tools import ToolCall, FunctionCall
+            from cartridges.data import ToolCall, FunctionCall
             
             def mock_parser(text):
                 # Return multiple tool calls
@@ -302,7 +302,7 @@ class TestSelfStudySynthesizerToolIntegration:
     async def test_client_interaction_tracking(self, synthesizer):
         """Test that client interactions are properly tracked."""
         with patch('cartridges.synthesizers.self_study.MODEL_TO_TOOL_CALL_PARSER') as mock_parser_dict:
-            from cartridges.tools import ToolCall, FunctionCall
+            from cartridges.data import ToolCall, FunctionCall
             
             def mock_parser(text):
                 return [ToolCall(
@@ -340,7 +340,7 @@ class TestSelfStudySynthesizerToolIntegration:
         
         for batch_size in batch_sizes:
             with patch('cartridges.synthesizers.self_study.MODEL_TO_TOOL_CALL_PARSER') as mock_parser_dict:
-                from cartridges.tools import ToolCall
+                from cartridges.data import ToolCall
                 
                 def mock_parser(text):
                     return [ToolCall(

@@ -1,8 +1,8 @@
-from cartridges.tools.base import ToolSet, Tool, ToolInput, ToolOutput
+from cartridges.data.tools import ToolSet, Tool, ToolInput, ToolOutput
 from typing import List, Dict, Any
 import asyncio
 from contextlib import AsyncExitStack
-from cartridges.tools.mcp.mixin import MCPMixin
+from cartridges.data.mcp.mixin import MCPMixin
 
 try:
     from mcp import ClientSession, StdioServerParameters

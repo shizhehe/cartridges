@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from cartridges.tools.mcp.tools import MCPToolSet, MCPTool
-from cartridges.tools.base import ToolInput, ToolOutput
+from cartridges.data.mcp.tools import MCPToolSet, MCPTool
+from cartridges.data.tools import ToolInput, ToolOutput
 
 
 class TestMCPToolSet:
@@ -71,8 +71,8 @@ class TestMCPToolSet:
         mcp_tools = MCPToolSet(config)
         
         # Mock the MCP client components
-        with patch('cartridges.tools.mcp.tools.stdio_client') as mock_stdio_client, \
-             patch('cartridges.tools.mcp.tools.ClientSession') as mock_session_class:
+        with patch('cartridges.resources.mcp.tools.stdio_client') as mock_stdio_client, \
+             patch('cartridges.resources.mcp.tools.ClientSession') as mock_session_class:
             
             # Setup mocks
             mock_transport = (AsyncMock(), AsyncMock())

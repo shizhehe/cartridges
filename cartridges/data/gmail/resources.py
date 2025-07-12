@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from datetime import datetime, timedelta
 from collections import defaultdict
 
-from cartridges.resources.base import Resource
+from cartridges.data.resources import Resource
 from .utils import get_service_pool
 
 class LabelConfig(BaseModel):

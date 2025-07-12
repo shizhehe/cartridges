@@ -1,9 +1,9 @@
 import pytest
 import os
 from unittest.mock import MagicMock
-from cartridges.tools.slack.slack import SlackToolSet
-from cartridges.tools.mcp.tools import MCPTool
-from cartridges.tools.base import ToolOutput
+from cartridges.data.slack.slack import SlackToolSet
+from cartridges.data.mcp.tools import MCPTool
+from cartridges.data.tools import ToolOutput
 
 
 class TestSlackToolSet:

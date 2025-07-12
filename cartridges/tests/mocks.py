@@ -5,8 +5,8 @@ import numpy as np
 
 from cartridges.clients.base import Client, ClientConfig, ClientResponse, ClientSample, TopLogprobs
 from cartridges.clients.usage import Usage
-from cartridges.tools.base import Tool, ToolInput, ToolOutput
-from cartridges.resources.base import Resource
+from cartridges.data.tools import Tool, ToolInput, ToolOutput
+from cartridges.data.resources import Resource
 
 
 class MockClient(Client):

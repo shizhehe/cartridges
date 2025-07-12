@@ -7,16 +7,21 @@ from cartridges.clients.tokasaurus import TokasaurusClient
 
 from cartridges.synthesize import SynthesizeConfig
 from cartridges.synthesizers.self_study import SelfStudySynthesizer
+from cartridges.data.resources import FileResource
 from cartridges.utils import WandBConfig
-from cartridges.data.gmail.tools import GmailToolSet
-from cartridges.data.gmail.resources import GmailResource, LabelConfig
 
 
 
 client = TokasaurusClient.Config(
-    url="https://hazyresearch--toka-qwen3-4b-1xh100-min0-serve.modal.run/v1",
+    url="https://hazyresearch--toka-qwen3-4b-1xh100-min0-serve.modal.run",
     model_name="Qwen/Qwen3-4b",
 )
+
+client = TokasaurusClient.Config(
+    url="http://0.0.0.0:10210",
+    model_name="Qwen/Qwen3-4b",
+)
+
 
 
 config = SynthesizeConfig(
@@ -27,26 +32,23 @@ config = SynthesizeConfig(
         prob_cot_a=0.3,
         use_tools_a=False, 
         use_tools_b=False,
-        tools=[
-            # GmailToolSet.Config(email="sabri@stanford.edu"  )
-        ],
+        max_completion_tokens_b=256,
+        tools=[],
         resources=[
-            GmailResource.Config(
-                labels=[
-                    LabelConfig(name="categories--stanford--primary--stanford-", weight=1.0),
-                    LabelConfig(name="categories--stanford--updates--stanford-", weight=1.0),
-                ]
+            FileResource.Config(
+                path=os.path.join(os.environ["CARTRIDGES_DIR"], "README.md"),
+                seed_prompts=["generic"]
             )
         ],
     ),
-    output_dir=os.environ.get("CODEMEM_OUTPUT_DIR", "."),
-    num_samples=32768, 
-    batch_size=64,    # Smaller batches 
+    output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),
+    num_samples=16, 
+    batch_size=4,    # Smaller batches 
     
-    max_num_batches_in_parallel=32,
+    max_num_batches_in_parallel=1,
 
-    name=FormatStringVariable(f"gmail_synthesis"),
-    run_id="gmail_synthesis",
+    name=FormatStringVariable(f"file_synthesis"),
+    run_id="file_synthesis",
     wandb=WandBConfig(
         project="cartridges",
         entity="hazy-research",

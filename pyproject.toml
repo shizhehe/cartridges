@@ -31,8 +31,7 @@ dependencies = [
 [project.scripts]
 pdr = "pdr.cli:main"
 
-[tool.pyright]
-include = ["cartridges"]
+
 
 [tool.setuptools]
 packages = ["cartridges", "scripts"]

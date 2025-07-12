@@ -23,8 +23,8 @@ from mimetypes import guess_type as guess_mime_type
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel
 
-from cartridges.tools.gmail.tools import Message, Thread
-from cartridges.tools.gmail.utils import authenticate_gmail_api
+from cartridges.data.gmail.tools import Message, Thread
+from cartridges.data.gmail.utils import authenticate_gmail_api
 
 # SETUP INSTRUCTIONS:
 # Follow the steps here to get a credentials.json file: https://thepythoncode.com/article/use-gmail-api-in-python

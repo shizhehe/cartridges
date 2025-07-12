@@ -1,8 +1,8 @@
 from typing import List, Literal, Optional
 from pydantic import BaseModel
 
-from cartridges.tools.base import Tool, ToolInput, ToolOutput
-from cartridges.tools.retrieval.retrievers import Retriever
+from cartridges.data.tools import Tool, ToolInput, ToolOutput
+from cartridges.data.retrieval.retrievers import Retriever
 
 import fitz
 import requests

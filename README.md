@@ -365,7 +365,7 @@ class CustomPromptSampler(PromptSampler):
 You can enhance the self-study process with tools that allow agents to dynamically retrieve additional context:
 
 ```python
-from cartridges.tools.base import Tool
+from cartridges.data.tools import Tool
 
 # Define custom tools for information retrieval
 tools = [

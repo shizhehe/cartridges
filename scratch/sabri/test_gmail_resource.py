@@ -17,7 +17,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from cartridges.tools.gmail.resources import GmailResource, LabelConfig
+from cartridges.data.gmail.resources import GmailResource, LabelConfig
 
 
 async def test_gmail_resource():

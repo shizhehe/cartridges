@@ -1,9 +1,9 @@
 import pytest
 import os
 from unittest.mock import MagicMock
-from cartridges.tools.gmail.gmail import GmailToolSet
-from cartridges.tools.mcp.tools import MCPTool
-from cartridges.tools.base import ToolOutput
+from cartridges.data.gmail.gmail import GmailToolSet
+from cartridges.data.mcp.tools import MCPTool
+from cartridges.data.tools import ToolOutput
 
 
 class TestGmailToolSet:

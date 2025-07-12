@@ -7,8 +7,8 @@ from cartridges.clients.tokasaurus import TokasaurusClient
 
 from cartridges.synthesize import SynthesizeConfig
 from cartridges.synthesizers.self_study import SelfStudySynthesizer
-from cartridges.resources.chatlog import ChatLogResource
-from cartridges.resources.code import CodeResource
+from cartridges.data.chatlog import ChatLogResource
+from cartridges.data.code import CodeResource
 from cartridges.utils import WandBConfig
 
 

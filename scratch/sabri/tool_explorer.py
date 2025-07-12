@@ -24,7 +24,7 @@ from pydantic import BaseModel, ValidationError
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from cartridges.tools.base import Tool, ToolSet, ToolInput, ToolOutput, instantiate_tools
+from cartridges.data.tools import Tool, ToolSet, ToolInput, ToolOutput, instantiate_tools
 
 
 class ToolExplorer:

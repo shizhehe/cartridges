@@ -9,13 +9,13 @@ from typing import List
 from transformers import AutoTokenizer
 
 from cartridges.structs import TrainingExample
-from cartridges.tools.base import instantiate_tools
+from cartridges.data.tools import instantiate_tools
 from cartridges.clients.base import ClientConfig, ClientSample
 from cartridges.synthesizers.base import AsyncConvoSynthesizer, ConvoSynthesizer
-from cartridges.tools.base import Tool, ToolSet, ToolOutput
-from cartridges.tools import MODEL_TO_TOOL_TEMPLATE, MODEL_TO_TOOL_CALL_PARSER, ToolCall, render_tool_template
+from cartridges.data.tools import Tool, ToolSet, ToolOutput
+from cartridges.data import MODEL_TO_TOOL_TEMPLATE, MODEL_TO_TOOL_CALL_PARSER, ToolCall, render_tool_template
 from cartridges.utils import get_logger
-from cartridges.resources.base import Resource
+from cartridges.data.resources import Resource
 
 logger = get_logger(__name__)
 

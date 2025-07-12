@@ -6,14 +6,14 @@ import pydrantic
 from pydrantic.variables import FormatStringVariable
 
 from cartridges.clients.tokasaurus_batch import TokasaurusBatchClient
-from cartridges.resources.text import StaticTextResource
-from cartridges.resources.code import CodeResource
-from cartridges.resources.slack import SlackResource
+from cartridges.data.text import StaticTextResource
+from cartridges.data.code import CodeResource
+from cartridges.data.slack import SlackResource
 from cartridges.synthesize import SynthesizeConfig
 from cartridges.synthesizers.self_study import SelfStudySynthesizer
 from cartridges.utils import WandBConfig
-from cartridges.tools.retrieval import RetrievalTool, BM25Retriever, SourceConfig
-from cartridges.tools.retrieval.tools import AMD_TK_SOURCES
+from cartridges.data.retrieval import RetrievalTool, BM25Retriever, SourceConfig
+from cartridges.data.retrieval.tools import AMD_TK_SOURCES
 
 
 client = TokasaurusBatchClient.Config(
