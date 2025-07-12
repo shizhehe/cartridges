@@ -365,12 +365,13 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
             strict=True,
         ):
 
-            if message["resp_obj"].top_logprobs is not None:
-                top_logprobs = message["resp_obj"].top_logprobs.flatten(
-                    threshold=self.config.min_prob_mass)
-            else:
-                top_logprobs = None
-            
+            def prepare_logprobs(message: dict) -> FlatTopLogprobs | None:
+                if message["resp_obj"].top_logprobs is not None:
+                    return message["resp_obj"].top_logprobs.flatten(
+                        threshold=self.config.min_prob_mass)
+                else:
+                    return None
+
             
             examples.append(
                 TrainingExample(
@@ -379,7 +380,7 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
                             role=message["role"],
                             content=message["content"],
                             token_ids=message["resp_obj"].token_ids,
-                            top_logprobs=top_logprobs,
+                            top_logprobs=prepare_logprobs(message),
                         )
                         for message in chat
                     ],
