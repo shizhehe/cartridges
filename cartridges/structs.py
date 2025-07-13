@@ -11,12 +11,6 @@ from cartridges.utils import get_logger
 logger = get_logger(__name__)
 
 
-@dataclass(slots=True)
-class TopLogprobs:
-    logprobs: np.ndarray  # [num_tokens, num_top_logprobs]
-    token_ids: np.ndarray  # [num_tokens, num_top_logprobs]
-
-
 @dataclass
 class TrainingExample:
     @dataclass

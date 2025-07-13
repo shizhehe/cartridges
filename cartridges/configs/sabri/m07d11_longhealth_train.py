@@ -15,7 +15,7 @@ file_name = Path(__file__).stem
 bs = 64
 
 data_sources = [
-    "/home/sabri/cartridges/outputs/2025-07-11-21-47-50-m07d11_test_longhealth_synthesis/m07d11_test_longhealth_synthesis_p10_n4096-0/artifact/dataset.pkl"
+    "/home/sabri/cartridges/outputs/2025-07-13-09-04-32-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_p10_n65536-0/artifact/dataset.pkl"
 ]
 
 config = TrainConfig(

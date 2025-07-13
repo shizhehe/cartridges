@@ -1,9 +1,8 @@
-from collections import defaultdict
+from __future__ import annotations
 import pickle
-import pyarrow as pa
 from pathlib import Path
 import random
-import pandas as pd
+
 from torch.utils.data import Dataset
 from dataclasses import dataclass
 from typing import Dict, List, Literal, Optional, Any
@@ -12,6 +11,7 @@ import os
 
 from transformers import PreTrainedTokenizerFast
 from pydrantic import ObjectConfig
+import numpy as np
 
 from cartridges.structs import TrainingExample
 from torch.utils.data import BatchSampler, Sampler
@@ -67,15 +67,70 @@ class TokenCounts:
         )
 
 
+def _base_convert_messages_to_element(
+    messages: List[TrainingExample.Message],
+    message_start_tokens: dict[str, list[int]],
+    message_end_tokens: dict[str, list[int]],
+) -> CartridgeDatasetElementLogitLabels:
+    input_ids, topk_token_ids, topk_logprobs, topk_token_idxs = [], [], [], []
+    token_counts = TokenCounts()
+
+    for message in messages:
+        msg_input_ids = message_start_tokens[message.role] + message.token_ids + message_end_tokens[message.role]
+
+        if message.top_logprobs is not None:
+            topk_token_ids.append(message.top_logprobs.token_id)
+            topk_logprobs.append(message.top_logprobs.logprobs)
+            topk_token_idxs.append(message.top_logprobs.token_idx + len(input_ids) + len(message_start_tokens[message.role]))
+
+        input_ids.extend(msg_input_ids)
+    
+    # FIXME: this is broken in the case that we truncate the input ids
+    token_counts += TokenCounts(
+        num_system_and_user_tokens=len(input_ids) if message.role == "user" else 0,
+        num_assistant_tokens=len(input_ids) if message.role == "assistant" else 0,
+    )
+
+    return CartridgeDatasetElementLogitLabels(
+        input_ids=torch.tensor(input_ids, dtype=torch.long),
+        topk_token_ids=torch.from_numpy(np.concatenate(topk_token_ids)),
+        topk_logprobs=torch.from_numpy(np.concatenate(topk_logprobs)),
+        topk_token_idxs=torch.from_numpy(np.concatenate(topk_token_idxs)),
+        metadata=[],
+        token_counts=token_counts,
+    )
+
+def qwen_messages_to_element(
+    messages: List[TrainingExample.Message],
+) -> CartridgeDatasetElementLogitLabels:
+
+    return _base_convert_messages_to_element(
+        messages,
+        message_start_tokens={
+            "user": [151644, 872,198],
+            "assistant": [151644, 77091,198],
+        },
+        message_end_tokens={
+            "user": [151645, 198],
+            "assistant": [151645, 198],
+        },
+    )
+
+MODEL_TO_MESSAGE_CONVERTER = {
+    "Qwen/Qwen3-4b": qwen_messages_to_element,
+}
+
+
 @dataclass
 class CartridgeDatasetElementLogitLabels:
     input_ids: torch.Tensor
     
 
     topk_logprobs: torch.Tensor
-    topk_tokens: torch.Tensor
+    topk_token_ids: torch.Tensor
+    topk_token_idxs: torch.Tensor
 
-    mask: torch.Tensor
+
     metadata: list[dict[str, Any]]
     token_counts: TokenCounts
     
@@ -148,7 +203,7 @@ class CartridgeTrainDataset(Dataset):
 
         self.config = config
 
-        self.data = []
+        self.data: List[TrainingExample] = []
         self.datasets = []
 
         for source, limit in config.data_sources:
@@ -222,48 +277,7 @@ class CartridgeTrainDataset(Dataset):
             return self._getitem_tokens(index, row)
 
         assert isinstance(row, TrainingExample)
-        breakpoint()
-
-        
-        # for message in row.messages:
-
-        
-        # truncate the input ids
-        if (
-            self.config.max_sequence_length is not None
-            and len(row.token_ids) > self.config.max_sequence_length
-        ):
-            row.token_ids = row.token_ids[:self.config.max_sequence_length + 1]
-            row.top_logprob_ids = row.top_logprob_ids[:self.config.max_sequence_length]
-            row.top_logprob_logprobs = row.top_logprob_logprobs[:self.config.max_sequence_length]
-
-        element = CartridgeDatasetElementLogitLabels(
-            input_ids=torch.from_numpy(row.token_ids[:-1]),
-            topk_tokens=torch.from_numpy(row.top_logprob_ids),
-            topk_logprobs=torch.from_numpy(row.top_logprob_logprobs),
-            mask=torch.full_like(torch.from_numpy(row.token_ids[:-1]), True),
-            metadata=[],
-            
-            # FIXME: this is broken in the case that we truncate the input ids
-            token_counts=TokenCounts(
-                # -1 because we last token is jut output (not input)
-                num_assistant_tokens=row.num_output_tokens - 1,
-                num_system_and_user_tokens=len(row.token_ids)
-                - row.num_output_tokens
-                - 1,
-            ),
-        )
-
-        assert len(element.topk_logprobs.shape) == 2
-        assert element.topk_logprobs.shape == element.topk_tokens.shape
-        assert element.topk_logprobs.shape[1] == self.config.top_k_logits
-
-        assert len(element.input_ids.shape) == 1
-        assert element.input_ids.shape == element.mask.shape
-
-        assert element.topk_logprobs.shape[0] == element.input_ids.shape[0]
-
-        return element
+        return MODEL_TO_MESSAGE_CONVERTER[self.tokenizer.name_or_path](row.messages)
 
     def reload(self):
         # Check if dataset has data_source_indices attribute

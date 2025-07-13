@@ -116,7 +116,6 @@ class TrainConfig(RunConfig):
     local_batch_size: int = 32
     use_batch_sampler: bool = False
 
-    tokenizer: str = "meta-llama/Llama-3.2-1B-Instruct"
     epochs: int = 5
     device: str = "cuda"
     distributed_backend: Literal["nccl", "gloo"] = "nccl"
@@ -208,7 +207,7 @@ def train(config: TrainConfig):
     logger.info(f"Train outputs will be saved to {config.run_dir}")
     # logger.info("Initializing tokenizer and dataset")
     download_wandb_artifacts(config)
-    tokenizer = AutoTokenizer.from_pretrained(config.tokenizer)
+    tokenizer = AutoTokenizer.from_pretrained(config.model.pretrained_model_name_or_path)
 
     # Load all the datasets in parallel
     ds_load_start_time = time.time()

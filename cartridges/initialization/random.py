@@ -3,7 +3,7 @@ from typing import Literal, Optional
 
 import torch
 from cartridges.cache import AttnConfig, KVCacheFactory, TrainableCache
-from cartridges.initialization.tokenization_utils import tokenize_data_into_system_prompt
+from cartridges.initialization.tokenization_utils import MODEL_TO_SYSTEM_PROMPT_TOKENIZER
 from transformers import DynamicCache
 
 class KVFromRandomVectors(KVCacheFactory):
@@ -48,6 +48,8 @@ class KVFromRandomText(KVCacheFactory):
     ) -> TrainableCache:
         content = (Path(__file__).resolve().parent / "data" / self.config.text_source).read_text()
 
+        tokenize_data_into_system_prompt = MODEL_TO_SYSTEM_PROMPT_TOKENIZER[tokenizer.name_or_path]
+
         input_ids = tokenize_data_into_system_prompt(
             tokenizer=tokenizer,
             content=content,
@@ -70,3 +72,9 @@ class KVFromRandomText(KVCacheFactory):
                 values=list(init_cache.value_cache),
                 num_frozen_tokens=self.config.num_frozen_tokens,
             )
+
+
+from typing import Optional
+import torch
+
+

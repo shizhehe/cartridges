@@ -17,6 +17,11 @@ client = TokasaurusClient.Config(
     model_name="Qwen/Qwen3-4b",
 )
 
+client = TokasaurusClient.Config(
+    url="https://hazyresearch--toka-llama-3-2-3b-instruct-1xh100-min0-serve.modal.run",
+    model_name="meta-llama/Llama-3.2-3B-Instruct",
+)
+
 # client = TokasaurusClient.Config(
 #     url="http://0.0.0.0:10210",
 #     model_name="Qwen/Qwen3-4b",
@@ -53,8 +58,8 @@ config = SynthesizeConfig(
         ],
     ),
     output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),
-    num_samples=16, 
-    batch_size=16,    # Smaller batches 
+    num_samples=65536, 
+    batch_size=32,    # Smaller batches 
     
     max_num_batches_in_parallel=256,
 
