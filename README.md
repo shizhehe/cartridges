@@ -128,7 +128,7 @@ uv pip install -e .
 
 2. Start the server:
 ```bash
-tksrs model=meta-llama/Llama-3.2-3B-Instruct kv_cache_num_tokens='(512 * 1024)' max_top_logprobs=5
+toka model=meta-llama/Llama-3.2-3B-Instruct kv_cache_num_tokens='(512 * 1024)' max_top_logprobs=5
 ```
 
 3. Configure your client:

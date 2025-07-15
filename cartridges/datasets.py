@@ -141,6 +141,7 @@ class CartridgeDatasetElementLogitLabels:
 @dataclass
 class CartridgeDatasetBatchLogitLabels:
     input_ids: torch.Tensor
+    element_ids: torch.Tensor
 
     topk_logprobs: torch.Tensor
     topk_tokens: torch.Tensor
