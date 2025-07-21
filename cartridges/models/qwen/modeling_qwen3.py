@@ -16,6 +16,7 @@ from typing import Callable, Optional, Union
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 from torch.nn.attention.flex_attention import (
     create_block_mask,
     flex_attention,
@@ -206,14 +207,20 @@ class Qwen3Attention(nn.Module):
             # sin and cos are specific to RoPE models; cache_position needed for the static cache
             cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
-
-        attn_output = flex_attention(
+        
+        print("Flex query in:", query_states)
+        print("Flex key in:", key_states)
+        print("Flex value in:", value_states)
+        attention_interface = ALL_ATTENTION_FUNCTIONS["flex_attention"]
+        attn_output, _ = attention_interface(
+            self,
             query_states,
             key_states,
             value_states,
-            block_mask=attention_mask,
+            attention_mask=attention_mask,
+            scaling=self.scaling,
         )
-
+        print("Flex attn out:", attn_output)
         attn_output = attn_output.reshape(*input_shape, -1).contiguous()
         attn_output = self.o_proj(attn_output)
         return attn_output
