@@ -26,7 +26,6 @@ from transformers.cache_utils import Cache, DynamicCache
 from transformers.generation import GenerationMixin
 from transformers.integrations import use_kernel_forward_from_hub
 from transformers.masking_utils import create_causal_mask, create_sliding_window_causal_mask
-from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
 from transformers.modeling_layers import GradientCheckpointingLayer
 from transformers.modeling_outputs import (
     BaseModelOutputWithPast,
@@ -39,8 +38,6 @@ from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS, dynamic_rope_u
 from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS, PreTrainedModel
 from transformers.processing_utils import Unpack
 from transformers.utils import auto_docstring, can_return_tuple, logging
-from transformers.utils.generic import check_model_inputs
-
 
 from .configuration_qwen3 import Qwen3Config
 
@@ -141,7 +138,6 @@ def eager_attention_forward(
     attention_mask: Optional[torch.Tensor],
     scaling: float,
     dropout: float = 0.0,
-    **kwargs: Unpack[TransformersKwargs],
 ):
     key_states = repeat_kv(key, module.num_key_value_groups)
     value_states = repeat_kv(value, module.num_key_value_groups)
@@ -211,7 +207,7 @@ class Qwen3Attention(nn.Module):
             cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
-        attn_output, attn_weights = flex_attention(
+        attn_output = flex_attention(
             query_states,
             key_states,
             value_states,
@@ -220,7 +216,7 @@ class Qwen3Attention(nn.Module):
 
         attn_output = attn_output.reshape(*input_shape, -1).contiguous()
         attn_output = self.o_proj(attn_output)
-        return attn_output, attn_weights
+        return attn_output
 
 
 class Qwen3DecoderLayer(GradientCheckpointingLayer):
@@ -244,20 +240,15 @@ class Qwen3DecoderLayer(GradientCheckpointingLayer):
         use_cache: Optional[bool] = False,
         cache_position: Optional[torch.LongTensor] = None,
         position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,  # necessary, but kept here for BC
-        **kwargs: Unpack[TransformersKwargs],
     ) -> tuple[torch.Tensor]:
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
         # Self Attention
-        hidden_states, _ = self.self_attn(
+        hidden_states = self.self_attn(
             hidden_states=hidden_states,
             attention_mask=attention_mask,
-            position_ids=position_ids,
             past_key_value=past_key_value,
-            use_cache=use_cache,
-            cache_position=cache_position,
             position_embeddings=position_embeddings,
-            **kwargs,
         )
         hidden_states = residual + hidden_states
 
@@ -270,7 +261,7 @@ class Qwen3DecoderLayer(GradientCheckpointingLayer):
 
 
 @auto_docstring
-class Qwen3PreTrainedModel(PreTrainedModel):
+class FlexQwen3PreTrainedModel(PreTrainedModel):
     config: Qwen3Config
     base_model_prefix = "model"
     supports_gradient_checkpointing = True
@@ -336,7 +327,7 @@ class Qwen3RotaryEmbedding(nn.Module):
 
 
 @auto_docstring
-class Qwen3Model(Qwen3PreTrainedModel):
+class FlexQwen3Model(FlexQwen3PreTrainedModel):
     def __init__(self, config: Qwen3Config):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
@@ -360,7 +351,6 @@ class Qwen3Model(Qwen3PreTrainedModel):
     def set_input_embeddings(self, value):
         self.embed_tokens = value
 
-    @check_model_inputs
     @auto_docstring
     def forward(
         self,
@@ -371,7 +361,6 @@ class Qwen3Model(Qwen3PreTrainedModel):
         inputs_embeds: Optional[torch.FloatTensor] = None,
         use_cache: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
-        **kwargs: Unpack[TransformersKwargs],
     ) -> BaseModelOutputWithPast:
         if (input_ids is None) ^ (inputs_embeds is not None):
             raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
@@ -398,7 +387,7 @@ class Qwen3Model(Qwen3PreTrainedModel):
         prefix_len = 0 if past_key_values is None else 0
         kv_seq_ids = torch.cat(
             [
-                torch.full((prefix_len,), -1, dtype=torch.long),
+                torch.full((prefix_len,), -1, dtype=torch.long, device=inputs_embeds.device),
                 seq_ids,
             ]
         )
@@ -406,6 +395,7 @@ class Qwen3Model(Qwen3PreTrainedModel):
         def mask_func(_, _h, q_idx, kv_idx):
             return (kv_idx < prefix_len) | ((seq_ids[q_idx] == kv_seq_ids[kv_idx]) & (q_idx + prefix_len >= kv_idx))
         block_mask = create_block_mask(mask_func, 1, 1, q_len, kv_len, device=inputs_embeds.device)
+        print(block_mask.to_string())
         # --- end build block mask ---
 
 
@@ -423,7 +413,6 @@ class Qwen3Model(Qwen3PreTrainedModel):
                 use_cache=use_cache,
                 cache_position=cache_position,
                 position_embeddings=position_embeddings,
-                **kwargs,
             )
 
         hidden_states = self.norm(hidden_states)
@@ -434,14 +423,14 @@ class Qwen3Model(Qwen3PreTrainedModel):
 
 
 @auto_docstring
-class Qwen3ForCausalLM(Qwen3PreTrainedModel, GenerationMixin):
+class FlexQwen3ForCausalLM(FlexQwen3PreTrainedModel, GenerationMixin):
     _tied_weights_keys = ["lm_head.weight"]
     _tp_plan = {"lm_head": "colwise_rep"}
     _pp_plan = {"lm_head": (["hidden_states"], ["logits"])}
 
     def __init__(self, config):
         super().__init__(config)
-        self.model = Qwen3Model(config)
+        self.model = FlexQwen3Model(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
@@ -479,7 +468,6 @@ class Qwen3ForCausalLM(Qwen3PreTrainedModel, GenerationMixin):
         use_cache: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
-        **kwargs: Unpack[TransformersKwargs],
     ) -> CausalLMOutputWithPast:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
@@ -511,7 +499,6 @@ class Qwen3ForCausalLM(Qwen3PreTrainedModel, GenerationMixin):
             inputs_embeds=inputs_embeds,
             use_cache=use_cache,
             cache_position=cache_position,
-            **kwargs,
         )
 
         hidden_states = outputs.last_hidden_state
@@ -521,7 +508,7 @@ class Qwen3ForCausalLM(Qwen3PreTrainedModel, GenerationMixin):
 
         loss = None
         if labels is not None:
-            loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size, **kwargs)
+            loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size)
 
         return CausalLMOutputWithPast(
             loss=loss,
@@ -533,7 +520,7 @@ class Qwen3ForCausalLM(Qwen3PreTrainedModel, GenerationMixin):
 
 
 __all__ = [
-    "Qwen3ForCausalLM",
-    "Qwen3PreTrainedModel",
-    "Qwen3Model",
+    "FlexQwen3ForCausalLM",
+    "FlexQwen3Model",
+    "FlexQwen3PreTrainedModel",
 ]
