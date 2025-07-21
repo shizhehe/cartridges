@@ -13,7 +13,7 @@ class KVFromRandomVectors(KVCacheFactory):
     def __init__(self, config: Config):
         self.config = config
 
-    def initalize_kv_cache(
+    def initialize_kv_cache(
         self,
         tokenizer,
         model,
@@ -40,7 +40,7 @@ class KVFromRandomText(KVCacheFactory):
         max_tokens: Optional[int]
         text_source: Literal["gradient.txt"] = "gradient.txt"
 
-    def initalize_kv_cache(
+    def initialize_kv_cache(
         self,
         tokenizer,
         model,

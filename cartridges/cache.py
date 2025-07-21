@@ -206,8 +206,8 @@ class TrainableCache(DynamicCache, nn.Module):
         return (key_states, value_states), (shared_key_states, shared_value_states)
 
     def clear(self):
-        self.key_cache: list[torch.Tensor] = [[] for _ in range(self.config.n_layers)]
-        self.value_cache: list[torch.Tensor] = [[] for _ in range(self.config.n_layers)]
+        self.key_cache: list[torch.Tensor] = []
+        self.value_cache: list[torch.Tensor] = []
 
     def save(self, path: str):
         """Saves the trainable keys and values to the specified path."""
@@ -296,7 +296,7 @@ class KVCacheFactory(abc.ABC):
         self.config = config
 
     @abc.abstractmethod
-    def initalize_kv_cache(
+    def initialize_kv_cache(
         self, tokenizer, model, attn_config: AttnConfig 
     ) -> TrainableCache:
         raise NotImplementedError()

@@ -191,7 +191,6 @@ class Qwen3Attention(nn.Module):
         position_embeddings: tuple[torch.Tensor, torch.Tensor],
         attention_mask: Optional[torch.Tensor],
         past_key_value: Optional[Cache] = None,
-        cache_position: Optional[torch.LongTensor] = None,
     ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[tuple[torch.Tensor]]]:
         input_shape = hidden_states.shape[:-1]
         hidden_shape = (*input_shape, -1, self.head_dim)
@@ -204,15 +203,15 @@ class Qwen3Attention(nn.Module):
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
 
         if past_key_value is not None:
-            # sin and cos are specific to RoPE models; cache_position needed for the static cache
-            cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
-            key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
-        
-        print("Flex query in:", query_states)
-        print("Flex key in:", key_states)
-        print("Flex value in:", value_states)
-        attention_interface = ALL_ATTENTION_FUNCTIONS["flex_attention"]
-        attn_output, _ = attention_interface(
+            # sin and cos are specific to RoPE models
+            cache_kwargs = {"sin": sin, "cos": cos}
+            (key_states, value_states), (shared_key_states, shared_value_states) = past_key_value.update_separate(
+                key_states, value_states, self.layer_idx, cache_kwargs
+            )
+            key_states = torch.cat([shared_key_states, key_states], dim=-2)
+            value_states = torch.cat([shared_value_states, value_states], dim=-2)
+
+        attn_output, _ = ALL_ATTENTION_FUNCTIONS["flex_attention"](
             self,
             query_states,
             key_states,
@@ -220,7 +219,6 @@ class Qwen3Attention(nn.Module):
             attention_mask=attention_mask,
             scaling=self.scaling,
         )
-        print("Flex attn out:", attn_output)
         attn_output = attn_output.reshape(*input_shape, -1).contiguous()
         attn_output = self.o_proj(attn_output)
         return attn_output
@@ -245,7 +243,6 @@ class Qwen3DecoderLayer(GradientCheckpointingLayer):
         position_ids: Optional[torch.LongTensor] = None,
         past_key_value: Optional[Cache] = None,
         use_cache: Optional[bool] = False,
-        cache_position: Optional[torch.LongTensor] = None,
         position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,  # necessary, but kept here for BC
     ) -> tuple[torch.Tensor]:
         residual = hidden_states
@@ -361,13 +358,12 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
     @auto_docstring
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
-        seq_ids: Optional[torch.LongTensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
+        input_ids: Optional[torch.LongTensor],
+        seq_ids: Optional[torch.LongTensor],
+        position_ids: Optional[torch.LongTensor],
         past_key_values: Optional[Cache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         use_cache: Optional[bool] = None,
-        cache_position: Optional[torch.LongTensor] = None,
     ) -> BaseModelOutputWithPast:
         if (input_ids is None) ^ (inputs_embeds is not None):
             raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
@@ -378,20 +374,20 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
         if use_cache and past_key_values is None:
             past_key_values = DynamicCache()
 
-        if cache_position is None:
-            past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
-            cache_position = torch.arange(
-                past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device
-            )
+        past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
+        position_ids = position_ids + past_seen_tokens
+    
 
-        if position_ids is None:
-            position_ids = cache_position.unsqueeze(0)
+        
+            
         
         # Build the block mask
         # --- begin build block mask ---
         q_len = len(seq_ids)
         kv_len = len(seq_ids) + (0 if past_key_values is None else past_key_values.get_seq_length())
-        prefix_len = 0 if past_key_values is None else 0
+        prefix_len = 0 if past_key_values is None else past_key_values.prefix_length()
+        if past_key_values is not None:
+            assert past_key_values.get_seq_length() == past_key_values.prefix_length()
         kv_seq_ids = torch.cat(
             [
                 torch.full((prefix_len,), -1, dtype=torch.long, device=inputs_embeds.device),
@@ -418,7 +414,6 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
                 position_ids=position_ids,
                 past_key_value=past_key_values,
                 use_cache=use_cache,
-                cache_position=cache_position,
                 position_embeddings=position_embeddings,
             )
 
@@ -473,7 +468,6 @@ class FlexQwen3ForCausalLM(FlexQwen3PreTrainedModel, GenerationMixin):
         inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.LongTensor] = None,
         use_cache: Optional[bool] = None,
-        cache_position: Optional[torch.LongTensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
     ) -> CausalLMOutputWithPast:
         r"""
@@ -505,7 +499,6 @@ class FlexQwen3ForCausalLM(FlexQwen3PreTrainedModel, GenerationMixin):
             past_key_values=past_key_values,
             inputs_embeds=inputs_embeds,
             use_cache=use_cache,
-            cache_position=cache_position,
         )
 
         hidden_states = outputs.last_hidden_state
