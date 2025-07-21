@@ -311,6 +311,7 @@ class CartridgeTrainDataset(Dataset):
         Raises:
             ValueError: If the batch contains mixed element types
         """
+        breakpoint()
         # TODO: get rid of this hack
         # batch = [i for i in batch if i is not None]
         if not batch:

@@ -17,10 +17,7 @@ from typing import Callable, Optional, Union
 import torch
 from torch import nn
 import torch.nn.functional as F
-from torch.nn.attention.flex_attention import (
-    create_block_mask,
-    flex_attention,
-)
+from torch.nn.attention.flex_attention import create_block_mask
 
 from transformers.activations import ACT2FN
 from transformers.cache_utils import Cache, DynamicCache
@@ -39,7 +36,6 @@ from .configuration_qwen3 import Qwen3Config
 
 logger = logging.get_logger(__name__)
 
-flex_attention = torch.compile(flex_attention, dynamic=False)
 
 
 @use_kernel_forward_from_hub("RMSNorm")
@@ -260,7 +256,7 @@ class Qwen3DecoderLayer(GradientCheckpointingLayer):
 
 @auto_docstring
 class FlexQwen3PreTrainedModel(PreTrainedModel):
-    config: Qwen3Config
+    config_class = Qwen3Config
     base_model_prefix = "model"
     supports_gradient_checkpointing = True
     _no_split_modules = ["Qwen3DecoderLayer"]
@@ -359,6 +355,10 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
         inputs_embeds: Optional[torch.FloatTensor] = None,
         use_cache: Optional[bool] = None,
     ) -> BaseModelOutputWithPast:
+        """
+        seq_ids (`torch.LongTensor` of shape `(sequence_length,)`):
+            Sequence IDs for the input tokens.
+        """
         if (input_ids is None) ^ (inputs_embeds is not None):
             raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
 
@@ -392,7 +392,6 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
         def mask_func(_, _h, q_idx, kv_idx):
             return (kv_idx < prefix_len) | ((seq_ids[q_idx] == kv_seq_ids[kv_idx]) & (q_idx + prefix_len >= kv_idx))
         block_mask = create_block_mask(mask_func, 1, 1, q_len, kv_len, device=inputs_embeds.device)
-        print(block_mask.to_string())
         # --- end build block mask ---
 
 
@@ -465,6 +464,8 @@ class FlexQwen3ForCausalLM(FlexQwen3PreTrainedModel, GenerationMixin):
         logits_to_keep: Union[int, torch.Tensor] = 0,
     ) -> CausalLMOutputWithPast:
         r"""
+        seq_ids (`torch.LongTensor` of shape `(sequence_length,)`):
+            Sequence IDs for the input tokens.
         labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
             Labels for computing the masked language modeling loss. Indices should either be in `[0, ...,
             config.vocab_size]` or -100 (see `input_ids` docstring). Tokens with indices set to `-100` are ignored
