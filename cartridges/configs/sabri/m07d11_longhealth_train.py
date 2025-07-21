@@ -6,7 +6,7 @@ import pydrantic
 from pydrantic.variables import FormatStringVariable
 
 from cartridges.initialization.random import KVFromRandomText, KVFromRandomVectors
-from cartridges.models.qwen.modeling_qwen3 import FlexQwen3Model
+from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
 from cartridges.train import EvalDatasetConfig, GenerateDatasetConfig, TrainConfig
 from cartridges.models.config import HFModelConfig
 from cartridges.datasets import CartridgeTrainDataset
@@ -22,7 +22,7 @@ data_sources = [
 config = TrainConfig(
     model=HFModelConfig(
         pretrained_model_name_or_path="Qwen/Qwen3-4b",
-        model_cls=FlexQwen3Model,
+        model_cls=FlexQwen3ForCausalLM,
     ),
     kv_cache_initializer=KVFromRandomVectors.Config(
         max_tokens=2048

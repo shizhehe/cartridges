@@ -140,6 +140,7 @@ class CartridgeDatasetElementLogitLabels:
 class CartridgeDatasetBatchLogitLabels:
     input_ids: torch.Tensor
     element_ids: torch.Tensor
+    position_ids: torch.Tensor
 
     topk_logprobs: torch.Tensor
     topk_token_ids: torch.Tensor
@@ -319,7 +320,7 @@ class CartridgeTrainDataset(Dataset):
             raise NotImplementedError("Token labels are not supported yet.")
             
 
-        input_ids, element_ids = [], []
+        input_ids, element_ids, position_ids = [], [], []
         topk_token_ids, topk_logprobs, topk_token_idxs = [], [], []
         metadatas = []
         token_counts = TokenCounts()
@@ -327,6 +328,7 @@ class CartridgeTrainDataset(Dataset):
         for element_id, element in enumerate(batch):
             input_ids.append(element.input_ids)
             element_ids.append(torch.full_like(element.input_ids, element_id, dtype=torch.long))
+            position_ids.append(torch.arange(len(element.input_ids), dtype=torch.long))
             topk_token_ids.append(element.topk_token_ids)
             topk_logprobs.append(element.topk_logprobs)
             topk_token_idxs.append(element.topk_token_idxs + curr_token_idx)
@@ -335,6 +337,7 @@ class CartridgeTrainDataset(Dataset):
             curr_token_idx += len(element.input_ids)
         input_ids = torch.cat(input_ids, dim=0)
         element_ids = torch.cat(element_ids, dim=0)
+        position_ids = torch.cat(position_ids, dim=0)
         topk_token_ids = torch.cat(topk_token_ids, dim=0)
         topk_logprobs = torch.cat(topk_logprobs, dim=0)
         topk_token_idxs = torch.cat(topk_token_idxs, dim=0)
@@ -342,6 +345,7 @@ class CartridgeTrainDataset(Dataset):
         return CartridgeDatasetBatchLogitLabels(
             input_ids=input_ids,
             element_ids=element_ids,
+            position_ids=position_ids,
             topk_token_ids=topk_token_ids,
             topk_logprobs=topk_logprobs,
             topk_token_idxs=topk_token_idxs,

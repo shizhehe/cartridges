@@ -348,9 +348,9 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
     @auto_docstring
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor],
-        seq_ids: Optional[torch.LongTensor],
-        position_ids: Optional[torch.LongTensor],
+        input_ids: torch.LongTensor, # [sum(seq_lens)]
+        seq_ids: torch.LongTensor, # [sum(seq_lens)]
+        position_ids: torch.LongTensor, # [sum(seq_lens)]
         past_key_values: Optional[Cache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         use_cache: Optional[bool] = None,
@@ -359,21 +359,16 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
         seq_ids (`torch.LongTensor` of shape `(sequence_length,)`):
             Sequence IDs for the input tokens.
         """
-        if (input_ids is None) ^ (inputs_embeds is not None):
-            raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
-
-        if inputs_embeds is None:
-            inputs_embeds = self.embed_tokens(input_ids)
+        input_ids = input_ids.unsqueeze(0)
+        position_ids = position_ids.unsqueeze(0)
+        
+        inputs_embeds = self.embed_tokens(input_ids)
 
         if use_cache and past_key_values is None:
             past_key_values = DynamicCache()
 
         past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
         position_ids = position_ids + past_seen_tokens
-    
-
-        
-            
         
         # Build the block mask
         # --- begin build block mask ---
@@ -454,9 +449,9 @@ class FlexQwen3ForCausalLM(FlexQwen3PreTrainedModel, GenerationMixin):
     @auto_docstring
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
-        seq_ids: Optional[torch.LongTensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
+        input_ids: torch.LongTensor, # [sum(seq_lens)]
+        seq_ids: torch.LongTensor, # [sum(seq_lens)]
+        position_ids: torch.LongTensor, # [sum(seq_lens)]
         past_key_values: Optional[Cache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.LongTensor] = None,

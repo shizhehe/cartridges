@@ -431,7 +431,6 @@ def train(config: TrainConfig):
             disable=not is_rank_zero,
         )
         for batch in train_pbar:
-            breakpoint()
 
             batch: CartridgeDatasetBatchTokenLabels | CartridgeDatasetBatchLogitLabels
             do_step = (iter_idx + 1) % accumulate_grad_steps == 0
@@ -465,51 +464,22 @@ def train(config: TrainConfig):
                     outputs = wrapped_model(
                         input_ids=batch.input_ids.to(local_rank),
                         seq_ids=batch.element_ids.to(local_rank),
-                        # labels=(
-                        #     batch.labels.to(local_rank)
-                        #     if config.loss_type == "tokens"
-                        #     else None
-                        # ),
+                        position_ids=batch.position_ids.to(local_rank),
                     )
 
-                    if config.loss_type == "tokens":
-                        # NOTE: we need to divide by the number of gradient accumulation steps
-                        # to ensure we have the same loss as if we were not using gradient accumulation
-                        loss = outputs.loss / accumulate_grad_steps
-                        mask = batch.mask.to(local_rank)
-                    elif config.loss_type == "logits":
-                        breakpoint()
+                    topk_pred_logprobs = F.log_softmax(outputs.logits, dim=-1)[
+                        0, 
+                        batch.topk_token_idxs.to(local_rank), 
+                        batch.topk_token_ids.to(local_rank)
+                    ] 
 
-                        topk_tgt_tokens = batch.topk_token_ids
-                        pred_log_probs = F.log_softmax(outputs.logits, dim=-1)  # [1, total_seq_len, vocab_size]
+                    # ce is sum -p(x)logq(x), where p is the true distr and q is the model distr
+                    ce_by_token = (
+                        -batch.topk_logprobs.to(local_rank).exp()  # p(x), true distr
+                        * topk_pred_logprobs  # q(x), model distr
+                    ).sum(dim=-1)
 
-                        pred_log_probs.gather(
-                            dim=2, 
-                            index=batch.topk_tgt_tokens.to(local_rank)
-                        )
-                        
-
-                        topk_pred_logprobs = pred_log_probs.gather(
-                            dim=2, index=topk_tgt_tokens.to(local_rank)
-                        )
-                        assert topk_pred_logprobs.shape == topk_tgt_logprobs.shape
-
-                        # ce is sum -p(x)logq(x), where p is the true distr and q is the model distr
-                        ce_by_token = (
-                            -topk_tgt_logprobs.to(local_rank).exp()  # p(x), true distr
-                            * topk_pred_logprobs  # q(x), model distr
-                        ).sum(dim=-1)
-
-                        mask = mask.to(local_rank)
-
-                        assert ce_by_token.shape == mask.shape
-                        loss = (
-                            (ce_by_token * mask).sum()
-                            / mask.sum()
-                            / accumulate_grad_steps
-                        )
-                    else:
-                        raise ValueError(f"Unknown loss type: {config.loss_type}")
+                    loss = (ce_by_token.mean() / accumulate_grad_steps)
 
                 # the loss should go outside of the automated-mixed precision context
                 # see here for an example: https://pytorch.org/docs/stable/notes/amp_examples.html
@@ -519,9 +489,9 @@ def train(config: TrainConfig):
             # Update the accumulated metrics
             accum_loss += loss.detach()
             accum_num_input_tokens += torch.tensor(
-                batch.input_ids.size(1), device=local_rank
+                batch.input_ids.size(0), device=local_rank
             )
-            accum_num_target_tokens += mask.sum().detach()
+            accum_num_target_tokens += 0 # mask.sum().detach() # TODO: fix thisTI
 
             if do_step:
                 optimizer.step()
@@ -1221,12 +1191,14 @@ class CacheAndModel(nn.Module):
         self, 
         input_ids: torch.Tensor, 
         seq_ids: torch.Tensor, 
+        position_ids: torch.Tensor,
         # labels: torch.Tensor
     ):
 
         out = self.model(
             input_ids=input_ids,
             seq_ids=seq_ids,
+            position_ids=position_ids,
             # labels=labels,
             use_cache=True,
             past_key_values=self.cache
