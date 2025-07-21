@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import Optional, List
+from typing import List
 
 import torch
 import torch.nn.functional as F
@@ -10,16 +10,9 @@ from torch.nn.attention.flex_attention import (
     create_block_mask,
     create_mask,
     flex_attention,
-    _mask_mod_signature,
 )
 
 from triton.testing import do_bench
-
-from attn_gym.masks.document_mask import length_to_offsets
-from attn_gym.masks import (
-    causal_mask,
-    generate_doc_mask_mod,
-)
 
 
 torch.set_default_device("cuda")
@@ -83,6 +76,16 @@ def test_mask(
     block_mask = create_block_mask_cached(mask_mod, 1, 1, total_seq_len, total_seq_len + prefix_len, device=device)
     sdpa_mask_fn = mask_mod 
     mask = create_mask(sdpa_mask_fn, 1, 1, total_seq_len, total_seq_len + prefix_len, device=device)
+
+    seq_lens_tensor = torch.tensor(seq_lens, device=device)
+    def padded_mask_mod(batch_idx, _h, q_idx, kv_idx):
+        # return (kv_idx < prefix_len) | ((q_idx + prefix_len >= kv_idx)  & q_idx < seq_lens_tensor[batch_idx])
+        return (kv_idx < prefix_len) | ((q_idx + prefix_len >= kv_idx))
+
+    padded_mask = create_mask(
+        lambda b_idx, _h, q_idx, kv_idx: (q_idx < seq_lens_tensor[b_idx]) & ((kv_idx < prefix_len) | (q_idx + prefix_len >= kv_idx)),
+        B=batch_size, H=1, Q_LEN=max_seq_len, KV_LEN=prefix_len + max_seq_len, device=device
+    )
     # --- end create block mask ---
     
     # Print the block mask
@@ -98,6 +101,8 @@ def test_mask(
         torch.randn(1, num_heads, total_seq_len + prefix_len, head_dim, **tensor_kwargs),
         torch.randn(1, num_heads, total_seq_len + prefix_len, head_dim, **tensor_kwargs),
     ]
+    grad_out_packed = torch.randn(1, num_heads, total_seq_len, head_dim, device=device, dtype=torch.float16)
+
 
     # Create padded version by reshaping packed data
     qkv_padded = []
@@ -114,15 +119,19 @@ def test_mask(
                 padded_tensor[:, :, :prefix_len, :] = qkv_tensor[:, :, :prefix_len, :]
         padded_tensor.requires_grad_(True)
         qkv_padded.append(padded_tensor)
-    gradOut_padded = torch.randn(batch_size, num_heads, max_seq_len, head_dim, device=device, dtype=torch.float16)
-    gradOut_packed = torch.randn(1, num_heads, total_seq_len, head_dim, device=device, dtype=torch.float16)
+    grad_out_padded = torch.zeros(batch_size, num_heads, max_seq_len, head_dim, device=device, dtype=torch.float16)
+    start_idx = 0
+    for b_idx, seq_len in enumerate(seq_lens):
+        grad_out_padded[b_idx, :, :seq_len, :] = grad_out_packed[0, :, start_idx:start_idx + seq_len, :]
+        start_idx += seq_len
+
+    
 
     # --- Begin compute FLOPs ---
     if block_mask is not None:
         density = (100 - block_mask.sparsity()) / 100
     else:
         density = 1.0
-    causal_fav2_flops = 0.5 * num_heads * head_dim * total_seq_len ** 2
     flops = density * num_heads * head_dim * total_seq_len ** 2
     # --- End compute FLOPs ---
 
@@ -130,27 +139,21 @@ def test_mask(
     # --- begin prepare ---
     functions_to_bench = [
         {
-            "fn": lambda: F.scaled_dot_product_attention(*qkv_packed, is_causal=True),
-            "name": "causal FA2",
-            "gradOut": gradOut_packed,
-            "flops": causal_fav2_flops,
-        },
-        # {
-        #     "fn": lambda: F.scaled_dot_product_attention(*qkv_packed, attn_mask=mask),
-        #     "name": "F.sdpa + mask",
-        #     "gradOut": gradOut_packed,
-        #     "flops": flops,
-        # },
-        {
-            "fn": lambda: flex_attention(*qkv_packed, block_mask=block_mask),
-            "name": "flexattention",
-            "gradOut": gradOut_packed,
+            "fn": lambda: F.scaled_dot_product_attention(*qkv_packed, attn_mask=mask),
+            "name": "F.sdpa + mask",
+            "gradOut": grad_out_packed,
             "flops": flops,
         },
         {
-            "fn": lambda: F.scaled_dot_product_attention(*qkv_padded, is_causal=True),
+            "fn": lambda: flex_attention(*qkv_packed, block_mask=block_mask),
+            "name": "flexattention",
+            "gradOut": grad_out_packed,
+            "flops": flops,
+        },
+        {
+            "fn": lambda: F.scaled_dot_product_attention(*qkv_padded, attn_mask=padded_mask),
             "name": "padded causal FA2",
-            "gradOut": gradOut_padded,
+            "gradOut": grad_out_padded,
             "flops": flops,
         },
     ]
@@ -172,39 +175,6 @@ def test_mask(
         torch.cuda.empty_cache()
 
     # --- end benchmark ---
-
-    # Check the correctness of the implementations
-    # --- begin correctness check ---
-    print_header(f"{mask_mod.__name__}".replace("_", " ").title())
-    # Inline correctness check
-    if not skip_correctness:
-        padded_outs = []
-        flex_outs = []
-
-        for tensor in qkv_padded:
-            tensor.grad = None
-
-        out1 = F.scaled_dot_product_attention(*qkv_padded, is_causal=True)
-        padded_outs.append(out1)
-        out1.backward(gradOut_padded)
-        padded_outs += [tensor.grad for tensor in qkv_padded]
-
-        for tensor in qkv_packed:
-            tensor.grad = None
-
-        out2 = flex_attention(*qkv_packed, block_mask=block_mask)
-        flex_outs.append(out2)
-        out2.backward(gradOut_packed)
-        flex_outs += [tensor.grad for tensor in qkv_packed]
-        
-        # Compare padded output with flex attention output
-        # Concatenate sequence data to match packed format
-        padded_out_concat = torch.cat([padded_outs[0][i, :, :seq_lens[i], :] for i in range(len(seq_lens))], dim=1)
-        padded_out_concat = padded_out_concat.unsqueeze(0)  # Add batch dimension to match flex output
-        
-        torch.testing.assert_close(flex_outs[0], padded_out_concat, atol=1e-1, rtol=1e-2)
-        print("Correctness check passed ✅")
-    # --- end correctness check ---
 
     # Print the results
     # --- begin print results ---
@@ -231,7 +201,45 @@ def test_mask(
     # --- end print results ---
 
 
+    # Check the correctness of the implementations
+    # --- begin correctness check ---
+    print_header(f"{mask_mod.__name__}".replace("_", " ").title())
+    if not skip_correctness:
+        # For correctness, compare flex attention with F.sdpa using the same mask
+        for tensor in qkv_packed:
+            tensor.grad = None
 
+        # Use flex attention
+        flex_out = flex_attention(*qkv_packed, block_mask=block_mask)
+        flex_out.backward(grad_out_packed, retain_graph=True)
+        flex_grads = [tensor.grad.clone() for tensor in qkv_packed]
+        
+        for tensor in qkv_packed:
+            tensor.grad = None
+
+        # Use F.sdpa with the same mask for comparison
+        sdpa_out = F.scaled_dot_product_attention(*qkv_packed, attn_mask=mask)
+        sdpa_out.backward(grad_out_packed)
+        sdpa_grads = [tensor.grad for tensor in qkv_packed]
+
+        # Use with padding 
+        pad_out = F.scaled_dot_product_attention(*qkv_padded, attn_mask=padded_mask)
+        pad_out.backward(grad_out_padded)
+        # SE (07/20): TODO implement grad check for padding
+        pad_grads = [tensor.grad for tensor in qkv_padded]
+        pad_out = torch.cat(
+            [pad_out[batch_idx, :, :seq_len, :] for batch_idx, seq_len in enumerate(seq_lens)],
+            dim=1
+        ).unsqueeze(0)
+        
+        # Compare outputs and gradients
+        torch.testing.assert_close(flex_out, sdpa_out, atol=1e-3, rtol=1e-3)
+        torch.testing.assert_close(flex_out, pad_out, atol=1e-3, rtol=1e-3)
+            
+        for flex_grad, sdpa_grad, pad_grad in zip(flex_grads, sdpa_grads, pad_grads):
+            torch.testing.assert_close(flex_grad, sdpa_grad, atol=1e-3, rtol=1e-3)
+        print("Correctness check passed ✅")
+    # --- end correctness check ---
 
 
 if __name__ == "__main__":
@@ -241,8 +249,8 @@ if __name__ == "__main__":
 
     test_mask(
         skip_correctness=False, 
-        seq_lens=[4, 8, 16, 8],
-        prefix_len=32
+        seq_lens=[128, 512, 768, 1024, 512],
+        prefix_len=8192
     )
 
     
