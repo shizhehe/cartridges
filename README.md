@@ -21,6 +21,7 @@ The code is based on our paper *[Cartridges: Lightweight and general-purpose lon
 
 **Table of contents**
 - [Setup](#setup)
+- [Architecture Overview](#architecture-overview)
 - [Synthesizing Training Data with Self-Study](#synthesizing-training-data-with-self-study)
 - [Training a Cartridge](#training-a-Cartridge)
 - [Serving Cartridges](#serving-Cartridges)
@@ -58,27 +59,27 @@ export CARTRIDGES_OUTPUT_DIR=/path/to/cartridges/outputs
 
 Below we walk through the process of generating synthetic training data for a corpus of text in more detail. As a running example, we'll be training a cartridge on our [paper on Cartridges](https://arxiv.org/abs/2506.06266). How meta!
 Here are the steps:
-1. Create a `StructuredContext` object that contains the data you want to store in the cartridge
+1. Configure resources that contain the data you want to store in the cartridge
 2. Ensure you have an inference server running (either [Tokasaurus](https://github.com/ScalingIntelligence/tokasaurus) or [SGLang](https://github.com/ScalingIntelligence/tokasaurus)) and configure your client to point to it
-4. Instantiate a `SynthesizeConfig` object that contains the parameters for the self-study process
+3. Instantiate a `SynthesizeConfig` object that contains the parameters for the self-study process
 4. Put it all together in one script and run it!
 
 > **Note:** For configuration, we use [Pydantic](https://docs.pydantic.dev/latest/) models. Pydantic models are useful for defining the schema of the config and quickly ensuring that the config is valid at the beginning of the script. We also rely on [`pydrantic`](https://github.com/seyuboglu/pydrantic), which provides a few utilities for working with configs.
 
-### Step 1: Create a Context Object
+### Step 1: Configure Resources
 
-A `StructuredContext` represents your corpus in a format that the self-study process can work with. We provide several built-in context types. For our example, we'll use the `TexDocument` context type. 
+Resources provide the data sources and generate the initial prompts that seed synthetic conversations during self-study. We provide several built-in resource types. For our example, we'll use the `StaticTextResource` type for a research paper.
 
 ```python 
-from cartridges.contexts.tex import TexDocument
-context_config = TexDocument.Config(
-    arxiv_src_url="https://arxiv.org/src/2506.06266",
-    main_file="main.tex"
+from cartridges.resources.text import StaticTextResource
+resource_config = StaticTextResource.Config(
+    root_dir="path/to/paper/directory",
+    description="Research paper on Cartridges"
 )
 ```
 
-We provide a few other context types including `HTMLDocument`, `TexDocument`.
-Can also use an arbitrary JSON object as a context. 
+We provide several other resource types including `ChatLogResource`, `CodeResource`, `ThunderkittensResource`, `SlackResource`, and `VideoResource`.
+You can also configure multiple resources to provide diverse training data. 
 
 ### Step 2: Prepare an Inference Server
 
@@ -128,7 +129,7 @@ uv pip install -e .
 
 2. Start the server:
 ```bash
-toka model=meta-llama/Llama-3.2-3B-Instruct kv_cache_num_tokens='(512 * 1024)' max_top_logprobs=5
+tksrs model=meta-llama/Llama-3.2-3B-Instruct kv_cache_num_tokens='(512 * 1024)' max_top_logprobs=5
 ```
 
 3. Configure your client:
@@ -188,61 +189,51 @@ We are now going to put all of the pieces together in a `SynthesizeConfig` objec
 
 **Core Settings**:
 - `num_samples`: Total number of training examples to generate
-- `batch_size`: Number of training examples to generate per call to the inference server.
-- `max_num_batches_in_parallel`: Number of batches to process concurrently. When using Modal, high values 
+- `batch_size`: Number of training examples to generate per call to the inference server
+- `max_num_batches_in_parallel`: Number of batches to process concurrently. When using Modal, high values enable better parallelization
 
 Here's a complete example script:
 
 ```python
 import os
-from pathlib import Path
 
 import pydrantic
 from pydrantic.variables import FormatStringVariable
 
-from cartridges.clients.tokasaurus_batch import TokasaurusBatchClient
+from cartridges.clients.tokasaurus import TokasaurusClient
 from cartridges.synthesize import SynthesizeConfig
-from cartridges.synthesizers.self_study import SelfStudySynthesizer, SlicePromptSamplerWithChunks
+from cartridges.synthesizers.self_study import SelfStudySynthesizer
 from cartridges.utils import WandBConfig
-from cartridges.tasks.longhealth.context import LongHealthStructuredContextConfig
+from cartridges.resources.text import StaticTextResource
 
 
-client_config = TokasaurusBatchClient.Config(
-    url="https://hazyresearch--tksrs-entry-capsules-3b-1xh100-min0-max64-serve.modal.run",
-    ports=None,
-    model_name="meta-llama/Llama-3.2-3B-Instruct",
-)
-
-context_config = TexDocument.Config(
-    arxiv_src_url="https://arxiv.org/src/2506.06266",
-    main_file="main.tex"
+client = TokasaurusClient.Config(
+    url="https://hazyresearch--toka-qwen3-4b-1xh100-min0-serve.modal.run/v1",
+    model_name="Qwen/Qwen3-4b",
 )
 
 config = SynthesizeConfig(
-    context=context_config,
     synthesizer=SelfStudySynthesizer.Config(
-        client=client_config,
-        tokenizer="meta-llama/Llama-3.2-3B-Instruct",
+        client=client,
         max_rounds=1,
-        prompt_sampler=SlicePromptSamplerWithChunks.Config(
-            slices=["structuring", "summarization", "question", "use_case", "creative"],
-            min_chunk_size=512,
-            max_chunk_size=4096,
-            desc=f"Below is a research paper on test-time training for long contexts."
-        ),
-        prob_cot_a=0.2,
-        use_tools=False, 
-        tools=[]
+        prob_cot_a=0.3,
+        use_tools_a=False,
+        use_tools_b=False,
+        tools=[],
+        resources=[
+            StaticTextResource.Config(
+                root_dir="path/to/paper/directory",
+                description="Research paper on test-time training for long contexts"
+            )
+        ],
     ),
     output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),
     num_samples=512,
     batch_size=16,
     max_num_batches_in_parallel=4,
-    handle_exceptions=True,  # Continue if individual batches fail
-    save_wandb_artifact=True,
-
     name="cartridges-tutorial",
     wandb=WandBConfig(project="cartridges", entity="hazy-research"),
+    save_wandb_artifact=True,
 )
 
 
@@ -294,7 +285,7 @@ with open("/path/to/output/dir/artifact/dataset.pkl", "rb") as f:
     data = pickle.load(f)
 
 rows = data["rows"]
-context = data["context"]
+resources = data["resources"]
 
 # Convert to DataFrame for exploration
 df = pd.DataFrame([
@@ -321,7 +312,7 @@ with open("/path/to/output/dir/artifact/dataset.pkl", "rb") as f:
     data = pickle.load(f)
 
 rows = data["rows"]
-context = data["context"]
+resources = data["resources"]
 
 # Convert to DataFrame for exploration
 df = pd.DataFrame([
@@ -365,18 +356,69 @@ class CustomPromptSampler(PromptSampler):
 You can enhance the self-study process with tools that allow agents to dynamically retrieve additional context:
 
 ```python
-from cartridges.data.tools import Tool
+from cartridges.tools.retrieval.tools import RetrievalTool
+from cartridges.tools.amdtk_code.tools import AMDTKCodeTool
+from cartridges.tools.slack.tools import SlackToolSet
+from cartridges.tools.gmail.tools import GmailToolSet
 
-# Define custom tools for information retrieval
+# Define tools for information retrieval and interaction
 tools = [
-    SearchTool.Config(description="Search for specific information"),
-    SummaryTool.Config(description="Generate summaries of sections")
+    RetrievalTool.Config(
+        description="Search AMD and ThunderKittens documentation",
+        retriever=BM25Retriever.Config(k1=1.5, b=0.75)
+    ),
+    AMDTKCodeTool.Config(
+        description="Test and benchmark GEMM kernels"
+    ),
+    SlackToolSet.Config(
+        description="Access Slack channels and messages"
+    ),
+    GmailToolSet.Config(
+        description="Access Gmail emails and threads",
+        email="user@example.com"
+    )
 ]
 
 synthesizer_config = SelfStudySynthesizer.Config(
     # ... other config ...
     use_tools=True,
     tools=tools
+)
+```
+
+#### Resource Integration
+
+You can configure multiple resource types to provide diverse training data:
+
+```python
+from cartridges.resources.chatlog import ChatLogResource
+from cartridges.resources.code import CodeResource
+from cartridges.resources.text import StaticTextResource
+from cartridges.resources.thunderkittens import ThunderkittensResource
+
+# Configure multiple resource types
+resources = [
+    ChatLogResource.Config(
+        path="database/chatlogs",
+        description="AMD GPU development conversations"
+    ),
+    CodeResource.Config(
+        root_dir="database/code",
+        description="ThunderKittens GEMM kernel code sessions"
+    ),
+    StaticTextResource.Config(
+        root_dir="database/static_text",
+        description="AMD documentation and technical references"
+    ),
+    ThunderkittensResource.Config(
+        path="database/thunderkittens",
+        description="ThunderKittens framework documentation"
+    )
+]
+
+synthesizer_config = SelfStudySynthesizer.Config(
+    # ... other config ...
+    resources=resources
 )
 ```
 <!-- 
@@ -450,6 +492,8 @@ config = TrainConfig(
         top_k_logits=20,
     ),
 
+    # Note: This example uses a legacy LongHealth context config
+    # For new projects, use the resource system instead
     context=LongHealthStructuredContextConfig(patient_ids=patient_ids),
     
     save_every_n_steps=512,
