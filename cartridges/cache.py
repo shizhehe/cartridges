@@ -109,6 +109,10 @@ class TrainableCache(DynamicCache, nn.Module):
             ],
             num_frozen_tokens=self.num_frozen_tokens,
         )
+    
+
+    def prefix_length(self) -> int:
+        return (self.num_trainable_tokens + self.num_frozen_tokens)
 
     def get_seq_length(self, layer_idx: Optional[int] = 0) -> int:
         return (

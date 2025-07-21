@@ -21,10 +21,10 @@ torch.manual_seed(0)
 torch._dynamo.config.cache_size_limit = 1000
 
 # Compile the flex_attention function
-flex_attention = torch.compile(flex_attention, dynamic=False)
+# flex_attention = torch.compile(flex_attention, dynamic=False)
 
 # For better performance, you can use:
-# flex_attention = torch.compile(_flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
+flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
 
 data_type = torch.float16
 
@@ -72,16 +72,10 @@ def test_mask(
     ).to(device)
     def mask_mod(_, _h, q_idx, kv_idx):
         return (kv_idx < prefix_len) | ((seq_id[q_idx + prefix_len] == seq_id[kv_idx]) & (q_idx + prefix_len >= kv_idx))
-
     block_mask = create_block_mask_cached(mask_mod, 1, 1, total_seq_len, total_seq_len + prefix_len, device=device)
-    sdpa_mask_fn = mask_mod 
-    mask = create_mask(sdpa_mask_fn, 1, 1, total_seq_len, total_seq_len + prefix_len, device=device)
+    sdpa_mask = create_mask(mask_mod, 1, 1, total_seq_len, total_seq_len + prefix_len, device=device)
 
     seq_lens_tensor = torch.tensor(seq_lens, device=device)
-    def padded_mask_mod(batch_idx, _h, q_idx, kv_idx):
-        # return (kv_idx < prefix_len) | ((q_idx + prefix_len >= kv_idx)  & q_idx < seq_lens_tensor[batch_idx])
-        return (kv_idx < prefix_len) | ((q_idx + prefix_len >= kv_idx))
-
     padded_mask = create_mask(
         lambda b_idx, _h, q_idx, kv_idx: (q_idx < seq_lens_tensor[b_idx]) & ((kv_idx < prefix_len) | (q_idx + prefix_len >= kv_idx)),
         B=batch_size, H=1, Q_LEN=max_seq_len, KV_LEN=prefix_len + max_seq_len, device=device
@@ -139,7 +133,7 @@ def test_mask(
     # --- begin prepare ---
     functions_to_bench = [
         {
-            "fn": lambda: F.scaled_dot_product_attention(*qkv_packed, attn_mask=mask),
+            "fn": lambda: F.scaled_dot_product_attention(*qkv_packed, attn_mask=sdpa_mask),
             "name": "F.sdpa + mask",
             "gradOut": grad_out_packed,
             "flops": flops,
