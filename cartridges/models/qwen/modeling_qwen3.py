@@ -28,15 +28,9 @@ from transformers.generation import GenerationMixin
 from transformers.integrations import use_kernel_forward_from_hub
 from transformers.masking_utils import create_causal_mask, create_sliding_window_causal_mask
 from transformers.modeling_layers import GradientCheckpointingLayer
-from transformers.modeling_outputs import (
-    BaseModelOutputWithPast,
-    CausalLMOutputWithPast,
-    QuestionAnsweringModelOutput,
-    SequenceClassifierOutputWithPast,
-    TokenClassifierOutput,
-)
+from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
 from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS, dynamic_rope_update
-from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS, PreTrainedModel
+from transformers.modeling_utils import PreTrainedModel, flex_attention_forward
 from transformers.processing_utils import Unpack
 from transformers.utils import auto_docstring, can_return_tuple, logging
 
@@ -211,7 +205,7 @@ class Qwen3Attention(nn.Module):
             key_states = torch.cat([shared_key_states, key_states], dim=-2)
             value_states = torch.cat([shared_value_states, value_states], dim=-2)
 
-        attn_output, _ = ALL_ATTENTION_FUNCTIONS["flex_attention"](
+        attn_output, _ = flex_attention_forward(
             self,
             query_states,
             key_states,

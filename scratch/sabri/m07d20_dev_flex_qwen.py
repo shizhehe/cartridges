@@ -16,21 +16,22 @@ device = "cuda"
 
 def small_qwen_config():
     """Create a small Qwen3 config for testing."""
+    num_layers = 3
     return Qwen3Config(
         vocab_size=1000,
         hidden_size=512,
         intermediate_size=1024,
-        num_hidden_layers=1,
+        num_hidden_layers=num_layers,
         num_attention_heads=8,
-        num_key_value_heads=8,
+        num_key_value_heads=2,
         head_dim=64,
         max_position_embeddings=512,
         use_cache=False,
-        layer_types=["full_attention", "full_attention"],
+        layer_types=["full_attention"] * num_layers,
     )
 
 
-
+cartridge_len = 1024
 seq_lens = [32, 64, 128, 64]
 batch_size = len(seq_lens)
 max_seq_len = max(seq_lens)
@@ -53,26 +54,28 @@ padded_position_ids = torch.stack(
     [torch.arange(max_seq_len, device=device) for _ in range(batch_size)]
 )
 
-
-
 config = small_qwen_config()
 model = FlexQwen3Model(config).to(device)
 ref_model = Qwen3Model(config).to(device)
 ref_model.load_state_dict(model.state_dict())
 
-
-
+# Check equivalence with no cache
+# --- begin no cache ---
 out = model(input_ids, seq_ids=seq_ids, position_ids=position_ids).last_hidden_state
 ref_out_padded = ref_model(padded_input_ids).last_hidden_state
+
 ref_out = torch.cat(
     [ref_out_padded[batch_idx, :seq_len] for batch_idx, seq_len in enumerate(seq_lens)],
     dim=0
 ).unsqueeze(0)
 torch.testing.assert_close(out, ref_out, atol=1e-3, rtol=1e-3)
 print("✅ Forward check passed (no cache)")
+# --- end no cache ---
 
 
-cache = KVFromRandomVectors.Config(max_tokens=128).instantiate().initialize_kv_cache(
+# Check equivalence with cache
+# --- begin with cache ---
+cache = KVFromRandomVectors.Config(max_tokens=cartridge_len).instantiate().initialize_kv_cache(
     tokenizer=None,
     model=ref_model,
     attn_config=AttnConfig(
@@ -84,6 +87,11 @@ cache = KVFromRandomVectors.Config(max_tokens=128).instantiate().initialize_kv_c
 cache.to(device)
 
 out = model(input_ids, seq_ids=seq_ids, position_ids=position_ids, use_cache=True, past_key_values=cache).last_hidden_state
+out.sum().backward()
+keys_grad = cache.trainable_keys[0].grad.clone()
+values_grad = cache.trainable_values[0].grad.clone()
+
+cache.zero_grad()
 cache.clear()
 
 ref_out_padded = ref_model(padded_input_ids, use_cache=True, past_key_values=cache).last_hidden_state
@@ -91,13 +99,18 @@ ref_out = torch.cat(
     [ref_out_padded[batch_idx, :seq_len] for batch_idx, seq_len in enumerate(seq_lens)],
     dim=0
 ).unsqueeze(0)
+ref_out.sum().backward()
+ref_keys_grad = cache.trainable_keys[0].grad.clone()
+ref_values_grad = cache.trainable_values[0].grad.clone()
 
 torch.testing.assert_close(out, ref_out, atol=1e-3, rtol=1e-3)
 print("✅ Forward check passed (with cache)")
+torch.testing.assert_close(keys_grad, ref_keys_grad, atol=1e-2, rtol=1e-2)
+torch.testing.assert_close(values_grad, ref_values_grad, atol=1e-2, rtol=1e-2)
+print("✅ Backward check passed (with cache)")
 
+# --- end with cache ---
 
-
-breakpoint()
 
 
 
