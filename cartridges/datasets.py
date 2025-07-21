@@ -125,11 +125,9 @@ MODEL_TO_MESSAGE_CONVERTER = {
 class CartridgeDatasetElementLogitLabels:
     input_ids: torch.Tensor
     
-
     topk_logprobs: torch.Tensor
     topk_token_ids: torch.Tensor
     topk_token_idxs: torch.Tensor
-
 
     metadata: list[dict[str, Any]]
     token_counts: TokenCounts
@@ -144,9 +142,9 @@ class CartridgeDatasetBatchLogitLabels:
     element_ids: torch.Tensor
 
     topk_logprobs: torch.Tensor
-    topk_tokens: torch.Tensor
+    topk_token_ids: torch.Tensor
+    topk_token_idxs: torch.Tensor
 
-    mask: torch.Tensor
     metadata: list[dict[str, Any]]
     token_counts: TokenCounts
     loss_weight: Optional[torch.Tensor] = None
@@ -311,106 +309,43 @@ class CartridgeTrainDataset(Dataset):
         Raises:
             ValueError: If the batch contains mixed element types
         """
-        breakpoint()
         # TODO: get rid of this hack
         # batch = [i for i in batch if i is not None]
         if not batch:
             raise ValueError("Empty batch provided to collate function")
 
-        # Ensure all elements are of the same type
-        first_element_type = type(batch[0])
-        if not all(isinstance(element, first_element_type) for element in batch):
-            raise ValueError(
-                f"All elements in the batch must be of the same type. "
-                f"Expected {first_element_type.__name__}, but found mixed types."
-            )
-
-        # Copy over input IDs
-        max_len = max(element.input_ids.size(0) for element in batch)
-        batch_size = len(batch)
-        input_ids = torch.full((batch_size, max_len), EOS_TOKEN_ID, dtype=torch.long)
-        metadata = [elem.metadata for elem in batch]
-        token_counts = [elem.token_counts for elem in batch]
-
         # Determine the batch type based on the first element
         if isinstance(batch[0], CartridgeDatasetElementTokenLabels):
-            # Create tensors to hold the batched data
-            labels = torch.full(
-                (batch_size, max_len), -100, dtype=torch.long
-            )  # -100 is ignored in loss calculation
+            raise NotImplementedError("Token labels are not supported yet.")
+            
 
-            mask = torch.zeros_like(input_ids, dtype=torch.bool)
+        input_ids, element_ids = [], []
+        topk_token_ids, topk_logprobs, topk_token_idxs = [], [], []
+        metadatas = []
+        token_counts = TokenCounts()
+        curr_token_idx = 0
+        for element_id, element in enumerate(batch):
+            input_ids.append(element.input_ids)
+            element_ids.append(torch.full_like(element.input_ids, element_id, dtype=torch.long))
+            topk_token_ids.append(element.topk_token_ids)
+            topk_logprobs.append(element.topk_logprobs)
+            topk_token_idxs.append(element.topk_token_idxs + curr_token_idx)
+            metadatas.append(element.metadata)
+            token_counts += element.token_counts
+            curr_token_idx += len(element.input_ids)
+        input_ids = torch.cat(input_ids, dim=0)
+        element_ids = torch.cat(element_ids, dim=0)
+        topk_token_ids = torch.cat(topk_token_ids, dim=0)
+        topk_logprobs = torch.cat(topk_logprobs, dim=0)
+        topk_token_idxs = torch.cat(topk_token_idxs, dim=0)
 
-            for i, element in enumerate(batch):
-                assert isinstance(element, CartridgeDatasetElementTokenLabels)
-                seq_len = element.input_ids.shape[0]
-                input_ids[i, :seq_len] = element.input_ids
-                labels[i, : element.input_ids.shape[0]] = element.labels
-                mask[i, :seq_len] = element.mask
-
-            return CartridgeDatasetBatchTokenLabels(
-                input_ids,
-                labels,
-                metadata=metadata,
-                token_counts=token_counts,
-                mask=mask,
-            )
-
-        try:
-            assert isinstance(batch[0], CartridgeDatasetElementLogitLabels)
-        except:
-            breakpoint()
-
-        mask = torch.zeros_like(input_ids, dtype=torch.bool)
-        k = batch[0].topk_tokens.shape[-1]
-
-        topk_tokens = torch.full(
-            (batch_size, max_len, k),
-            fill_value=EOS_TOKEN_ID,
-            dtype=torch.long,
-        )
-        topk_logprobs = torch.full(
-            (batch_size, max_len, k),
-            fill_value=-k,  # HACK: prevent overflows
-            dtype=torch.float,
-        )
-
-        # Fill the tensors with data from each element
-        for i, element in enumerate(batch):
-            assert isinstance(element, CartridgeDatasetElementLogitLabels)
-
-            assert element.topk_tokens.shape == element.topk_logprobs.shape
-            assert len(element.topk_tokens.shape) == 2
-
-            seq_len = element.input_ids.shape[0]
-
-            input_ids[i, :seq_len] = element.input_ids
-            topk_tokens[i, :seq_len] = element.topk_tokens
-            topk_logprobs[i, :seq_len] = element.topk_logprobs
-            mask[i, :seq_len] = element.mask
-
-        loss_weight = None
-        if (
-            hasattr(self, "data_source_indices")
-            and len(self.data_source_indices) > 0
-            and len(self.data_source_indices) >= len(batch)
-        ):
-            loss_weight = torch.ones_like(input_ids, dtype=torch.float)
-            for i, element in enumerate(batch):
-                seq_len = element.input_ids.shape[0]
-                dataset_idx = self.data_source_indices[i]
-                loss_weight[i, :seq_len] = (
-                    self.dataset_weights[dataset_idx]
-                    if hasattr(self, "dataset_weights")
-                    else 1.0
-                )
         return CartridgeDatasetBatchLogitLabels(
             input_ids=input_ids,
-            topk_tokens=topk_tokens,
+            element_ids=element_ids,
+            topk_token_ids=topk_token_ids,
             topk_logprobs=topk_logprobs,
-            mask=mask,
-            loss_weight=loss_weight,
-            metadata=metadata,
+            topk_token_idxs=topk_token_idxs,
+            metadata=metadatas,
             token_counts=token_counts,
         )
 

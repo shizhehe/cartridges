@@ -267,7 +267,7 @@ def train(config: TrainConfig):
         logger.info("Using custom prefix tuning (TrainableCache)")
 
         initializer = config.kv_cache_initializer.instantiate()
-        cache: TrainableCache = initializer.initalize_kv_cache(
+        cache: TrainableCache = initializer.initialize_kv_cache(
             tokenizer=tokenizer, model=model, attn_config=attn_config,
         )
         logger.info(
@@ -431,6 +431,7 @@ def train(config: TrainConfig):
             disable=not is_rank_zero,
         )
         for batch in train_pbar:
+            breakpoint()
 
             batch: CartridgeDatasetBatchTokenLabels | CartridgeDatasetBatchLogitLabels
             do_step = (iter_idx + 1) % accumulate_grad_steps == 0
@@ -463,11 +464,12 @@ def train(config: TrainConfig):
 
                     outputs = wrapped_model(
                         input_ids=batch.input_ids.to(local_rank),
-                        labels=(
-                            batch.labels.to(local_rank)
-                            if config.loss_type == "tokens"
-                            else None
-                        ),
+                        seq_ids=batch.element_ids.to(local_rank),
+                        # labels=(
+                        #     batch.labels.to(local_rank)
+                        #     if config.loss_type == "tokens"
+                        #     else None
+                        # ),
                     )
 
                     if config.loss_type == "tokens":
@@ -476,10 +478,16 @@ def train(config: TrainConfig):
                         loss = outputs.loss / accumulate_grad_steps
                         mask = batch.mask.to(local_rank)
                     elif config.loss_type == "logits":
-                        topk_tgt_logprobs = batch.topk_logprobs
-                        topk_tgt_tokens = batch.topk_tokens
-                        mask = batch.mask
-                        pred_log_probs = F.log_softmax(outputs.logits, dim=-1)
+                        breakpoint()
+
+                        topk_tgt_tokens = batch.topk_token_ids
+                        pred_log_probs = F.log_softmax(outputs.logits, dim=-1)  # [1, total_seq_len, vocab_size]
+
+                        pred_log_probs.gather(
+                            dim=2, 
+                            index=batch.topk_tgt_tokens.to(local_rank)
+                        )
+                        
 
                         topk_pred_logprobs = pred_log_probs.gather(
                             dim=2, index=topk_tgt_tokens.to(local_rank)
@@ -1209,11 +1217,17 @@ class CacheAndModel(nn.Module):
         self.model = model
 
 
-    def forward(self, input_ids, labels=None):
+    def forward(
+        self, 
+        input_ids: torch.Tensor, 
+        seq_ids: torch.Tensor, 
+        # labels: torch.Tensor
+    ):
 
         out = self.model(
-            input_ids,
-            labels=labels,
+            input_ids=input_ids,
+            seq_ids=seq_ids,
+            # labels=labels,
             use_cache=True,
             past_key_values=self.cache
         )
