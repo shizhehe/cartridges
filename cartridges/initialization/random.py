@@ -54,12 +54,18 @@ class KVFromRandomText(KVCacheFactory):
             tokenizer=tokenizer,
             content=content,
             max_tokens=self.config.max_tokens,
-        )
+        ).squeeze(0)
         
         init_cache = DynamicCache()
+        
         with torch.no_grad():
+            input_ids = input_ids.to(model.device)
+            seq_ids = torch.full_like(input_ids, 0, dtype=torch.long)
+            position_ids = torch.arange(input_ids.shape[-1], dtype=torch.long).to(model.device)
             model(
-                input_ids.to(model.device),
+                input_ids=input_ids,
+                seq_ids=seq_ids,
+                position_ids=position_ids,
                 use_cache=True,
                 past_key_values=init_cache,
             )

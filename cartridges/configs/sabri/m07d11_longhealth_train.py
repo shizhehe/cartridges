@@ -24,7 +24,7 @@ config = TrainConfig(
         pretrained_model_name_or_path="Qwen/Qwen3-4b",
         model_cls=FlexQwen3ForCausalLM,
     ),
-    kv_cache_initializer=KVFromRandomVectors.Config(
+    kv_cache_initializer=KVFromRandomText.Config(
         max_tokens=2048
     ),
     

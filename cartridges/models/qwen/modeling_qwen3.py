@@ -274,11 +274,17 @@ class Qwen3Attention(nn.Module):
         if past_key_value is not None:
             # sin and cos are specific to RoPE models
             cache_kwargs = {"sin": sin, "cos": cos}
-            (key_states, value_states), (shared_key_states, shared_value_states) = past_key_value.update_separate(
-                key_states, value_states, self.layer_idx, cache_kwargs
-            )
-            key_states = torch.cat([shared_key_states, key_states], dim=-2)
-            value_states = torch.cat([shared_value_states, value_states], dim=-2)
+            if hasattr(past_key_value, "update_separate"):
+                (key_states, value_states), (shared_key_states, shared_value_states) = past_key_value.update_separate(
+                    key_states, value_states, self.layer_idx, cache_kwargs
+                )
+                key_states = torch.cat([shared_key_states, key_states], dim=-2)
+                value_states = torch.cat([shared_value_states, value_states], dim=-2)
+            else:
+                key_states, value_states = past_key_value.update(
+                    key_states, value_states, self.layer_idx, cache_kwargs
+                )
+  
 
         attn_output = flex_attention_forward(
             self,
@@ -453,8 +459,8 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
         # --- begin build block mask ---
         q_len = len(seq_ids)
         kv_len = len(seq_ids) + (0 if past_key_values is None else past_key_values.get_seq_length())
-        prefix_len = 0 if past_key_values is None else past_key_values.prefix_length()
-        if past_key_values is not None:
+        prefix_len = 0 if past_key_values is None or not hasattr(past_key_values, "prefix_length") else past_key_values.prefix_length()
+        if past_key_values is not None and hasattr(past_key_values, "prefix_length"):
             assert past_key_values.get_seq_length() == past_key_values.prefix_length()
         kv_seq_ids = torch.cat(
             [

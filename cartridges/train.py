@@ -110,10 +110,10 @@ class TrainConfig(RunConfig):
     # the `global_batch_size` is the total batch size across all devices and gradient
     # accumulation steps. We will infer the number of gradient accumulation steps from the
     # `global_batch_size`, and the number of devices.
-    # each batch is packed into a single sequence of length `seq_length`. Depending
+    # each batch is packed into a single sequence of length `packed_seq_length`. Depending
     # on the `packing_mode`, the final element in the batch will be truncated or padded.
     global_batch_size: int = 1
-    seq_length: int = 2048
+    packed_seq_length: int = 2048
     packing_mode: Literal["truncate", "pad"] = "pad"
 
     epochs: int = 5

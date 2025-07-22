@@ -389,7 +389,7 @@ class PackedBatchSampler(BatchSampler):
         sampler (Sampler): A sampler that provides indices of dataset elements.
         dataset (CartridgeTrainDataset): The dataset containing elements to be batched.
         mode (Literal["truncate", "pad"]): The mode of operation for batching, either "truncate" or "pad".
-        seq_length (int): The maximum allowed sequence length for each batch.
+        packed_seq_length (int): The maximum allowed sequence length for each batch.
         shuffle (bool): Whether to shuffle the batches. Currently, only shuffling is supported.
     """
     def __init__(
@@ -397,7 +397,7 @@ class PackedBatchSampler(BatchSampler):
         sampler: Sampler,
         dataset: CartridgeTrainDataset,
         packing_mode: Literal["truncate", "pad"]="pad",
-        seq_length: int = 2048,
+        packed_seq_length: int = 2048,
         shuffle: bool = True,
     ):
         assert shuffle, "We only support shuffling for now."
@@ -409,14 +409,14 @@ class PackedBatchSampler(BatchSampler):
             idx = queue[0]
             elem: CartridgeDatasetElementLogitLabels = dataset[idx]
             
-            if curr_seq_len == 0 and len(elem.input_ids) > seq_length:
+            if curr_seq_len == 0 and len(elem.input_ids) > packed_seq_length:
                 # if the current element is by itself longer than the sequence length,
                 # then the only option is to truncate it. So we just add it to the batch
                 # and start a new batch.
                 curr_batch.append(queue.popleft())
                 self.batches.append(curr_batch)
                 curr_batch, curr_seq_len = [], 0
-            elif curr_seq_len + len(elem.input_ids) > seq_length:
+            elif curr_seq_len + len(elem.input_ids) > packed_seq_length:
                 # when the current batch would be too long if we add the current element,
                 # if we are in truncate mode, then we just add the current element to the batch
                 # and start a new batch. Otherwise, we just start a new batch.
