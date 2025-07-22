@@ -63,12 +63,12 @@ config = SynthesizeConfig(
     
     max_num_batches_in_parallel=256,
 
-    name=FormatStringVariable(f"{Path(__file__).stem}_{patients_str}_n{{num_samples}}"),
-    run_id=FormatStringVariable("{name}"),
+    name=f"{Path(__file__).stem}_{patients_str}",
+    run_id=f"{Path(__file__).stem}_{patients_str}",
     wandb=WandBConfig(
         project="cartridges",
         entity="hazy-research",
-        tags=[f"gmail_synthesis", "tools", "mcp"],
+        tags=[f"longhealth_synthesis"],
     ),
     save_wandb_artifact=False,
     save_wandb_preview=False,
