@@ -32,6 +32,23 @@ config =CartridgeTrainDataset.Config(
 )
 dataset = config.instantiate(tokenizer=tokenizer)
 
+target_seq_len = 2048
+batches = []
+print(f"target_seq_len={target_seq_len}")
+curr_batch = []
+curr_seq_len = 0
+for idx, elem in enumerate(dataset):
+    curr_batch.append(idx)
+    curr_seq_len += len(elem.input_ids)
+    if curr_seq_len > target_seq_len:
+        batches.append(curr_batch)
+        curr_batch = []
+        curr_seq_len = 0
+
+print(f"avg batch size={sum(len(b) for b in batches)/ len(batches)}")
+breakpoint()
+
+
 
 dataloader = DataLoader(
     dataset,
