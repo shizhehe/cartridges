@@ -32,21 +32,19 @@ config = TrainConfig(
     loss_type="logits",
     epochs=2,
     global_batch_size=bs,
-    local_batch_size=4,
-    use_batch_sampler=False,
+    packed_seq_length=4096,
+    packing_mode="truncate",
 
     dataset=CartridgeTrainDataset.Config(
         data_sources=[
             (source, None)
             for source in data_sources
         ],
-        max_sequence_length=1024,
         is_wandb=True,
         label_type="logits",
         top_k_logits=20,
     ),
 
-    
     save_every_n_steps=512,
     generate_every_n_steps=512,
     generate_max_new_tokens=512,

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from collections import deque
 import pickle
 from pathlib import Path
 import random
@@ -174,8 +175,6 @@ def msg(content, role: Literal["user"] | Literal["assistant"] | Literal["system"
     return {"content": content, "role": role}
 
 
-SENTINEL_MESSAGE = "sentinel"
-
 
 @dataclass
 class TokenData:
@@ -189,9 +188,8 @@ class CartridgeTrainDataset(Dataset):
     class Config(ObjectConfig):
         _pass_as_config = True
         data_sources: list[tuple[str, int | None],]  # path, limit
-        max_sequence_length: int | None = None
         is_wandb: bool = False
-        label_type: Literal["tokens"] | Literal["logits"] | Literal["online"]
+        label_type: Literal["tokens", "logits"] = "logits"
         top_k_logits: int = 20
         dataset_weights: Optional[list[float]] = None
         user_prompt_prefix: list[str] | None = None
@@ -297,28 +295,18 @@ class CartridgeTrainDataset(Dataset):
             list[CartridgeDatasetElementLogitLabels]
             | list[CartridgeDatasetElementTokenLabels]
         ),
+        packed_seq_length: int,
     ) -> CartridgeDatasetBatchLogitLabels | CartridgeDatasetBatchTokenLabels:
         """
-        Collate a list of dataset elements into a batch.
-
-        Args:
-            batch: A list of dataset elements, either logit labels or token labels
-
-        Returns:
-            A batch object containing the batched input_ids, labels, and mask (for logit labels)
-
-        Raises:
-            ValueError: If the batch contains mixed element types
+        Collate a list of dataset elements into a single sequence of length `seq_length`.
+        The elements are packed into a single sequence 
         """
-        # TODO: get rid of this hack
-        # batch = [i for i in batch if i is not None]
         if not batch:
             raise ValueError("Empty batch provided to collate function")
 
         # Determine the batch type based on the first element
         if isinstance(batch[0], CartridgeDatasetElementTokenLabels):
             raise NotImplementedError("Token labels are not supported yet.")
-            
 
         input_ids, element_ids, position_ids = [], [], []
         topk_token_ids, topk_logprobs, topk_token_idxs = [], [], []
@@ -335,12 +323,36 @@ class CartridgeTrainDataset(Dataset):
             metadatas.append(element.metadata)
             token_counts += element.token_counts
             curr_token_idx += len(element.input_ids)
+        
         input_ids = torch.cat(input_ids, dim=0)
         element_ids = torch.cat(element_ids, dim=0)
         position_ids = torch.cat(position_ids, dim=0)
         topk_token_ids = torch.cat(topk_token_ids, dim=0)
         topk_logprobs = torch.cat(topk_logprobs, dim=0)
         topk_token_idxs = torch.cat(topk_token_idxs, dim=0)
+
+        if len(input_ids) > packed_seq_length:
+            # if the input ids are longer than the sequence length, we need to truncate 
+            # we need to truncate them
+            input_ids = input_ids[:packed_seq_length]
+            element_ids = element_ids[:packed_seq_length]
+            position_ids = position_ids[:packed_seq_length]
+
+            # we also need to filter out any targets that are from the truncated part of
+            # the input ids
+            mask = topk_token_idxs < packed_seq_length
+            topk_token_ids = topk_token_ids[mask]
+            topk_logprobs = topk_logprobs[mask]
+            topk_token_idxs = topk_token_idxs[mask]
+
+        elif len(input_ids) < packed_seq_length:
+            # if the input ids are shorter than the sequence length, we need to pad them
+            # it is critical that the sequence length stays constant to avoid 
+            # flex attention recompiles.
+            padding = torch.full((packed_seq_length - len(input_ids),), 0, dtype=torch.long)
+            input_ids = torch.cat([input_ids, padding])
+            element_ids = torch.cat([element_ids, padding])
+            position_ids = torch.cat([position_ids, padding])
 
         return CartridgeDatasetBatchLogitLabels(
             input_ids=input_ids,
@@ -352,6 +364,85 @@ class CartridgeTrainDataset(Dataset):
             metadata=metadatas,
             token_counts=token_counts,
         )
+
+
+class PackedBatchSampler(BatchSampler):
+    """
+    A sampler that organizes dataset elements into batches with a focus on sequence length constraints.
+
+    This class attempts to create batches of dataset elements such that the total sequence length of each batch
+    does not exceed a specified limit (`seq_length`). The batching process can operate in two modes: "truncate" 
+    and "pad". 
+
+    - In "truncate" mode, if adding an element to the current batch would exceed the `seq_length`, the element 
+        is added to a new batch instead. However, if an individual element's sequence length exceeds `seq_length`, 
+        it is forced to be truncated and added to a new batch on its own.
+    
+    - In "pad" mode, elements are added to the current batch until adding another would exceed `seq_length`. 
+        The current batch is then finalized, and a new batch is started. The final batch is padded to ensure 
+        consistent batch sizes.
+    
+    Note that the sampler does not actually handle the truncation or padding, this is 
+    left to the collate function.
+
+    Args:
+        sampler (Sampler): A sampler that provides indices of dataset elements.
+        dataset (CartridgeTrainDataset): The dataset containing elements to be batched.
+        mode (Literal["truncate", "pad"]): The mode of operation for batching, either "truncate" or "pad".
+        seq_length (int): The maximum allowed sequence length for each batch.
+        shuffle (bool): Whether to shuffle the batches. Currently, only shuffling is supported.
+    """
+    def __init__(
+        self, 
+        sampler: Sampler,
+        dataset: CartridgeTrainDataset,
+        packing_mode: Literal["truncate", "pad"]="pad",
+        seq_length: int = 2048,
+        shuffle: bool = True,
+    ):
+        assert shuffle, "We only support shuffling for now."
+        self.batches = [] 
+        queue = deque(sampler)
+        
+        curr_batch, curr_seq_len = [], 0
+        while queue:
+            idx = queue[0]
+            elem: CartridgeDatasetElementLogitLabels = dataset[idx]
+            
+            if curr_seq_len == 0 and len(elem.input_ids) > seq_length:
+                # if the current element is by itself longer than the sequence length,
+                # then the only option is to truncate it. So we just add it to the batch
+                # and start a new batch.
+                curr_batch.append(queue.popleft())
+                self.batches.append(curr_batch)
+                curr_batch, curr_seq_len = [], 0
+            elif curr_seq_len + len(elem.input_ids) > seq_length:
+                # when the current batch would be too long if we add the current element,
+                # if we are in truncate mode, then we just add the current element to the batch
+                # and start a new batch. Otherwise, we just start a new batch.
+                if packing_mode == "truncate":
+                    curr_batch.append(queue.popleft())
+                self.batches.append(curr_batch)
+                curr_batch, curr_seq_len = [], 0
+            else:
+                # otherwise, we just add the current element to the batch and continue
+                curr_batch.append(queue.popleft())
+                curr_seq_len += len(elem.input_ids)
+        
+        if curr_batch:
+            # need to add the last batch
+            self.batches.append(curr_batch)
+        
+        random.shuffle(self.batches)
+    
+    def __iter__(self):
+        for batch_idxs in self.batches:
+            yield batch_idxs
+
+    def __len__(self):
+        return len(self.batches)
+
+
 
 @dataclass
 class CartridgeGenerateDatasetElement:
@@ -404,37 +495,3 @@ class CartridgeGenerateDataset(CartridgeTrainDataset):
                 "idx": index,
             },
         )
-
-
-class CartridgeDatasetBatchSampler(BatchSampler):
-    def __init__(
-        self, 
-        sampler: Sampler,
-        dataset: CartridgeTrainDataset,
-        batch_size: int, 
-        shuffle: bool = True,
-    ):
-        self.batches = [] 
-        assert shuffle
-        
-        # get lengths of each element 
-        lengths = []
-        for idx in sampler:
-            elem: CartridgeDatasetElementLogitLabels = dataset[idx]
-            lengths.append((len(elem.input_ids), idx))
-        sorted_idxs = sorted(lengths, key=lambda x: x[0])
-
-        self.idx_batches = [
-            [idx for _, idx in sorted_idxs[i:i + batch_size]] 
-            for i in range(0, len(sorted_idxs), batch_size) 
-        ]
-        
-        random.shuffle(self.idx_batches)
-    
-    def __iter__(self):
-        for batch_idxs in self.idx_batches:
-            yield batch_idxs
-
-    def __len__(self):
-        return len(self.idx_batches)
-

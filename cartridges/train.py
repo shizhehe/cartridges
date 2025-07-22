@@ -29,7 +29,7 @@ import wandb
 from cartridges.cache import AttnConfig, KVCacheFactory, TrainableCache
 from cartridges.datasets import (
     CartridgeDatasetBatchLogitLabels,
-    CartridgeDatasetBatchSampler,
+    PackedBatchSampler,
     CartridgeDatasetBatchTokenLabels,
     CartridgeGenerateDataset,
     CartridgeGenerateDatasetElement,
@@ -45,8 +45,7 @@ logger = get_logger(__name__)
 
 class EvalDatasetConfig(BaseConfig):
 
-    # the "local" batch size is the batch size per device.
-    local_batch_size: Optional[int] = 1
+    seq_length: Optional[int] = 2048
     dataset: ObjectConfig
     name_for_wandb: str
     only_eval_rank_0: bool = False
@@ -108,13 +107,14 @@ class TrainConfig(RunConfig):
     generate_datasets: list[GenerateDatasetConfig] = field(default_factory=list)
     generate_max_new_tokens: int = 128
 
-    # the global batch size is the total batch size across all devices and gradient
-    # accumulation steps
-    # we will infer the number of gradient accumulation steps from the `global_batch_size`,
-    # the `local_batch_size`, and the number of devices
-    global_batch_size: int = 1024
-    local_batch_size: int = 32
-    use_batch_sampler: bool = False
+    # the `global_batch_size` is the total batch size across all devices and gradient
+    # accumulation steps. We will infer the number of gradient accumulation steps from the
+    # `global_batch_size`, and the number of devices.
+    # each batch is packed into a single sequence of length `seq_length`. Depending
+    # on the `packing_mode`, the final element in the batch will be truncated or padded.
+    global_batch_size: int = 1
+    seq_length: int = 2048
+    packing_mode: Literal["truncate", "pad"] = "pad"
 
     epochs: int = 5
     device: str = "cuda"
@@ -196,12 +196,10 @@ def train(config: TrainConfig):
 
     # compute the correct number of gradient accumulation steps
     assert config.global_batch_size % num_devices == 0
-    assert config.global_batch_size % config.local_batch_size == 0
     accumulate_grad_steps = (
-        config.global_batch_size // config.local_batch_size // num_devices
+        config.global_batch_size // num_devices
     )
     print(f"Global batch size: {config.global_batch_size}")
-    print(f"Local batch size: {config.local_batch_size}")
     print(f"Num devices: {num_devices}")
 
     logger.info(f"Train outputs will be saved to {config.run_dir}")
@@ -220,7 +218,7 @@ def train(config: TrainConfig):
     eval_datasets = [
         EvalDataset(
             dataset=dataset_config.dataset.instantiate(tokenizer=tokenizer),
-            batch_size=dataset_config.local_batch_size,
+            # batch_size=dataset_config.local_batch_size,
             name=dataset_config.name_for_wandb,
             only_eval_rank_0=dataset_config.only_eval_rank_0,
             dataloader_num_workers=dataset_config.dataloader_num_workers,
@@ -257,7 +255,6 @@ def train(config: TrainConfig):
     )
     
 
-    # TODO(RE: I believe this assertion is a fair one.
     assert config.model.tuning_method in ("custom_prefix", "peft")
     use_peft = config.model.tuning_method == "peft"
     
@@ -318,21 +315,17 @@ def train(config: TrainConfig):
             generator=torch.Generator().manual_seed(config.seed),
         )
 
-    if config.use_batch_sampler:
-        sampler = CartridgeDatasetBatchSampler(
-            sampler=train_sampler,
-            dataset=dataset,
-            batch_size=config.local_batch_size,
-            shuffle=True,
-        )
-        sampler_kwargs = {"batch_sampler": sampler}
-    else:
-        sampler_kwargs = {"sampler": train_sampler, "batch_size": config.local_batch_size}
-    
+    sampler = PackedBatchSampler(
+        sampler=train_sampler,
+        dataset=dataset,
+        packing_mode=config.packing_mode,
+        packed_seq_length=config.packed_seq_length,
+        shuffle=True,
+    )
     dataloader = DataLoader(
-        dataset,
-        collate_fn=dataset.collate,
-        **sampler_kwargs,
+        dataset, 
+        collate_fn=lambda batch: dataset.collate(batch, packed_seq_length=config.packed_seq_length), 
+        batch_sampler=sampler
     )
 
     # Set up optimizer based on tuning method
