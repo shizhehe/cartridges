@@ -31,7 +31,7 @@ config = TrainConfig(
     lr=2e-2,
     loss_type="logits",
     epochs=2,
-    global_batch_size=bs,
+    global_batch_size=32,
     packed_seq_length=4096,
     packing_mode="truncate",
 

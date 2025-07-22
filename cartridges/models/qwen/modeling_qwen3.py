@@ -23,12 +23,10 @@ from transformers.activations import ACT2FN
 from transformers.cache_utils import Cache, DynamicCache
 from transformers.generation import GenerationMixin
 from transformers.integrations import use_kernel_forward_from_hub
-from transformers.masking_utils import create_causal_mask, create_sliding_window_causal_mask
 from transformers.modeling_layers import GradientCheckpointingLayer
 from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
 from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS, dynamic_rope_update
 from transformers.modeling_utils import PreTrainedModel
-from transformers.processing_utils import Unpack
 from transformers.utils import auto_docstring, can_return_tuple, logging
 
 from .configuration_qwen3 import Qwen3Config
@@ -38,7 +36,8 @@ logger = logging.get_logger(__name__)
 
 # SE (07/21): `dynamic=False` is necessary to avoid a "PassManager::run failed" error
 # when interacting with torch.amp.autocast.
-flex_attention = torch.compile(flex_attention, dynamic=False)
+# flex_attention = torch.compile(flex_attention, dynamic=False)
+flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
 
 
 

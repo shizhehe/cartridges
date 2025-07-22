@@ -453,16 +453,22 @@ def train(config: TrainConfig):
             )
             with ddp_ctx_manager:
                 with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
+                    
 
+                    t0 = time.time()
                     outputs = wrapped_model(
                         input_ids=batch.input_ids.to(local_rank),
                         seq_ids=batch.element_ids.to(local_rank),
                         position_ids=batch.position_ids.to(local_rank),
                     )
+                    torch.cuda.synchronize()
+                    logger.info(f"Model forward: {time.time() - t0}")
 
+
+                    t0 = time.time()
                     topk_pred_logprobs = F.log_softmax(outputs.logits, dim=-1)[
                         0, 
-                        batch.topk_token_idxs.to(local_rank), 
+                        batch.topk_token_idxs.to(local_rank) - 1, 
                         batch.topk_token_ids.to(local_rank)
                     ] 
 
@@ -470,14 +476,20 @@ def train(config: TrainConfig):
                     ce_by_token = (
                         -batch.topk_logprobs.to(local_rank).exp()  # p(x), true distr
                         * topk_pred_logprobs  # q(x), model distr
-                    ).sum(dim=-1)
+                    )
 
                     loss = (ce_by_token.mean() / accumulate_grad_steps)
+                    torch.cuda.synchronize()
+                    logger.info(f"Loss forward: {time.time() - t0}")
+                    
 
                 # the loss should go outside of the automated-mixed precision context
                 # see here for an example: https://pytorch.org/docs/stable/notes/amp_examples.html
                 # but it should go inside the ddp context manager
+                t0 = time.time()
                 loss.backward()
+                torch.cuda.synchronize()
+                logger.info(f"Loss backward: {time.time() - t0}")
 
             # Update the accumulated metrics
             accum_loss += loss.detach()
