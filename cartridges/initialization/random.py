@@ -48,7 +48,7 @@ class KVFromRandomText(KVCacheFactory):
     ) -> TrainableCache:
         content = (Path(__file__).resolve().parent / "data" / self.config.text_source).read_text()
 
-        tokenize_data_into_system_prompt = MODEL_TO_SYSTEM_PROMPT_TOKENIZER[tokenizer.name_or_path]
+        tokenize_data_into_system_prompt = MODEL_TO_SYSTEM_PROMPT_TOKENIZER[tokenizer.name_or_path.lower()]
 
         input_ids = tokenize_data_into_system_prompt(
             tokenizer=tokenizer,

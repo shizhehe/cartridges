@@ -115,11 +115,29 @@ def qwen_messages_to_element(
             "user": [151645, 198],
             "assistant": [151645, 198],
         },
+
+    )
+
+def llama_messages_to_element(
+    messages: List[TrainingExample.Message],
+) -> CartridgeDatasetElementLogitLabels:
+    return _base_convert_messages_to_element(
+        messages,
+        message_start_tokens={
+            "user": [128006, 882,128007],
+            "assistant": [128006, 78191,128007],
+        },
+        message_end_tokens={
+            "user": [128009],
+            "assistant": [128009],
+        },
     )
 
 MODEL_TO_MESSAGE_CONVERTER = {
     "Qwen/Qwen3-4b": qwen_messages_to_element,
+    "meta-llama/Llama-3.2-3B-Instruct": llama_messages_to_element,
 }
+MODEL_TO_MESSAGE_CONVERTER = {k.lower(): v for k, v in MODEL_TO_MESSAGE_CONVERTER.items()}
 
 
 @dataclass
@@ -275,7 +293,7 @@ class CartridgeTrainDataset(Dataset):
             return self._getitem_tokens(index, row)
 
         assert isinstance(row, TrainingExample)
-        return MODEL_TO_MESSAGE_CONVERTER[self.tokenizer.name_or_path](row.messages)
+        return MODEL_TO_MESSAGE_CONVERTER[self.tokenizer.name_or_path.lower()](row.messages)
 
     def reload(self):
         # Check if dataset has data_source_indices attribute

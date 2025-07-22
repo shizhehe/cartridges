@@ -7,6 +7,7 @@ from pydrantic.variables import FormatStringVariable
 
 from cartridges.initialization.random import KVFromRandomText, KVFromRandomVectors
 from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
+from cartridges.models.llama.modeling_llama import FlexLlamaForCausalLM
 from cartridges.train import EvalDatasetConfig, GenerateDatasetConfig, TrainConfig
 from cartridges.models.config import HFModelConfig
 from cartridges.datasets import CartridgeTrainDataset
@@ -17,13 +18,17 @@ bs = 4
 
 data_sources = [
     # "/home/sabri/cartridges/outputs/2025-07-13-09-04-32-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_p10_n65536-0/artifact/dataset.pkl"
-    "/data/sabri/cartridges/2025-07-22-12-53-08-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_p10-0/artifact/dataset.pkl"
+    # "/data/sabri/cartridges/2025-07-22-12-53-08-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_p10-0/artifact/dataset.pkl"
+
+    "/data/sabri/cartridges/2025-07-22-16-36-53-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_p10_n8192-0/artifact/dataset.pkl"
 ]
 
 config = TrainConfig(
     model=HFModelConfig(
-        pretrained_model_name_or_path="Qwen/Qwen3-4b",
-        model_cls=FlexQwen3ForCausalLM,
+        # pretrained_model_name_or_path="Qwen/Qwen3-4b",
+        # model_cls=FlexQwen3ForCausalLM,
+        pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
+        model_cls=FlexLlamaForCausalLM,
     ),
     kv_cache_initializer=KVFromRandomText.Config(
         max_tokens=2048
@@ -31,7 +36,7 @@ config = TrainConfig(
     
     lr=2e-2,
     loss_type="logits",
-    epochs=2,
+    epochs=1,
     global_batch_size=32,
     packed_seq_length=4096,
     packing_mode="truncate",
@@ -52,7 +57,7 @@ config = TrainConfig(
     generate_datasets=[],
     eval_every_n_steps=256,
     eval_datasets=[],
-    distributed_backend="nccl",
+    distributed_backend="gloo",
 
     wandb=WandBConfig(
         project="cartridges",

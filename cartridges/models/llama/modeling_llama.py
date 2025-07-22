@@ -50,11 +50,10 @@ logger = logging.get_logger(__name__)
 
 # SE (07/21): `dynamic=False` is necessary to avoid a "PassManager::run failed" error
 # when interacting with torch.amp.autocast.
+# flex_attention = torch.compile(flex_attention, dynamic=False)
 # SE (07/22): The `mode="max-autotune-no-cudagraphs"` gives a ~2x speedup on 
 # backward running on a single A100.
-# flex_attention = torch.compile(flex_attention, dynamic=False)
-# flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
-# Compilation disabled for now due to issues - can be enabled later for performance
+flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
 
 
 @use_kernel_forward_from_hub("RMSNorm")
