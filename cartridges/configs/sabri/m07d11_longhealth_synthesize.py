@@ -63,8 +63,8 @@ config = SynthesizeConfig(
     
     max_num_batches_in_parallel=256,
 
-    name=f"{Path(__file__).stem}_{patients_str}",
-    run_id=f"{Path(__file__).stem}_{patients_str}",
+    name=FormatStringVariable(f"{Path(__file__).stem}_{patients_str}_n{{num_samples}}"),
+    run_id=FormatStringVariable("{name}"),
     wandb=WandBConfig(
         project="cartridges",
         entity="hazy-research",

@@ -16,7 +16,8 @@ file_name = Path(__file__).stem
 bs = 4
 
 data_sources = [
-    "/home/sabri/cartridges/outputs/2025-07-13-09-04-32-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_p10_n65536-0/artifact/dataset.pkl"
+    # "/home/sabri/cartridges/outputs/2025-07-13-09-04-32-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_p10_n65536-0/artifact/dataset.pkl"
+    "/data/sabri/cartridges/2025-07-22-12-53-08-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_p10-0/artifact/dataset.pkl"
 ]
 
 config = TrainConfig(
@@ -51,7 +52,7 @@ config = TrainConfig(
     generate_datasets=[],
     eval_every_n_steps=256,
     eval_datasets=[],
-    distributed_backend="gloo",
+    distributed_backend="nccl",
 
     wandb=WandBConfig(
         project="cartridges",
