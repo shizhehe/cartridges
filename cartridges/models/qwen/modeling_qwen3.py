@@ -17,7 +17,7 @@ from typing import Callable, Optional, Union
 import torch
 from torch import nn
 import torch.nn.functional as F
-from torch.nn.attention.flex_attention import create_block_mask
+from torch.nn.attention.flex_attention import create_block_mask, flex_attention, BlockMask
 
 from transformers.activations import ACT2FN
 from transformers.cache_utils import Cache, DynamicCache
@@ -27,7 +27,7 @@ from transformers.masking_utils import create_causal_mask, create_sliding_window
 from transformers.modeling_layers import GradientCheckpointingLayer
 from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
 from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS, dynamic_rope_update
-from transformers.modeling_utils import PreTrainedModel, flex_attention_forward
+from transformers.modeling_utils import PreTrainedModel
 from transformers.processing_utils import Unpack
 from transformers.utils import auto_docstring, can_return_tuple, logging
 
@@ -35,6 +35,85 @@ from .configuration_qwen3 import Qwen3Config
 
 
 logger = logging.get_logger(__name__)
+
+# SE (07/21): `dynamic=False` is necessary to avoid a "PassManager::run failed" error
+# when interacting with torch.amp.autocast.
+flex_attention = torch.compile(flex_attention, dynamic=False)
+
+
+
+def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+    """
+    This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
+    num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
+    """
+    batch, num_key_value_heads, slen, head_dim = hidden_states.shape
+    if n_rep == 1:
+        return hidden_states
+    hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
+    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
+
+
+def flex_attention_forward(
+    module: torch.nn.Module,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attention_mask: Union[torch.Tensor, "BlockMask"],
+    scaling: Optional[float] = None,
+    softcap: Optional[float] = None,
+    **kwargs,
+) -> tuple[torch.Tensor, torch.Tensor]:
+
+    if kwargs.get("dropout", 0.0) > 0:
+        raise ValueError(
+            "`flex_attention` does not support `dropout`. Please use it with inference"
+            " only (`model.eval()`) or turn off the attention dropout in the respective config."
+        )
+
+    block_mask = None
+    score_mask = None
+    if isinstance(attention_mask, BlockMask):
+        block_mask = attention_mask
+    else:
+        score_mask = attention_mask
+
+    if score_mask is not None:
+        score_mask = score_mask[:, :, :, : key.shape[-2]]
+
+    def score_mod(score, batch_idx, head_idx, q_idx, kv_idx):
+        if softcap is not None:
+            score = softcap * torch.tanh(score / softcap)
+        if score_mask is not None:
+            score = score + score_mask[batch_idx][0][q_idx][kv_idx]
+        return score
+
+    enable_gqa = True
+    num_local_query_heads = query.shape[1]
+
+    # When running TP this helps:
+    if not ((num_local_query_heads & (num_local_query_heads - 1)) == 0):
+        key = repeat_kv(key, query.shape[1] // key.shape[1])
+        value = repeat_kv(value, query.shape[1] // value.shape[1])
+        enable_gqa = False
+
+    kernel_options = kwargs.get("kernel_options", None)
+    attn_output = flex_attention(
+        query,
+        key,
+        value,
+        score_mod=score_mod,
+        block_mask=block_mask,
+        enable_gqa=enable_gqa,
+        scale=scaling,
+        kernel_options=kernel_options,
+        return_lse=False,
+    )
+    # lse is returned in float32
+    
+    attn_output = attn_output.transpose(1, 2).contiguous()
+
+    return attn_output
 
 
 
@@ -201,7 +280,7 @@ class Qwen3Attention(nn.Module):
             key_states = torch.cat([shared_key_states, key_states], dim=-2)
             value_states = torch.cat([shared_value_states, value_states], dim=-2)
 
-        attn_output, _ = flex_attention_forward(
+        attn_output = flex_attention_forward(
             self,
             query_states,
             key_states,
@@ -386,7 +465,11 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
         
         def mask_func(_, _h, q_idx, kv_idx):
             return (kv_idx < prefix_len) | ((seq_ids[q_idx] == kv_seq_ids[kv_idx]) & (q_idx + prefix_len >= kv_idx))
-        block_mask = create_block_mask(mask_func, 1, 1, q_len, kv_len, device=inputs_embeds.device)
+        block_mask = create_block_mask(
+            mask_func, 1, 1, q_len, kv_len, 
+            device=inputs_embeds.device,
+            # _compile=True
+        )
         # --- end build block mask ---
 
 
@@ -507,6 +590,7 @@ class FlexQwen3ForCausalLM(FlexQwen3PreTrainedModel, GenerationMixin):
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
+
 
 
 __all__ = [

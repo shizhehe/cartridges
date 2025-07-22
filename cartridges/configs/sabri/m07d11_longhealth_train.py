@@ -13,7 +13,7 @@ from cartridges.datasets import CartridgeTrainDataset
 from cartridges.utils import WandBConfig
 
 file_name = Path(__file__).stem
-bs = 64
+bs = 4
 
 data_sources = [
     "/home/sabri/cartridges/outputs/2025-07-13-09-04-32-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_p10_n65536-0/artifact/dataset.pkl"
@@ -33,7 +33,7 @@ config = TrainConfig(
     epochs=2,
     global_batch_size=bs,
     local_batch_size=4,
-    use_batch_sampler=True,
+    use_batch_sampler=False,
 
     dataset=CartridgeTrainDataset.Config(
         data_sources=[

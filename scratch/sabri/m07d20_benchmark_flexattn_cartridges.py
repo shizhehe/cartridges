@@ -212,7 +212,7 @@ def test_mask(
             tensor.grad = None
 
         # Use F.sdpa with the same mask for comparison
-        sdpa_out = F.scaled_dot_product_attention(*qkv_packed, attn_mask=mask)
+        sdpa_out = F.scaled_dot_product_attention(*qkv_packed, attn_mask=sdpa_mask)
         sdpa_out.backward(grad_out_packed)
         sdpa_grads = [tensor.grad for tensor in qkv_packed]
 

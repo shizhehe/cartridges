@@ -491,7 +491,7 @@ def train(config: TrainConfig):
             accum_num_input_tokens += torch.tensor(
                 batch.input_ids.size(0), device=local_rank
             )
-            accum_num_target_tokens += 0 # mask.sum().detach() # TODO: fix thisTI
+            accum_num_target_tokens += torch.tensor(0, device=local_rank) # mask.sum().detach() # TODO: fix thisTI
 
             if do_step:
                 optimizer.step()
