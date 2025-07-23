@@ -1,416 +1,217 @@
-import os
-from cartridges.datasets import TEMPLATE
-from transformers import AutoTokenizer
-import wandb
-from cartridges.train import TrainConfig, CacheAndModel
-from cartridges.cache import TrainableCache
+from typing import Any, List, Optional
+from transformers import DynamicCache, AutoTokenizer
 import torch
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
-from typing import List, Optional, Union, TYPE_CHECKING
-from peft import PeftModel
+from tqdm import tqdm
 
-
-def load_model_and_cache_from_wandb(
-    wandb_run_id: str,
-    step: int,
-    device: str = "cuda",
-) -> tuple[CacheAndModel, AutoTokenizer]:
-    is_ddp = "LOCAL_RANK" in os.environ
-    is_rank_zero = (not is_ddp) or (dist.get_rank() == 0)
-
-    train_config = TrainConfig.from_wandb(wandb_run_id, strict=False)
-
-    model = train_config.model.instantiate().to(device)
-    tokenizer = AutoTokenizer.from_pretrained(train_config.tokenizer)
-
-    if is_rank_zero:
-        out = wandb.restore(
-            f"cache-step{step}.pt", run_path=wandb_run_id, root=train_config.run_dir
-        )
+class PackedCache(DynamicCache):
+    """A packed cache for generation with FlexAttention.
     
-    dist.barrier()
-    cache = TrainableCache.from_pretrained(
-        os.path.join(train_config.run_dir, f"cache-step{step}.pt"), 
-        device=device
-    )
+    The cache must do two things:
 
-    return CacheAndModel(cache=cache, model=model), tokenizer
+    - Keep track of sequence membership of the cache and expose it to the model via
+    the seq_ids method. The model will use this once per forward pass to construct 
+    the appropriate block mask. 
+    - Keep track of keys and values and expose them to the model in a packed manner via 
+    the update method. 
+    """
+    def __init__(self):
+        super().__init__()
+        self._seq_ids = None
 
-
-def generate(
-    input_ids: torch.Tensor,
-    cache_and_model: Union[CacheAndModel, DDP, PeftModel],
-    tokenizer: AutoTokenizer,
-    max_new_tokens: int = 32,
-):
-    cache = None
+    def update(
+        self, 
+        new_keys: torch.Tensor,
+        new_values: torch.Tensor,
+        layer_idx: int,
+        cache_kwargs: dict[str, Any],
+    ):
+        """Update the cache with new keys and values.
+        
+        Args:
+            new_keys: (1, L, H) tensor of new keys
+            new_values: (1, L, H) tensor of new values
+            layer_idx: index of the layer in the model.
+            cache_kwargs: kwargs to pass to the cache.
+        """
+        # Extract seq_ids from cache_kwargs if provided
+        if "seq_ids" in cache_kwargs:
+            self._seq_ids = cache_kwargs["seq_ids"]
+        
+        # Call parent update method
+        return super().update(new_keys, new_values, layer_idx, cache_kwargs)
     
-    if isinstance(cache_and_model, PeftModel):
-        cache = None
-    elif isinstance(cache_and_model, DDP):
-        module: CacheAndModel = cache_and_model.module
-        cache = module.cache if hasattr(module, 'cache') else None
-    else:
-        if hasattr(cache_and_model, 'cache'):
-            cache = cache_and_model.cache
-        else:
-            cache = None
-        
-    # Initialize generation loop
-    generated_tokens = []
-
-    with torch.inference_mode():
-        # Get the device from the model
-        device = next(cache_and_model.parameters()).device
-        input_ids = input_ids.to(device)
-        past_key_values = None  # For tracking KV cache in standard generation
-        
-        for _ in range(max_new_tokens):
-            # Get model outputs
-            if cache is None:
-                # Standard autoregressive generation for PEFT models
-                outputs = cache_and_model(
-                    input_ids=(input_ids if len(generated_tokens) == 0 else input_ids[:, -1:]),
-                    past_key_values=past_key_values,
-                    use_cache=True,
-                )
-                # Update KV cache for next iteration
-                past_key_values = outputs.past_key_values
-            else:
-                # Custom cache-based generation
-                outputs = cache_and_model(
-                    input_ids=(input_ids if len(generated_tokens) == 0 else input_ids[:, -1:]),
-                )
-                assert past_key_values is None
-
-            # Get next token prediction
-            next_token = outputs.logits[:, -1:].argmax(dim=-1)
-            # Stop if EOS token is generated
-            if next_token.item() == tokenizer.eos_token_id:
-                break
-
-            generated_tokens.append(next_token)
-
-            # Update input_ids for next iteration
-            input_ids = torch.cat([input_ids, next_token], dim=-1)
-            
-        # Clean up cache after generation
-        if cache is not None:
-            # SE(05/19): there used to be a code path that would manually clear, but it was not being used so we removed
-            assert hasattr(cache, "clear")  
-            cache.clear()
-
-    if len(generated_tokens) == 0:
-        return "[invalid]"
-    return tokenizer.decode(torch.cat(generated_tokens, dim=-1)[0])
+    def seq_ids(self) -> torch.Tensor:
+        """Returns the sequence ids of the cache."""
+        return self._seq_ids
+       
 
 
-def get_loss(
+def flex_generate(
+    model,
     input_ids: torch.Tensor,
-    cache_and_model, #Union['CacheAndModel', DDP, PeftModel],
+    seq_ids: torch.Tensor,
+    position_ids: torch.Tensor,
     tokenizer: AutoTokenizer,
-    answer_ids: torch.Tensor,
-):
-    original_seq_len = input_ids.shape[1]
-
-
-    # Move tensors to device
-    device = next(cache_and_model.parameters()).device
-    input_ids = input_ids.to(device)
-    answer_ids = answer_ids.to(device)
-
-    # Perplexity calculation
-    # Concatenate input and answer
-    full_input = torch.cat([input_ids, answer_ids], dim=1)
-
-    with torch.inference_mode():
-        outputs = cache_and_model(full_input)
-        logits = outputs.logits  # shape: [batch, seq_len, vocab]
-
-        # Find where the answer starts in the full input
-        answer_start = input_ids.shape[1] + 4
-        
-        # Predict the answer tokens only (i.e., target is answer_ids)
-        shift_logits = logits[:, answer_start - 1:-1, :]  # predict from last input token onward
-        shift_labels = answer_ids[:, 4:]
-
-        from torch.nn import functional as F
-        loss = F.cross_entropy(
-            shift_logits.reshape(-1, shift_logits.size(-1)),
-            shift_labels.reshape(-1),
-            reduction='none',
-        )
-        total_loss = loss.sum()
-        num_tokens = loss.numel()
-
-    # Clean up cache after generation
-    cache = cache_and_model.cache 
-    if cache is not None:
-        if hasattr(cache, "clear"):
-            cache.clear()
-        else:
-            for layer_idx in range(len(cache.key_cache)):
-                cache.key_cache[layer_idx] = cache.key_cache[layer_idx][
-                    :, :, :original_seq_len
-                ]
-                cache.value_cache[layer_idx] = cache.value_cache[layer_idx][
-                    :, :, :original_seq_len
-                ]
-    else:
-        print("ahhhhhhhh cache is none")
-        # assert 0, "Cache is None, but we are trying to clear it"
-
-
-    return total_loss, num_tokens
-
-
-
-def generate_samples(
-    input_ids: torch.Tensor,  # shape (batch_size, seq_len)
-    cache_and_model: Union[CacheAndModel, DDP, PeftModel],
-    tokenizer: AutoTokenizer,
+    stop_token_ids: Optional[List[int]] = None,
     max_new_tokens: int = 32,
-    num_samples: int = 16,
     temperature: float = 0.0,
-    use_stop_token: bool = True,
+    show_progress: bool = False,
 ):
+    """Autoregressive generation with FlexAttention (e.g. FlexLlamaModel, FlexQwen3Model).
     
-    cache: Optional[TrainableCache] = None
-    original_seq_len = input_ids.shape[1]
+    Args:
+        model: The model to use for generation
+        input_ids: (N,) tensor of input ids where N is the total number of tokens across 
+            the sequences.
+        seq_ids: (N,) tensor specifying the membership of each token to a sequence
+        position_ids: (N,) tensor of position of a token within it's sequence
+        stop_token_ids: By default, will use the end of text id from the tokenizer.
+        tokenizer: tokenizer to use for decoding
+        max_new_tokens: maximum number of new tokens to generate.
+        temperature: temperature for sampling
+        show_progress: whether to show a progress bar during generation
     
-    if isinstance(cache_and_model, PeftModel):
-        cache = None
-        raise NotImplementedError("PEFT models not supported for batch generation")
-    elif isinstance(cache_and_model, DDP):
-        module: CacheAndModel = cache_and_model.module
-        cache: TrainableCache = module.cache if hasattr(module, 'cache') else None
-    else:
-        if hasattr(cache_and_model, 'cache'):
-            cache = cache_and_model.cache
-            original_seq_len = cache.get_seq_length()
-        else:
+    This implementation relies on the PackedCache above.
+    """
+    if stop_token_ids is None:
+        stop_token_ids = [tokenizer.eos_token_id] if tokenizer.eos_token_id is not None else []
+    
+    device = input_ids.device
+    cache = PackedCache()
+    
+    # Initialize generated sequences
+    generated_tokens = [[] for _ in range(seq_ids.max().item() + 1)]
+    
+    # Current state
+    current_input_ids = input_ids
+    current_seq_ids = seq_ids
+    current_position_ids = position_ids
+    
+    progress_range = tqdm(range(max_new_tokens), desc="Generating", disable=not show_progress)
+    for step in progress_range:
+        # Forward pass
+        with torch.no_grad():
             breakpoint()
-            raise ValueError("Unexpected")
-    
-    input_ids = input_ids.repeat(num_samples, 1)
-    sample_idxs = torch.arange(num_samples)  # needed since the shape of input_ids will change
-    # Initialize generation loop
-    generated_tokens = [[] for _ in range(num_samples)]
-
-    with torch.inference_mode():
-        # Get the device from the model
-        device = next(cache_and_model.parameters()).device
-        input_ids = input_ids.to(device)
-        past_key_values = None  # For tracking KV cache in standard generation
+            outputs = model(
+                input_ids=current_input_ids,
+                seq_ids=current_seq_ids,
+                position_ids=current_position_ids,
+                # past_key_values=cache,
+                # use_cache=True,
+            )
         
-        for _ in range(max_new_tokens):
-            # Get model outputs
-            if cache is None:
-                assert False
-                # Standard autoregressive generation for PEFT models
-                outputs = cache_and_model(
-                    input_ids=(input_ids if len(generated_tokens) == 0 else input_ids[:, -1:]),
-                    past_key_values=past_key_values,
-                    use_cache=True,
-                )
-                # Update KV cache for next iteration
-                past_key_values = outputs.past_key_values
-            else:
-                # Custom cache-based generation
-                outputs = cache_and_model(
-                    input_ids=(input_ids if len(generated_tokens[0]) == 0 else input_ids[:, -1:]),
-                )
-                assert past_key_values is None
-            
-            
-            # Get next token prediction
-            next_sample_idxs, next_input_ids = [], []
-            next_key_cache = [[] for _ in range(len(cache.key_cache))]
-            next_value_cache = [[] for _ in range(len(cache.value_cache))]
-            for input_idx, sample_idx in enumerate(sample_idxs):
-                if temperature == 0.0:
-                    next_token = outputs.logits[input_idx, -1:].argmax(dim=-1)
-                else:
-                    scaled_logits = outputs.logits[input_idx, -1:] / temperature
-                    probs = scaled_logits.softmax(dim=-1)
-                    next_token = probs.multinomial(num_samples=1, replacement=True)[0]
-                generated_tokens[sample_idx].append(next_token)
-                
-                # Stop if EOS token is generated
-                if not use_stop_token or next_token.item() != tokenizer.eos_token_id:
-                    next_sample_idxs.append(sample_idx)
-                    next_input_ids.append(torch.cat([input_ids[input_idx], next_token], dim=-1))
-                    
-                    for layer_idx in range(len(cache.key_cache)):
-                        next_key_cache[layer_idx].append(cache.key_cache[layer_idx][input_idx])
-                        next_value_cache[layer_idx].append(cache.value_cache[layer_idx][input_idx])
-            
-            if len(next_sample_idxs) == 0:
-                break
-            
-            sample_idxs = torch.tensor(next_sample_idxs)
-            input_ids = torch.stack(next_input_ids, dim=0)
-            cache.key_cache = [torch.stack(next_key_cache[layer_idx], dim=0) for layer_idx in range(len(next_key_cache))]
-            cache.value_cache = [torch.stack(next_value_cache[layer_idx], dim=0) for layer_idx in range(len(next_value_cache))]
-
-        # Clean up cache after generation
-        if cache is not None:
-            if hasattr(cache, "clear"):
-                cache.clear()
-            else:
-                for layer_idx in range(len(cache.key_cache)):
-                    cache.key_cache[layer_idx] = cache.key_cache[layer_idx][
-                        :, :, :original_seq_len
-                    ]
-                    cache.value_cache[layer_idx] = cache.value_cache[layer_idx][
-                        :, :, :original_seq_len
-                    ]
-
-    if len(generated_tokens) == 0:
-        return "[invalid]"
-    return [tokenizer.decode(torch.tensor(toks)) for toks in generated_tokens]
-
-
-
-def generate_batch(
-    input_ids: List[torch.Tensor],  # shape (batch_size, seq_len)
-    cache_and_model: Union[CacheAndModel, DDP, PeftModel],
-    tokenizer: AutoTokenizer,
-    max_new_tokens: int = 32,
-    num_samples: int = 16,
-    temperature: float = 0.0,
-    use_stop_token: bool = True,
-):
-    is_ddp = "LOCAL_RANK" in os.environ
-    is_rank_zero = (not is_ddp) or (dist.get_rank() == 0)
-    
-    cache: Optional[TrainableCache] = None
-    num_inputs = len(input_ids)
-    
-    if isinstance(cache_and_model, DDP):
-        is_peft = False
-        module: CacheAndModel = cache_and_model.module
-        cache: TrainableCache = module.cache if hasattr(module, 'cache') else None
-    else:
-        if hasattr(cache_and_model, 'cache'):
-            cache = cache_and_model.cache
-            original_seq_len = cache.get_seq_length()
-        else:
-            cache = None
-    is_peft = cache is None
-    
-    input_ids = [x for x in input_ids for _ in range(num_samples)]  # we want to repeat each input num_samples, not interleave
-    num_generations = num_inputs * num_samples
-    seq_lens = [input_ids.shape[0] for input_ids in input_ids]
-    orig_idxs = torch.arange(num_generations)  # needed since the shape of input_ids will change
-    generated_tokens = [[] for _ in range(num_generations)]
-    with torch.inference_mode():
-        # Get the device from the model
-        device = next(cache_and_model.parameters()).device
-        input_ids = [x.to(device) for x in input_ids]
-        curr_input_ids = torch.stack([x[:min(seq_lens)] for x in input_ids], dim=0)
-        curr_orig_idxs = orig_idxs
+        # Get logits for the last token of each sequence
+        logits = outputs.logits  # (1, seq_len, vocab_size)
+        last_logits = logits[0, -len(current_input_ids):, :]  # Get logits for current tokens
         
-        for curr_token_idx in range(min(seq_lens), max(seq_lens) + max_new_tokens + 1):
-            # Get model outputs
-            if curr_token_idx == min(seq_lens): # prefill on first token
-                x = curr_input_ids
-            else: # decode after first token
-                x = curr_input_ids[:, -1:]  
-
-            if is_peft:
-                # Standard autoregressive generation for PEFT models
-                outputs = cache_and_model(
-                    input_ids=x,
-                    past_key_values=cache,
-                    use_cache=True,
-                )
-                # Update KV cache for next iteration
-                cache = outputs.past_key_values
+        # Sample next tokens for each sequence
+        next_tokens = []
+        next_seq_ids = []
+        next_position_ids = []
+        
+        # Group tokens by sequence
+        seq_groups = {}
+        for i, seq_id in enumerate(current_seq_ids):
+            if seq_id.item() not in seq_groups:
+                seq_groups[seq_id.item()] = []
+            seq_groups[seq_id.item()].append(i)
+        
+        active_sequences = []
+        
+        for seq_id, token_indices in seq_groups.items():
+            # Get the last token's logits for this sequence
+            last_token_idx = token_indices[-1]
+            token_logits = last_logits[last_token_idx]
+            
+            # Apply temperature
+            if temperature > 0:
+                token_logits = token_logits / temperature
+                next_token = torch.multinomial(torch.softmax(token_logits, dim=-1), 1).item()
             else:
-                # Custom cache-based generation
-                outputs = cache_and_model(input_ids=x)
+                next_token = token_logits.argmax().item()
             
+            # Check if this sequence should continue
+            if next_token not in stop_token_ids:
+                next_tokens.append(next_token)
+                next_seq_ids.append(seq_id)
+                next_position_ids.append(current_position_ids[last_token_idx] + 1)
+                generated_tokens[seq_id].append(next_token)
+                active_sequences.append(seq_id)
+        
+        # If no sequences are active, break
+        if not next_tokens:
+            progress_range.close()
+            break
             
-            # Get next token prediction
-            next_orig_idxs, next_input_ids = [], []
-            next_key_cache = [[] for _ in range(len(cache.key_cache))]
-            next_value_cache = [[] for _ in range(len(cache.value_cache))]
-            for input_idx, orig_idx in enumerate(curr_orig_idxs):
-                in_prefill = seq_lens[orig_idx] > curr_input_ids.shape[1]
-                if in_prefill:
-                    # this input has not yet been fully prefilled yet, so we need
-                    next_token = input_ids[orig_idx][curr_input_ids.shape[1]].unsqueeze(0)
-
-                else:
-                    if temperature == 0.0:
-                        next_token = outputs.logits[input_idx, -1:].argmax(dim=-1)
-                    else:
-                        scaled_logits = outputs.logits[input_idx, -1:] / temperature
-                        probs = scaled_logits.softmax(dim=-1)
-                        next_token = probs.multinomial(num_samples=1, replacement=True)[0]
-                    generated_tokens[orig_idx].append(next_token)
-                
-                # construct next_* lists based on the stop conditions for the sequence
-                if (
-                    (
-                        in_prefill or
-                        not use_stop_token or 
-                        next_token.item() != tokenizer.eos_token_id
-                    ) and curr_token_idx < seq_lens[orig_idx] + max_new_tokens - 1 
-                ):
-                    next_orig_idxs.append(orig_idx)
-                    next_input_ids.append(torch.cat([curr_input_ids[input_idx], next_token], dim=-1))
-                    
-                    for layer_idx in range(len(cache.key_cache)):
-                        next_key_cache[layer_idx].append(cache.key_cache[layer_idx][input_idx])
-                        next_value_cache[layer_idx].append(cache.value_cache[layer_idx][input_idx])
-                
-            # # print memory consumption
-            # if is_rank_zero:
-            #     print(torch.cuda.memory_allocated() / 1024**2, "MB")
-            
-            if len(next_orig_idxs) == 0:
-                break
-            
-            curr_orig_idxs = torch.tensor(next_orig_idxs)
-            curr_input_ids = torch.stack(next_input_ids, dim=0)
-            cache.key_cache = [torch.stack(next_key_cache[layer_idx], dim=0) for layer_idx in range(len(next_key_cache))]
-            cache.value_cache = [torch.stack(next_value_cache[layer_idx], dim=0) for layer_idx in range(len(next_value_cache))]
-
-        # Clean up cache after generation
-        if is_peft:
-            cache = None
-        else: 
-            assert hasattr(cache, "clear")
-            cache.clear()
-
-    if len(generated_tokens) == 0:
-        return "[invalid]"
-    return [tokenizer.decode(torch.tensor(toks)) for toks in generated_tokens]
-
+        # Update cache with seq_ids for next iteration
+        cache._seq_ids = current_seq_ids
+        
+        # Prepare inputs for next iteration
+        current_input_ids = torch.tensor(next_tokens, device=device, dtype=torch.long)
+        current_seq_ids = torch.tensor(next_seq_ids, device=device, dtype=torch.long)
+        current_position_ids = torch.tensor(next_position_ids, device=device, dtype=torch.long)
+    
+    return generated_tokens
+    
+    
 
 if __name__ == "__main__":
-    cache_and_model, tokenizer = load_model_and_cache_from_wandb(   
-        wandb_run_id="hazy-research/Cartridges/ghm1tny6",
-        step=64,
-        device="cuda"
-    )
-    
+    from cartridges.models.llama.modeling_llama import FlexLlamaModel
+    from transformers import AutoTokenizer
 
-    messages = [
-        {"role": "user", "content": "What is the capital of the moon?"},
+    model_name = "meta-llama/Llama-3.2-3B-Instruct"
+    model = FlexLlamaModel.from_pretrained(model_name).to("cuda")
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+    convos = [
+        [
+            {"role": "user", "content": "What is the capital of the moon?"},
+        ],
+        [
+            {"role": "user", "content": "Who are you?"},
+        ],
+        [
+            {"role": "user", "content": "Why is the sky blue?"},
+        ],
     ]
 
-    input_ids = tokenizer.apply_chat_template(
-        messages, 
-        tokenize=True, 
-        add_generation_prompt=True,
-        return_tensors="pt",
-        chat_template=TEMPLATE,
-    ).to("cuda")
-    output = generate(input_ids, cache_and_model, tokenizer, max_new_tokens=32)
-    print(output)
+    input_ids, seq_ids, position_ids = [], [], []
+    for idx, convo in enumerate(convos):
+        curr_input_ids = tokenizer.apply_chat_template(
+            convo, 
+            tokenize=True, 
+            add_generation_prompt=True,
+            return_tensors="pt",
+        ).to("cuda")
+        # Flatten the input_ids and create corresponding seq_ids and position_ids
+        flat_input_ids = curr_input_ids.flatten()
+        curr_seq_ids = torch.full((flat_input_ids.shape[0],), idx, dtype=torch.long, device="cuda")
+        curr_position_ids = torch.arange(flat_input_ids.shape[0], device="cuda")
+        
+        input_ids.append(flat_input_ids)
+        seq_ids.append(curr_seq_ids)
+        position_ids.append(curr_position_ids)
+    
+    input_ids = torch.cat(input_ids, dim=0)
+    seq_ids = torch.cat(seq_ids, dim=0)
+    position_ids = torch.cat(position_ids, dim=0)
 
-    breakpoint()
+    print("Starting generation...")
+    print(f"Input shapes: input_ids={input_ids.shape}, seq_ids={seq_ids.shape}, position_ids={position_ids.shape}")
+    
+    output = flex_generate(
+        model=model,
+        input_ids=input_ids,
+        seq_ids=seq_ids,
+        position_ids=position_ids,
+        tokenizer=tokenizer,
+        max_new_tokens=5,  # Reduce for testing
+        show_progress=True,
+    )
+    print("Generated tokens:", output)
+    
+    # Decode the output
+    for seq_idx, tokens in enumerate(output):
+        if tokens:
+            decoded = tokenizer.decode(tokens)
+            print(f"Sequence {seq_idx}: {decoded}")
