@@ -328,7 +328,7 @@ def train(config: TrainConfig):
         if cache_tuning:
             wandb_log_dict.update(
                 {
-                    "num_trainable_tokens": cache.num_trainable_tokens,
+                    "num_trainable_tokens": cache._num_trainable_tokens,
                     "cache_trainable_params": sum(
                         p.numel() for p in cache.parameters() if p.requires_grad
                     ),

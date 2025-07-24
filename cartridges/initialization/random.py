@@ -21,7 +21,7 @@ class KVFromRandomVectors(KVCacheFactory):
     ) -> TrainableCache:
         rand_vectors = lambda: [
             torch.randn(
-                attn_config.n_heads, self.config.max_tokens, attn_config.head_dim,
+                1, attn_config.n_heads, self.config.max_tokens, attn_config.head_dim,
                 dtype=torch.bfloat16,
             )
             for _ in range(attn_config.n_layers)

@@ -313,7 +313,6 @@ class LlamaAttention(nn.Module):
         cos, sin = batch.position_embeddings
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
 
-
         past_key_value = batch.past_key_values
         if past_key_value is not None:
             key_states, value_states = past_key_value.update(
@@ -442,14 +441,13 @@ class FlexLlamaModel(FlexLlamaPreTrainedModel):
         if use_cache and past_key_values is None:
             past_key_values = DynamicCache()
 
-        past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
-        position_ids = position_ids + past_seen_tokens
+        cache_len = past_key_values.num_tokens() if past_key_values is not None else 0
+        position_ids = position_ids + cache_len
         
         # Build the block mask
         # --- begin build block mask ---
-        cache_len = past_key_values.num_tokens()        
         kv_seq_ids = seq_ids
-        if past_key_values is not None and past_key_values.num_tokens() > 0:
+        if cache_len > 0:
             kv_seq_ids = torch.cat([past_key_values.seq_ids(), kv_seq_ids])
     
         def mask_func(_, _h, q_idx, kv_idx):

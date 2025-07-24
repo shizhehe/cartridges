@@ -37,9 +37,9 @@ class TrainableCache(nn.Module):
     Args:
         config: The attention configuration, which we use to construct the 
         trainable_keys (list[torch.Tensor], optional): A `config.n_layers` length list of 
-            trainable keys for the cache, should be of shape (n_heads, num_trainable_tokens, head_dim).
+            trainable keys for the cache, should be of shape (1, n_heads, num_trainable_tokens, head_dim).
         trainable_values (list[torch.Tensor]): A `config.n_layers` length list of 
-            trainable values for the cache, should be of shape (n_heads, num_trainable_tokens, head_dim).
+            trainable values for the cache, should be of shape (1, n_heads, num_trainable_tokens, head_dim).
         num_frozen_tokens (int): The number of the trainable tokens to freeze at the 
             beginning of the cache.
     """
@@ -51,34 +51,36 @@ class TrainableCache(nn.Module):
         num_frozen_tokens: int = 0,
     ):
         super().__init__()
-        self._seq_ids = None
+        self.config = config
         self._keys = [None] * config.n_layers  # List of tensors per layer
         self._values = [None] * config.n_layers  # List of tensors per layer
         self._num_tokens = 0
-        self.prefix_length = 0
 
         assert (init_keys is None) == (init_values is None)
         if init_keys is None:
-            self.num_trainable_tokens, self.num_frozen_tokens = 0, 0
+            self._num_trainable_tokens, self._num_frozen_tokens = 0, 0
             self.frozen_keys, self.frozen_values = None, None
             self.trainable_keys, self.trainable_values = None, None
+            self._seq_ids = None
         else:
-            self.num_init_tokens = init_keys[0].shape[1]
-            self.num_trainable_tokens = self.num_init_tokens - num_frozen_tokens
+            self._num_init_tokens = init_keys[0].shape[2]
+            self._num_frozen_tokens = num_frozen_tokens
+            self._num_trainable_tokens = self._num_init_tokens - num_frozen_tokens
             assert len(init_keys) == config.n_layers == len(init_values)
             
             # we initialize the seq ids for the first 
             # `num_trainable_tokens + num_frozen_tokens` tokens to -1, which means that 
             # the tokens are part of the cartridge and should be attended to by 
             # all tokens.
-            self._seq_ids = torch.full(
-                (self.num_init_tokens,),
+            _seq_ids =torch.full(
+                (self._num_init_tokens,),
                 fill_value=CARTRIDGE_SEQ_ID, 
-                dtype=torch.long
+                dtype=torch.long,
             )
+            self.register_buffer("_seq_ids", _seq_ids)  # .to moves the tensor to the correct device
 
             for vec in itertools.chain(init_keys, init_values):
-                assert vec.shape == (config.n_heads, self.num_init_tokens, config.head_dim)
+                assert vec.shape == (1, config.n_heads, self._num_init_tokens, config.head_dim)
 
             self.frozen_keys = nn.ParameterList(
                 [
@@ -139,25 +141,28 @@ class TrainableCache(nn.Module):
             else:
                 self._seq_ids = torch.cat([self._seq_ids, new_seq_ids], dim=0)
             self._num_tokens += new_keys.shape[2]
+        
+        print(new_keys.shape)
 
         keys = [new_keys]
         values = [new_values]
 
         if self._keys[layer_idx] is not None:
             # Concatenate along sequence dimension while maintaining contiguous sequences
-            self._keys[layer_idx] = torch.cat([self._keys[layer_idx], new_keys], dim=2)
+            keys = [self._keys[layer_idx]] + keys
             values = [self._values[layer_idx]] + values
         
-        if self.num_trainable_tokens > 0:
+        if self._num_trainable_tokens > 0:
             keys = [self.trainable_keys[layer_idx]] + keys
             values = [self.trainable_values[layer_idx]] + values
         
-        if self.num_frozen_tokens > 0:
+        if self._num_frozen_tokens > 0:
             keys = [self.frozen_keys[layer_idx]] + keys
             values = [self.frozen_values[layer_idx]] + values
 
-        self._keys[layer_idx] = torch.cat(keys, dim=1)
-        self._values[layer_idx] = torch.cat(values, dim=1)
+
+        self._keys[layer_idx] = torch.cat(keys, dim=2)
+        self._values[layer_idx] = torch.cat(values, dim=2)
 
         return self._keys[layer_idx], self._values[layer_idx]
     
@@ -209,8 +214,8 @@ class TrainableCache(nn.Module):
             )
         if checkpoint["frozen_keys"]:
             if (
-                checkpoint["frozen_keys"][0].size(0) != n_heads
-                or checkpoint["frozen_keys"][0].size(2) != head_dim
+                checkpoint["frozen_keys"][0].size(1) != n_heads
+                or checkpoint["frozen_keys"][0].size(3) != head_dim
             ):
                 raise AssertionError(
                     "Mismatch in head configuration between trainable and fixed keys"
@@ -228,7 +233,7 @@ class TrainableCache(nn.Module):
             num_tokens=num_tokens + num_frozen_tokens,
             keys=[
                 (
-                    torch.cat([fixed, trainable], dim=1).contiguous()
+                    torch.cat([fixed, trainable], dim=2).contiguous()
                     if num_frozen_tokens > 0
                     else trainable
                 )
@@ -238,7 +243,7 @@ class TrainableCache(nn.Module):
             ],
             values=[
                 (
-                    torch.cat([fixed, trainable], dim=1).contiguous()
+                    torch.cat([fixed, trainable], dim=2).contiguous()
                     if num_frozen_tokens > 0
                     else trainable
                 )
@@ -318,7 +323,7 @@ class KVCacheFactoryWithStateSaving(abc.ABC):
         maybe_cache = self.maybe_load_cached()
         if maybe_cache is not None:
             assert (
-                maybe_cache.num_trainable_tokens + maybe_cache.num_frozen_tokens
+                maybe_cache._num_trainable_tokens + maybe_cache._num_frozen_tokens
                 == self.config.num_tokens
             )
             assert maybe_cache.config == attn_config
