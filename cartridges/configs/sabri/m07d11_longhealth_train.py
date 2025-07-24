@@ -38,17 +38,16 @@ config = TrainConfig(
     loss_type="logits",
     epochs=1,
     global_batch_size=32,
-    packed_seq_length=4096,
-    packing_mode="truncate",
 
     dataset=CartridgeTrainDataset.Config(
         data_sources=[
-            (source, None)
+            (source, 512)
             for source in data_sources
         ],
         is_wandb=True,
-        label_type="logits",
         top_k_logits=20,
+        packed_seq_length=4096,
+        packing_mode="truncate",
     ),
 
     save_every_n_steps=512,
