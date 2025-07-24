@@ -80,6 +80,7 @@ def test_output_with_cache_equivalence(
             1, config.num_key_value_heads, cartridge_len, config.head_dim,
             dtype=torch.bfloat16,
             device=device,
+            requires_grad=True,
         )
         for _ in range(config.num_hidden_layers)
     ]
@@ -127,9 +128,10 @@ def test_output_with_cache_equivalence(
     ref_out = torch.cat([
         ref_out_padded[batch_idx, :seq_len] for batch_idx, seq_len in enumerate(data['seq_lens'])
     ], dim=0).unsqueeze(0)
-    # ref_keys_grad = cache.trainable_keys[0].grad.clone()
-    # ref_values_grad = cache.trainable_values[0].grad.clone()
+    ref_out.sum().backward()
+    ref_keys_grad = keys[0].grad.clone()
+    ref_values_grad = values[0].grad.clone()
     
     torch.testing.assert_close(out, ref_out, atol=1e-3, rtol=1e-3)
-    # torch.testing.assert_close(keys_grad, ref_keys_grad, atol=1e-1, rtol=1e-2)
-    # torch.testing.assert_close(values_grad, ref_values_grad, atol=1e-1, rtol=1e-2)
+    torch.testing.assert_close(keys_grad, ref_keys_grad, atol=1e-1, rtol=1e-2)
+    torch.testing.assert_close(values_grad, ref_values_grad, atol=1e-1, rtol=1e-2)
