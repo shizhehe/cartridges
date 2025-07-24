@@ -12,7 +12,9 @@ class PackedCache(DynamicCache):
     the seq_ids method. The model will use this once per forward pass to construct 
     the appropriate block mask. 
     - Keep track of keys and values and expose them to the model in a packed manner via 
-    the update method, ensuring tokens from the same sequence are contiguous.
+    the update method.
+    
+    TODO (Sabri): Ensure that tokens from the same sequence are contiguous.
     """
     def __init__(self):
         super().__init__()

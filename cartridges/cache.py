@@ -19,195 +19,160 @@ class AttnConfig:
     n_heads: int
     head_dim: int
 
+CARTRIDGE_SEQ_ID = -1
 
-# SE (03/24): I had to add nn.Module to the inheritance because I was getting the error
-# TrainableCache has no attribute `.to`. Still not sure why this started happening --
-# perhaps there was an update to the transformers library.
-class TrainableCache(DynamicCache, nn.Module):
+class TrainableCache(nn.Module):
+    """A trainable packed cache for generation with FlexAttention.
+    
+    The cache must do two things, which a standard Hugging Face cache does not:
 
+    - Keep track of sequence membership of the cache and expose it to the model via
+    the seq_ids method. The model will use this once per forward pass to construct 
+    the appropriate block mask. 
+    - Keep track of keys and values and expose them to the model in a packed manner via 
+    the update method.
+    
+    TODO (Sabri): Ensure that tokens from the same sequence are contiguous.
+
+    Args:
+        config: The attention configuration, which we use to construct the 
+        trainable_keys (list[torch.Tensor], optional): A `config.n_layers` length list of 
+            trainable keys for the cache, should be of shape (n_heads, num_trainable_tokens, head_dim).
+        trainable_values (list[torch.Tensor]): A `config.n_layers` length list of 
+            trainable values for the cache, should be of shape (n_heads, num_trainable_tokens, head_dim).
+        num_frozen_tokens (int): The number of the trainable tokens to freeze at the 
+            beginning of the cache.
+    """
     def __init__(
-        self,
+        self,        
         config: AttnConfig,
-        num_tokens: int,
-        keys: list[torch.Tensor],
-        values: list[torch.Tensor],
+        init_keys: list[torch.Tensor]=None,
+        init_values: list[torch.Tensor]=None,
         num_frozen_tokens: int = 0,
     ):
         super().__init__()
-        assert 0 <= num_frozen_tokens < num_tokens
+        self._seq_ids = None
+        self._keys = [None] * config.n_layers  # List of tensors per layer
+        self._values = [None] * config.n_layers  # List of tensors per layer
+        self._num_tokens = 0
+        self.prefix_length = 0
 
-        self.config = config
-        self.num_trainable_tokens = num_tokens - num_frozen_tokens
-        self.num_frozen_tokens = num_frozen_tokens
+        assert (init_keys is None) == (init_values is None)
+        if init_keys is None:
+            self.num_trainable_tokens, self.num_frozen_tokens = 0, 0
+            self.frozen_keys, self.frozen_values = None, None
+            self.trainable_keys, self.trainable_values = None, None
+        else:
+            self.num_init_tokens = init_keys[0].shape[1]
+            self.num_trainable_tokens = self.num_init_tokens - num_frozen_tokens
+            assert len(init_keys) == config.n_layers == len(init_values)
+            
+            # we initialize the seq ids for the first 
+            # `num_trainable_tokens + num_frozen_tokens` tokens to -1, which means that 
+            # the tokens are part of the cartridge and should be attended to by 
+            # all tokens.
+            self._seq_ids = torch.full(
+                (self.num_init_tokens,),
+                fill_value=CARTRIDGE_SEQ_ID, 
+                dtype=torch.long
+            )
 
-        assert len(keys) == config.n_layers
-        assert len(values) == config.n_layers
+            for vec in itertools.chain(init_keys, init_values):
+                assert vec.shape == (config.n_heads, self.num_init_tokens, config.head_dim)
 
-        for vec in itertools.chain(keys, values):
-            assert vec.shape == (1, config.n_heads, num_tokens, config.head_dim)
+            self.frozen_keys = nn.ParameterList(
+                [
+                    nn.Parameter(keys_vec[:, :, :num_frozen_tokens].contiguous())
+                    for keys_vec in init_keys
+                ]
+                if num_frozen_tokens
+                else []
+            )
+            self.frozen_values = nn.ParameterList(
+                [
+                    nn.Parameter(values_vec[:, :, :num_frozen_tokens].contiguous())
+                    for values_vec in init_values
+                ]
+                if num_frozen_tokens
+                else []
+            )
 
-        self.fixed_keys = nn.ParameterList(
-            [
-                nn.Parameter(keys_vec[:, :, :num_frozen_tokens].contiguous())
-                for keys_vec in keys
-            ]
-            if num_frozen_tokens
-            else []
-        )
-        self.fixed_values = nn.ParameterList(
-            [
-                nn.Parameter(values_vec[:, :, :num_frozen_tokens].contiguous())
-                for values_vec in values
-            ]
-            if num_frozen_tokens
-            else []
-        )
+            for param in itertools.chain(self.frozen_keys, self.frozen_values):
+                param.requires_grad = False
 
-        for param in itertools.chain(self.fixed_keys, self.fixed_values):
-            param.requires_grad = False
-
-        self.trainable_keys = nn.ParameterList(
-            [
-                nn.Parameter(keys_vec[:, :, num_frozen_tokens:].contiguous())
-                for keys_vec in keys
-            ]
-        )
-        self.trainable_values = nn.ParameterList(
-            [
-                nn.Parameter(values_vec[:, :, num_frozen_tokens:].contiguous())
-                for values_vec in values
-            ]
-        )
-
-    def clone(self):
-        return TrainableCache(
-            config=self.config,
-            num_tokens=self.num_trainable_tokens + self.num_frozen_tokens,
-            keys=[
-                (
-                    torch.cat([fixed, trainable], dim=2).contiguous()
-                    if self.num_frozen_tokens > 0
-                    else trainable
-                )
-                for fixed, trainable in zip(
-                    self.fixed_keys,
-                    self.trainable_keys,
-                    strict=True,
-                )
-            ],
-            values=[
-                (
-                    torch.cat([fixed, trainable], dim=2).contiguous()
-                    if self.num_frozen_tokens > 0
-                    else trainable
-                )
-                for fixed, trainable in zip(
-                    self.fixed_values,
-                    self.trainable_values,
-                    strict=True,
-                )
-            ],
-            num_frozen_tokens=self.num_frozen_tokens,
-        )
-    
-
-    def prefix_length(self) -> int:
-        return (self.num_trainable_tokens + self.num_frozen_tokens)
-
-    def get_seq_length(self, layer_idx: Optional[int] = 0) -> int:
-        return (
-            super().get_seq_length(layer_idx)
-            + self.num_trainable_tokens
-            + self.num_frozen_tokens
-        )
-
+            self.trainable_keys = nn.ParameterList(
+                [
+                    nn.Parameter(keys_vec[:, :, num_frozen_tokens:].contiguous())
+                    for keys_vec in init_keys
+                ]
+            )
+            self.trainable_values = nn.ParameterList(
+                [
+                    nn.Parameter(values_vec[:, :, num_frozen_tokens:].contiguous())
+                    for values_vec in init_values
+                ]
+            )
+            
     def update(
-        self,
-        key_states: torch.Tensor,
-        value_states: torch.Tensor,
+        self, 
+        new_keys: torch.Tensor,
+        new_values: torch.Tensor,
+        new_seq_ids: torch.Tensor,
         layer_idx: int,
-        cache_kwargs: Optional[dict[str, Any]] = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ):
+        """Update the cache with new keys and values while maintaining sequence contiguity.
+        
+        Args:
+            new_keys: (1, num_heads, seq_len, head_dim) tensor of new keys
+            new_values: (1, num_heads, seq_len, head_dim) tensor of new values  
+            new_seq_ids: (seq_len,) tensor of sequence ids for the new tokens
+            layer_idx: index of the layer in the model.
         """
-        Return a list[tuple(Tensor, Tensor)] shaped like typical Hugging Face past_key_values.
-        i.e. past_key_values[layer] = (key, value)
-        """
-        key_states, value_states = super().update(
-            key_states, value_states, layer_idx, cache_kwargs
-        )
+        assert new_seq_ids.shape[0] == new_keys.shape[2]
+        assert new_seq_ids.shape[0] == new_values.shape[2]
 
-        assert key_states.shape == value_states.shape
-        batch_size = key_states.shape[0]
+        if layer_idx == 0:
+            # we assume the same seq ids at every layer. This allows us to create
+            # a single block mask for the entire model. 
+            if self._seq_ids is None:
+                self._seq_ids = new_seq_ids
+            else:
+                self._seq_ids = torch.cat([self._seq_ids, new_seq_ids], dim=0)
+            self._num_tokens += new_keys.shape[2]
 
+        keys = [new_keys]
+        values = [new_values]
+
+        if self._keys[layer_idx] is not None:
+            # Concatenate along sequence dimension while maintaining contiguous sequences
+            self._keys[layer_idx] = torch.cat([self._keys[layer_idx], new_keys], dim=2)
+            values = [self._values[layer_idx]] + values
+        
+        if self.num_trainable_tokens > 0:
+            keys = [self.trainable_keys[layer_idx]] + keys
+            values = [self.trainable_values[layer_idx]] + values
+        
         if self.num_frozen_tokens > 0:
-            fixed_keys = self.fixed_keys[layer_idx].repeat(batch_size, 1, 1, 1)
-            fixed_values = self.fixed_values[layer_idx].repeat(batch_size, 1, 1, 1)
+            keys = [self.frozen_keys[layer_idx]] + keys
+            values = [self.frozen_values[layer_idx]] + values
 
-            trainable_keys = self.trainable_keys[layer_idx].repeat(batch_size, 1, 1, 1)
-            trainable_values = self.trainable_values[layer_idx].repeat(
-                batch_size, 1, 1, 1
-            )
+        self._keys[layer_idx] = torch.cat(keys, dim=1)
+        self._values[layer_idx] = torch.cat(values, dim=1)
 
-            key_states = torch.cat([fixed_keys, trainable_keys, key_states], dim=-2)
-            value_states = torch.cat(
-                [fixed_values, trainable_values, value_states], dim=-2
-            )
-        else:
-            trainable_keys = self.trainable_keys[layer_idx].repeat(batch_size, 1, 1, 1)
-            trainable_values = self.trainable_values[layer_idx].repeat(
-                batch_size, 1, 1, 1
-            )
-
-            key_states = torch.cat([trainable_keys, key_states], dim=-2)
-            value_states = torch.cat([trainable_values, value_states], dim=-2)
-
-        return (key_states, value_states)
-
-    def update_separate(
-        self,
-        key_states: torch.Tensor,
-        value_states: torch.Tensor,
-        layer_idx: int,
-        cache_kwargs: Optional[dict[str, Any]] = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Return a list[tuple(Tensor, Tensor)] shaped like typical Hugging Face past_key_values.
-        i.e. past_key_values[layer] = (key, value)
-        """
-        key_states, value_states = super().update(
-            key_states, value_states, layer_idx, cache_kwargs
-        )
-
-        assert key_states.shape == value_states.shape
-        batch_size = key_states.shape[0]
-
-        if self.num_frozen_tokens > 0:
-
-            shared_key_states = torch.cat(
-                [self.fixed_keys[layer_idx], self.trainable_keys[layer_idx]], dim=-2
-            )
-            shared_value_states = torch.cat(
-                [self.fixed_values[layer_idx], self.trainable_values[layer_idx]], dim=-2
-            )
-
-        else:
-            # raise NotImplementedError("No frozen tokens")
-            shared_key_states = self.trainable_keys[layer_idx].contiguous()
-            shared_value_states = self.trainable_values[layer_idx].contiguous()
-
-            # trainable_keys = self.trainable_keys[layer_idx].repeat(batch_size, 1, 1, 1)
-            # trainable_values = self.trainable_values[layer_idx].repeat(
-            #     batch_size, 1, 1, 1
-            # )
-
-            # key_states = torch.cat([trainable_keys, key_states], dim=-2)
-            # value_states = torch.cat([trainable_values, value_states], dim=-2)
-
-        return (key_states, value_states), (shared_key_states, shared_value_states)
-
+        return self._keys[layer_idx], self._values[layer_idx]
+    
+    def num_tokens(self) -> int:
+        """Get the sequence length of the cache."""
+        return self._num_frozen_tokens + self._num_trainable_tokens + self._num_tokens
+    
+    def seq_ids(self) -> torch.Tensor:
+        """Returns the sequence ids of the cache."""
+        return self._seq_ids
+       
     def clear(self):
-        self.key_cache: list[torch.Tensor] = []
-        self.value_cache: list[torch.Tensor] = []
+        self._keys = [None] * self.config.n_layers
+        self._values = [None] * self.config.n_layers
+        self._num_tokens = 0
 
     def save(self, path: str):
         """Saves the trainable keys and values to the specified path."""
@@ -215,8 +180,8 @@ class TrainableCache(DynamicCache, nn.Module):
             {
                 "trainable_keys": self.trainable_keys,
                 "trainable_values": self.trainable_values,
-                "fixed_keys": self.fixed_keys,
-                "fixed_values": self.fixed_values,
+                "frozen_keys": self.frozen_keys,
+                "frozen_values": self.frozen_values,
             },
             path,
         )
@@ -229,7 +194,7 @@ class TrainableCache(DynamicCache, nn.Module):
         checkpoint = torch.load(path, map_location=device, weights_only=False)
 
         # Ensure necessary keys are in the checkpoint
-        for key in ["trainable_keys", "trainable_values", "fixed_keys", "fixed_values"]:
+        for key in ["trainable_keys", "trainable_values", "frozen_keys", "frozen_values"]:
             if key not in checkpoint:
                 raise KeyError(f"Key '{key}' not found in checkpoint")
 
@@ -238,14 +203,14 @@ class TrainableCache(DynamicCache, nn.Module):
         num_tokens = checkpoint["trainable_keys"][0].size(2)
         head_dim = checkpoint["trainable_keys"][0].size(3)
 
-        if len(checkpoint["fixed_keys"]) != n_layers:
+        if len(checkpoint["frozen_keys"]) != n_layers:
             raise AssertionError(
                 "Mismatch in number of layers between trainable and fixed keys"
             )
-        if checkpoint["fixed_keys"]:
+        if checkpoint["frozen_keys"]:
             if (
-                checkpoint["fixed_keys"][0].size(1) != n_heads
-                or checkpoint["fixed_keys"][0].size(3) != head_dim
+                checkpoint["frozen_keys"][0].size(0) != n_heads
+                or checkpoint["frozen_keys"][0].size(2) != head_dim
             ):
                 raise AssertionError(
                     "Mismatch in head configuration between trainable and fixed keys"
@@ -253,9 +218,9 @@ class TrainableCache(DynamicCache, nn.Module):
 
         config = AttnConfig(n_layers=n_layers, n_heads=n_heads, head_dim=head_dim)
         # Here, num_tokens is inferred from trainable keys, but note that the total tokens may be different if fixed tokens exist.
-        # The number of fixed tokens can be inferred from fixed_keys if available.
+        # The number of fixed tokens can be inferred from frozen_keys if available.
         num_frozen_tokens = (
-            checkpoint["fixed_keys"][0].size(2) if checkpoint["fixed_keys"] else 0
+            checkpoint["frozen_keys"][0].size(1) if checkpoint["frozen_keys"] else 0
         )
 
         return cls(
@@ -263,22 +228,22 @@ class TrainableCache(DynamicCache, nn.Module):
             num_tokens=num_tokens + num_frozen_tokens,
             keys=[
                 (
-                    torch.cat([fixed, trainable], dim=2).contiguous()
+                    torch.cat([fixed, trainable], dim=1).contiguous()
                     if num_frozen_tokens > 0
                     else trainable
                 )
                 for fixed, trainable in zip(
-                    checkpoint["fixed_keys"], checkpoint["trainable_keys"]
+                    checkpoint["frozen_keys"], checkpoint["trainable_keys"]
                 )
             ],
             values=[
                 (
-                    torch.cat([fixed, trainable], dim=2).contiguous()
+                    torch.cat([fixed, trainable], dim=1).contiguous()
                     if num_frozen_tokens > 0
                     else trainable
                 )
                 for fixed, trainable in zip(
-                    checkpoint["fixed_values"], checkpoint["trainable_values"]
+                    checkpoint["frozen_values"], checkpoint["trainable_values"]
                 )
             ],
             num_frozen_tokens=num_frozen_tokens,

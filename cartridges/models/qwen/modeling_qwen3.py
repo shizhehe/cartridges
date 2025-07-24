@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from typing import Callable, Optional, Union
+from dataclasses import dataclass
 
 import torch
 from torch import nn
@@ -36,10 +37,27 @@ logger = logging.get_logger(__name__)
 
 # SE (07/21): `dynamic=False` is necessary to avoid a "PassManager::run failed" error
 # when interacting with torch.amp.autocast.
+flex_attention = torch.compile(flex_attention, dynamic=True)
 # SE (07/22): The `mode="max-autotune-no-cudagraphs"` gives a ~2x speedup on 
 # backward running on a single A100.
-# flex_attention = torch.compile(flex_attention, dynamic=False)
-flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
+# flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
+
+@dataclass
+class Qwen3Batch:
+    input_ids: torch.LongTensor
+    seq_ids: torch.LongTensor
+    position_ids: torch.LongTensor
+    hidden_states: torch.Tensor
+    past_key_values: Optional[Cache] = None
+    position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None
+    attention_mask: Optional[torch.Tensor] = None
+    use_cache: Optional[bool] = None
+
+    def update(self, **kwargs) -> "Qwen3Batch":
+        return Qwen3Batch(
+            **{k: v for k, v in self.__dict__.items() if k not in kwargs},
+            **kwargs,
+        )
 
 
 def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
@@ -254,13 +272,8 @@ class Qwen3Attention(nn.Module):
         self.k_norm = Qwen3RMSNorm(self.head_dim, eps=config.rms_norm_eps)  # thus post q_norm does not need reshape
         self.sliding_window = config.sliding_window if config.layer_types[layer_idx] == "sliding_attention" else None
 
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        position_embeddings: tuple[torch.Tensor, torch.Tensor],
-        attention_mask: Optional[torch.Tensor],
-        past_key_value: Optional[Cache] = None,
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[tuple[torch.Tensor]]]:
+    def forward(self, batch: Qwen3Batch) -> torch.Tensor:
+        hidden_states = batch.hidden_states
         input_shape = hidden_states.shape[:-1]
         hidden_shape = (*input_shape, -1, self.head_dim)
 
@@ -268,34 +281,27 @@ class Qwen3Attention(nn.Module):
         key_states = self.k_norm(self.k_proj(hidden_states).view(hidden_shape)).transpose(1, 2)
         value_states = self.v_proj(hidden_states).view(hidden_shape).transpose(1, 2)
 
-        cos, sin = position_embeddings
+        cos, sin = batch.position_embeddings
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
 
+        past_key_value = batch.past_key_values
         if past_key_value is not None:
-            # sin and cos are specific to RoPE models
-            cache_kwargs = {"sin": sin, "cos": cos}
-            if hasattr(past_key_value, "update_separate"):
-                (key_states, value_states), (shared_key_states, shared_value_states) = past_key_value.update_separate(
-                    key_states, value_states, self.layer_idx, cache_kwargs
-                )
-                key_states = torch.cat([shared_key_states, key_states], dim=-2)
-                value_states = torch.cat([shared_value_states, value_states], dim=-2)
-            else:
-                key_states, value_states = past_key_value.update(
-                    key_states, value_states, self.layer_idx, cache_kwargs
-                )
+            key_states, value_states = past_key_value.update(
+                key_states, value_states, batch.seq_ids, self.layer_idx,
+            )
   
         attn_output = flex_attention_forward(
             self,
             query_states,
             key_states,
             value_states,
-            attention_mask=attention_mask,
+            attention_mask=batch.attention_mask,
             scaling=self.scaling,
         )
         attn_output = attn_output.reshape(*input_shape, -1).contiguous()
         attn_output = self.o_proj(attn_output)
-        return attn_output
+        
+        return batch.update(hidden_states=attn_output)
 
 
 class Qwen3DecoderLayer(GradientCheckpointingLayer):
@@ -310,32 +316,22 @@ class Qwen3DecoderLayer(GradientCheckpointingLayer):
         self.post_attention_layernorm = Qwen3RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.attention_type = config.layer_types[layer_idx]
 
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_value: Optional[Cache] = None,
-        use_cache: Optional[bool] = False,
-        position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,  # necessary, but kept here for BC
-    ) -> tuple[torch.Tensor]:
-        residual = hidden_states
-        hidden_states = self.input_layernorm(hidden_states)
+    def forward(self, batch: Qwen3Batch) -> Qwen3Batch:
+        residual = batch.hidden_states
+        hidden_states = self.input_layernorm(batch.hidden_states)
+        batch = batch.update(hidden_states=hidden_states)
+
         # Self Attention
-        hidden_states = self.self_attn(
-            hidden_states=hidden_states,
-            attention_mask=attention_mask,
-            past_key_value=past_key_value,
-            position_embeddings=position_embeddings,
-        )
-        hidden_states = residual + hidden_states
+        batch = self.self_attn(batch)
+        hidden_states = residual + batch.hidden_states
 
         # Fully Connected
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = self.mlp(hidden_states)
         hidden_states = residual + hidden_states
-        return hidden_states
+
+        return batch.update(hidden_states=hidden_states)
 
 
 @auto_docstring
@@ -456,22 +452,15 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
         
         # Build the block mask
         # --- begin build block mask ---
-        q_len = len(seq_ids)
-        kv_len = len(seq_ids) + (0 if past_key_values is None else past_key_values.get_seq_length())
-        prefix_len = 0 if past_key_values is None or not hasattr(past_key_values, "prefix_length") else past_key_values.prefix_length()
-        if past_key_values is not None and hasattr(past_key_values, "prefix_length"):
-            assert past_key_values.get_seq_length() == past_key_values.prefix_length()
-        kv_seq_ids = torch.cat(
-            [
-                torch.full((prefix_len,), -1, dtype=torch.long, device=inputs_embeds.device),
-                seq_ids,
-            ]
-        )
-        
+        cache_len = past_key_values.num_tokens() if past_key_values is not None else 0       
+        kv_seq_ids = seq_ids
+        if past_key_values is not None and past_key_values.num_tokens() > 0:
+            kv_seq_ids = torch.cat([past_key_values.seq_ids(), kv_seq_ids])
+    
         def mask_func(_, _h, q_idx, kv_idx):
-            return (kv_idx < prefix_len) | ((seq_ids[q_idx] == kv_seq_ids[kv_idx]) & (q_idx + prefix_len >= kv_idx))
+            return (kv_seq_ids[kv_idx] == -1) | ((seq_ids[q_idx] == kv_seq_ids[kv_idx]) & (q_idx + cache_len >= kv_idx))
         block_mask = create_block_mask(
-            mask_func, 1, 1, q_len, kv_len, 
+            mask_func, B=1, H=1, Q_LEN=len(seq_ids), KV_LEN=len(seq_ids) + cache_len, 
             device=inputs_embeds.device,
             # _compile=True
         )
@@ -483,17 +472,20 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
         # create position embeddings to be shared across the decoder layers
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
 
-        for decoder_layer in self.layers[: self.config.num_hidden_layers]:
-            hidden_states = decoder_layer(
-                hidden_states,
-                attention_mask=block_mask,
-                position_ids=position_ids,
-                past_key_value=past_key_values,
-                use_cache=use_cache,
-                position_embeddings=position_embeddings,
-            )
+        batch = Qwen3Batch(
+            hidden_states=hidden_states,
+            input_ids=input_ids,
+            seq_ids=seq_ids,
+            position_ids=position_ids,
+            past_key_values=past_key_values,
+            position_embeddings=position_embeddings,
+            attention_mask=block_mask,
+        )
 
-        hidden_states = self.norm(hidden_states)
+        for decoder_layer in self.layers[: self.config.num_hidden_layers]:
+            batch = decoder_layer(batch)
+
+        hidden_states = self.norm(batch.hidden_states)
         return BaseModelOutputWithPast(
             last_hidden_state=hidden_states,
             past_key_values=past_key_values if use_cache else None,
