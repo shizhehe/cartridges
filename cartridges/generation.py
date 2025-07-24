@@ -239,7 +239,7 @@ if __name__ == "__main__":
         seq_ids=seq_ids,
         position_ids=position_ids,
         tokenizer=tokenizer,
-        max_new_tokens=5,  # Reduce for testing
+        max_new_tokens=128,  # Reduce for testing
         show_progress=True,
     )
     print("Generated tokens:", output)
