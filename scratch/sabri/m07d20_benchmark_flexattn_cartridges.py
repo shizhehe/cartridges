@@ -43,7 +43,7 @@ def calculate_tflops(flops: float, time_ms: float, multiplier: int) -> float:
 
 
 def print_header(text):
-    width = 91
+    width = 9[1
     print("╔" + "═" * (width - 2) + "╗")
     print(f"║ {text.center(width - 4)} ║")
     print("╚" + "═" * (width - 2) + "╝")

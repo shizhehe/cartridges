@@ -12,11 +12,15 @@ class PackedCache(DynamicCache):
     the seq_ids method. The model will use this once per forward pass to construct 
     the appropriate block mask. 
     - Keep track of keys and values and expose them to the model in a packed manner via 
-    the update method. 
+    the update method, ensuring tokens from the same sequence are contiguous.
     """
     def __init__(self):
         super().__init__()
         self._seq_ids = None
+        self._key_cache = []  # List of tensors per layer
+        self._value_cache = []  # List of tensors per layer
+        self._num_tokens = 0
+        self.prefix_length = 0
 
     def update(
         self, 
@@ -25,20 +29,42 @@ class PackedCache(DynamicCache):
         layer_idx: int,
         cache_kwargs: dict[str, Any],
     ):
-        """Update the cache with new keys and values.
+        """Update the cache with new keys and values while maintaining sequence contiguity.
         
         Args:
-            new_keys: (1, L, H) tensor of new keys
-            new_values: (1, L, H) tensor of new values
+            new_keys: (1, num_heads, seq_len, head_dim) tensor of new keys
+            new_values: (1, num_heads, seq_len, head_dim) tensor of new values  
             layer_idx: index of the layer in the model.
             cache_kwargs: kwargs to pass to the cache.
         """
-        # Extract seq_ids from cache_kwargs if provided
-        if "seq_ids" in cache_kwargs:
-            self._seq_ids = cache_kwargs["seq_ids"]
+        # Ensure we have enough cache layers
+        while len(self._key_cache) <= layer_idx:
+            self._key_cache.append(None)
+            self._value_cache.append(None)
         
-        # Call parent update method
-        return super().update(new_keys, new_values, layer_idx, cache_kwargs)
+        if self._key_cache[layer_idx] is None:
+            # First time - initialize cache for this layer
+            self._key_cache[layer_idx] = new_keys
+            self._value_cache[layer_idx] = new_values
+            self._num_tokens = new_keys.shape[2]
+        else:
+            # Concatenate along sequence dimension while maintaining contiguous sequences
+            self._key_cache[layer_idx] = torch.cat([self._key_cache[layer_idx], new_keys], dim=2)
+            self._value_cache[layer_idx] = torch.cat([self._value_cache[layer_idx], new_values], dim=2)
+            self._num_tokens += new_keys.shape[2]
+        
+        return self._key_cache[layer_idx], self._value_cache[layer_idx]
+    
+    def set_seq_ids(self, seq_ids: torch.Tensor):
+        """Set the sequence IDs for the cache."""
+        if self._seq_ids is None:
+            self._seq_ids = seq_ids.clone()
+        else:
+            self._seq_ids = torch.cat([self._seq_ids, seq_ids], dim=0)
+
+    def num_tokens(self) -> int:
+        """Get the sequence length of the cache."""
+        return self._num_tokens + self.prefix_length
     
     def seq_ids(self) -> torch.Tensor:
         """Returns the sequence ids of the cache."""
@@ -89,15 +115,14 @@ def flex_generate(
     
     progress_range = tqdm(range(max_new_tokens), desc="Generating", disable=not show_progress)
     for step in progress_range:
-        # Forward pass
+        # Forward pass - update cache with current seq_ids before the forward pass
         with torch.no_grad():
-            breakpoint()
             outputs = model(
                 input_ids=current_input_ids,
                 seq_ids=current_seq_ids,
                 position_ids=current_position_ids,
-                # past_key_values=cache,
-                # use_cache=True,
+                past_key_values=cache,
+                use_cache=True,
             )
         
         # Get logits for the last token of each sequence
@@ -142,9 +167,6 @@ def flex_generate(
         if not next_tokens:
             progress_range.close()
             break
-            
-        # Update cache with seq_ids for next iteration
-        cache._seq_ids = current_seq_ids
         
         # Prepare inputs for next iteration
         current_input_ids = torch.tensor(next_tokens, device=device, dtype=torch.long)
@@ -156,11 +178,11 @@ def flex_generate(
     
 
 if __name__ == "__main__":
-    from cartridges.models.llama.modeling_llama import FlexLlamaModel
+    from cartridges.models.llama.modeling_llama import FlexLlamaForCausalLM
     from transformers import AutoTokenizer
 
     model_name = "meta-llama/Llama-3.2-3B-Instruct"
-    model = FlexLlamaModel.from_pretrained(model_name).to("cuda")
+    model = FlexLlamaForCausalLM.from_pretrained(model_name).to("cuda")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     convos = [

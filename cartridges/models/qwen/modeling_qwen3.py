@@ -285,7 +285,6 @@ class Qwen3Attention(nn.Module):
                     key_states, value_states, self.layer_idx, cache_kwargs
                 )
   
-
         attn_output = flex_attention_forward(
             self,
             query_states,
