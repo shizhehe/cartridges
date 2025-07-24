@@ -28,9 +28,7 @@ import wandb
 
 from cartridges.cache import AttnConfig, KVCacheFactory, TrainableCache
 from cartridges.datasets import (
-    CartridgeDatasetBatchLogitLabels,
-    PackedBatchSampler,
-    CartridgeDatasetBatchTokenLabels,
+    CartridgeDatasetBatch,
     CartridgeGenerateDataset,
     CartridgeGenerateDatasetElement,
     CartridgeTrainDataset,
@@ -63,6 +61,7 @@ class EvalDataset:
 
 class GenerateDatasetConfig(BaseConfig):
     dataset: ObjectConfig
+
     name_for_wandb: str
     dataloader_num_workers: int = 0
     num_samples: int = 1
@@ -110,11 +109,7 @@ class TrainConfig(RunConfig):
     # the `global_batch_size` is the total batch size across all devices and gradient
     # accumulation steps. We will infer the number of gradient accumulation steps from the
     # `global_batch_size`, and the number of devices.
-    # each batch is packed into a single sequence of length `packed_seq_length`. Depending
-    # on the `packing_mode`, the final element in the batch will be truncated or padded.
     global_batch_size: int = 1
-    packed_seq_length: int = 2048
-    packing_mode: Literal["truncate", "pad"] = "pad"
 
     epochs: int = 5
     device: str = "cuda"
@@ -205,42 +200,24 @@ def train(config: TrainConfig):
     logger.info(f"Train outputs will be saved to {config.run_dir}")
     # logger.info("Initializing tokenizer and dataset")
     download_wandb_artifacts(config)
-    tokenizer = AutoTokenizer.from_pretrained(config.model.pretrained_model_name_or_path)
+    tokenizer = AutoTokenizer.from_pretrained(config.model.pretrained_model_name_or_path)    
 
-    # Load all the datasets in parallel
-    ds_load_start_time = time.time()
-
-    logger.info("Starting to load datasets")
-    dataset = config.dataset.instantiate(tokenizer=tokenizer)
+    t0 = time.time()
+    dataset = config.dataset.instantiate(tokenizer=tokenizer, seed=config.seed)
     logger.info(
-        f"Fininshed loading training dataset from disk, took {(time.time() - ds_load_start_time):.3}s"
+        f"Fininshed loading training dataset from disk, took {(time.time() - t0):.3}s"
     )
-    eval_datasets = [
-        EvalDataset(
-            dataset=dataset_config.dataset.instantiate(tokenizer=tokenizer),
-            # batch_size=dataset_config.local_batch_size,
-            name=dataset_config.name_for_wandb,
-            only_eval_rank_0=dataset_config.only_eval_rank_0,
-            dataloader_num_workers=dataset_config.dataloader_num_workers,
-        )
-        for dataset_config in config.eval_datasets
-    ]
 
-    generate_datasets = [
-        GenerateDataset(
-            name=generate_dataset_config.name_for_wandb,
-            dataset=generate_dataset_config.dataset.instantiate(tokenizer=tokenizer),
-            dataloader_num_workers=generate_dataset_config.dataloader_num_workers,
-            num_samples=generate_dataset_config.num_samples,
-            temperature=generate_dataset_config.temperature,
-            batch_size=generate_dataset_config.batch_size,
-            num_samples_final=generate_dataset_config.num_samples_final,
-            override_max_tokens=generate_dataset_config.override_max_tokens,
-        )
-        for generate_dataset_config in config.generate_datasets
+    eval_datasets: list[tuple[EvalDatasetConfig, CartridgeTrainDataset]] = [    
+        (ds_config, ds_config.dataset.instantiate(tokenizer=tokenizer, seed=config.seed))
+        for ds_config in config.eval_datasets
+    ]
+    generate_datasets: list[tuple[GenerateDatasetConfig, CartridgeGenerateDataset]] = [
+        (ds_config, ds_config.dataset.instantiate(tokenizer=tokenizer, seed=config.seed))
+        for ds_config in config.generate_datasets
     ]
     logger.info(
-        f"Finished to loading datasets from disk, took {(time.time() - ds_load_start_time):.2}s"
+        f"Finished to loading eval and generate datasets from disk, took {(time.time() - t0):.2}s"
     )
 
     model = config.model.instantiate().to(local_rank).to(torch.bfloat16)
@@ -274,7 +251,6 @@ def train(config: TrainConfig):
     else:
         cache_tuning = False
 
-    assert isinstance(dataset, CartridgeTrainDataset)
 
     # Different model wrapping logic based on tuning method
     if use_peft:
@@ -288,10 +264,7 @@ def train(config: TrainConfig):
             param.requires_grad = False
 
         cache = cache.to(local_rank)
-        wrapped_model = CacheAndModel(
-            cache,
-            model,
-        )
+        wrapped_model = CacheAndModel(cache, model,)
 
     if is_ddp:
 
@@ -315,25 +288,21 @@ def train(config: TrainConfig):
             generator=torch.Generator().manual_seed(config.seed),
         )
 
-    sampler = PackedBatchSampler(
-        sampler=train_sampler,
-        dataset=dataset,
-        packing_mode=config.packing_mode,
-        packed_seq_length=config.packed_seq_length,
-        shuffle=True,
-    )
     dataloader = DataLoader(
         dataset, 
-        collate_fn=lambda batch: dataset.collate(batch, packed_seq_length=config.packed_seq_length), 
-        batch_sampler=sampler
+        sampler=train_sampler,
+        # our dataset already handles batching, so we force the batch size to 1
+        # and extract it in the collate. We still use the dataloader to leverage
+        # a single worker to avoid blocking the main process
+        batch_size=1, 
+        collate_fn=lambda x: x[0], 
+        num_workers=1, 
     )
 
-    # Set up optimizer based on tuning method
-    if use_peft:
-        optimizer = optim.Adam(wrapped_model.parameters(), lr=config.lr)
-    else:
-        optimizer = optim.Adam(cache.parameters(), lr=config.lr)
-
+    optimizer = optim.Adam(
+        wrapped_model.parameters() if use_peft else cache.parameters(), 
+        lr=config.lr
+    )
 
     # Initialize counter variables
     # optimizer_step: number of optimizer steps taken, iter_idx: number of loop iterations, epoch_idx: number of epochs completed
@@ -376,12 +345,13 @@ def train(config: TrainConfig):
         logger.info(f"Setup wandb with model stats: {wandb_log_dict}")
 
     def do_evaluation():
-        for dataset in eval_datasets:
+        for ds_config, dataset in eval_datasets:
             evaluate(
                 config=config,
                 model=wrapped_model,
                 cache=cache,
                 eval_dataset=dataset,
+                ds_config=ds_config,
                 optimizer_step=optimizer_step,
                 epoch=epoch_idx,
                 local_rank=local_rank,
@@ -389,7 +359,7 @@ def train(config: TrainConfig):
             )
 
     def do_evaluate_generations(step: int = None, final: bool = False):
-        for generate_dataset in generate_datasets:
+        for ds_config, generate_dataset in generate_datasets:
             eval_fn = (
                 evaluate_generations
                 if generate_dataset.batch_size == 1
@@ -423,9 +393,9 @@ def train(config: TrainConfig):
             leave=False,
             disable=not is_rank_zero,
         )
+        logger.info(f"Dataloader length: {len(dataloader)}")
         for batch in train_pbar:
-
-            batch: CartridgeDatasetBatchTokenLabels | CartridgeDatasetBatchLogitLabels
+            batch: CartridgeDatasetBatch
             do_step = (iter_idx + 1) % accumulate_grad_steps == 0
 
             if (
@@ -577,6 +547,8 @@ def train(config: TrainConfig):
             # Save PEFT model
             logger.info(f"Saving PEFT model to {config.run_dir}/peft_model")
             model.save_pretrained(f"{config.run_dir}/peft_model")
+    
+    logger.info(f"Done training waiting for final barrier.")
 
     # SE (03/21): Careful to synchronize all processes before finishing in case
     # there's another call to `train` in the same process
@@ -592,7 +564,8 @@ def evaluate(
     config: TrainConfig,
     model,  # Can be either CacheAndModel or a PEFT model
     cache: Optional[TrainableCache],
-    eval_dataset: EvalDataset,
+    eval_dataset: CartridgeTrainDataset,
+    ds_config: EvalDatasetConfig,
     optimizer_step: int,
     epoch: int,
     local_rank: int,
@@ -605,32 +578,32 @@ def evaluate(
     world_size = dist.get_world_size() if is_ddp else 1
 
     logger.info(
-        f"Evaluating `{eval_dataset.name}` (n={len(eval_dataset.dataset)}, {len(eval_dataset.dataset) // world_size} per device, world size={world_size})"
+        f"Evaluating `{ds_config.name_for_wandb}` (n={len(eval_dataset)}, {len(eval_dataset) // world_size} per device, world size={world_size})"
     )
-    tokenizer = eval_dataset.dataset.tokenizer
+    tokenizer = eval_dataset.tokenizer
 
     sampler = (
-        DistributedSampler(eval_dataset.dataset)
-        if is_ddp and not eval_dataset.only_eval_rank_0
+        DistributedSampler(eval_dataset)
+        if is_ddp and not ds_config.only_eval_rank_0
         else None
     )
     dataloader = DataLoader(
-        eval_dataset.dataset,
-        batch_size=eval_dataset.batch_size,
-        collate_fn=eval_dataset.dataset.collate,
+        eval_dataset,
+        batch_size=ds_config.batch_size,
+        collate_fn=eval_dataset.collate,
         sampler=sampler,
-        num_workers=eval_dataset.dataloader_num_workers,
+        num_workers=ds_config.dataloader_num_workers,
     )
 
     dataloader_pbar = tqdm(
         dataloader,
         total=len(dataloader),
-        desc=f"Evaluation [step={optimizer_step}] ({eval_dataset.name})",
+        desc=f"Evaluation [step={optimizer_step}] ({ds_config.name_for_wandb})",
         leave=False,
         disable=not is_rank_zero,
     )
 
-    prefix = f"eval_{eval_dataset.name}"
+    prefix = f"eval_{ds_config.name_for_wandb}"
 
     results = []
     with torch.no_grad():
@@ -640,7 +613,7 @@ def evaluate(
         epoch_num_elements = torch.tensor(0, device="cuda")
 
         for batch in dataloader_pbar:
-            batch: CartridgeDatasetBatchTokenLabels
+            batch: CartridgeDatasetBatch
             labels = batch.labels.to(local_rank)[:, 1:]
 
             epoch_num_system_and_user_tokens += sum(
