@@ -34,6 +34,7 @@ def flex_generate(
     
     This implementation relies on the PackedCache above.
     """
+    model.eval()
     if stop_token_ids is None:
         stop_token_ids = [tokenizer.eos_token_id] if tokenizer.eos_token_id is not None else []
     

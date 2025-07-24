@@ -37,10 +37,11 @@ logger = logging.get_logger(__name__)
 
 # SE (07/21): `dynamic=False` is necessary to avoid a "PassManager::run failed" error
 # when interacting with torch.amp.autocast.
-flex_attention = torch.compile(flex_attention, dynamic=True)
+# flex_attention = torch.compile(flex_attention, dynamic=True)
 # SE (07/22): The `mode="max-autotune-no-cudagraphs"` gives a ~2x speedup on 
 # backward running on a single A100.
-# flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
+flex_attention_train = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
+flex_attention_dynamic = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
 
 @dataclass
 class Qwen3Batch:
@@ -71,6 +72,8 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
+
+# https://github.com/pytorch/pytorch/issues/133254
 
 def flex_attention_forward(
     module: torch.nn.Module,
@@ -115,8 +118,18 @@ def flex_attention_forward(
         value = repeat_kv(value, query.shape[1] // value.shape[1])
         enable_gqa = False
 
-    kernel_options = kwargs.get("kernel_options", None)
-    attn_output = flex_attention(
+    kernel_options = kwargs.get("kernel_options", {})
+    # kernel_options = {
+    #     "BLOCK_M": 64, 
+    #     "BLOCK_N": 64,
+    #     "BLOCK_M1": 32,
+    #     "BLOCK_N1": 64,
+    #     "BLOCK_M2": 64,
+    #     "BLOCK_N2": 32,
+    #     **kernel_options,
+    # }
+    attn = flex_attention_train if module.training else flex_attention_dynamic
+    attn_output = attn(
         query,
         key,
         value,
