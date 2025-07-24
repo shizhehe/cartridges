@@ -320,18 +320,9 @@ class LlamaAttention(nn.Module):
 
         past_key_value = batch.past_key_values
         if past_key_value is not None:
-            # sin and cos are specific to RoPE models
-            cache_kwargs = {"sin": sin, "cos": cos}
-            if hasattr(past_key_value, "update_separate"):
-                (key_states, value_states), (shared_key_states, shared_value_states) = past_key_value.update_separate(
-                    key_states, value_states, self.layer_idx, cache_kwargs
-                )
-                key_states = torch.cat([shared_key_states, key_states], dim=-2)
-                value_states = torch.cat([shared_value_states, value_states], dim=-2)
-            else:
-                key_states, value_states = past_key_value.update(
-                    key_states, value_states, self.layer_idx, cache_kwargs
-                )
+            key_states, value_states = past_key_value.update(
+                key_states, value_states, batch.seq_ids, self.layer_idx,
+            )
 
         attn_output = flex_attention_forward(
             self,
@@ -460,12 +451,9 @@ class FlexLlamaModel(FlexLlamaPreTrainedModel):
         
         # Build the block mask
         # --- begin build block mask ---
-        cache_len = past_key_values.num_tokens()
-        print(cache_len)
-        
+        cache_len = past_key_values.num_tokens()        
         kv_seq_ids = seq_ids
         if past_key_values is not None and past_key_values.num_tokens() > 0:
-            breakpoint()
             kv_seq_ids = torch.cat([past_key_values.seq_ids(), kv_seq_ids])
     
         def mask_func(_, _h, q_idx, kv_idx):

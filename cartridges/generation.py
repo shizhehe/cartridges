@@ -26,32 +26,44 @@ class PackedCache(DynamicCache):
         self, 
         new_keys: torch.Tensor,
         new_values: torch.Tensor,
+        new_seq_ids: torch.Tensor,
         layer_idx: int,
-        cache_kwargs: dict[str, Any],
     ):
         """Update the cache with new keys and values while maintaining sequence contiguity.
         
         Args:
             new_keys: (1, num_heads, seq_len, head_dim) tensor of new keys
             new_values: (1, num_heads, seq_len, head_dim) tensor of new values  
+            new_seq_ids: (seq_len,) tensor of sequence ids for the new tokens
             layer_idx: index of the layer in the model.
-            cache_kwargs: kwargs to pass to the cache.
         """
+        assert new_seq_ids.shape[0] == new_keys.shape[2]
+        assert new_seq_ids.shape[0] == new_values.shape[2]
+
         # Ensure we have enough cache layers
         while len(self._key_cache) <= layer_idx:
             self._key_cache.append(None)
             self._value_cache.append(None)
+
+        if layer_idx == 0:
+            # we assume the same seq ids at every layer. This allows us to create
+            # a single block mask for the entire model. 
+            if self._seq_ids is None:
+                self._seq_ids = new_seq_ids
+            else:
+                self._seq_ids = torch.cat([self._seq_ids, new_seq_ids], dim=0)
+            self._num_tokens += new_keys.shape[2]
+
         
         if self._key_cache[layer_idx] is None:
             # First time - initialize cache for this layer
             self._key_cache[layer_idx] = new_keys
             self._value_cache[layer_idx] = new_values
-            self._num_tokens = new_keys.shape[2]
         else:
             # Concatenate along sequence dimension while maintaining contiguous sequences
             self._key_cache[layer_idx] = torch.cat([self._key_cache[layer_idx], new_keys], dim=2)
             self._value_cache[layer_idx] = torch.cat([self._value_cache[layer_idx], new_values], dim=2)
-            self._num_tokens += new_keys.shape[2]
+
         
         return self._key_cache[layer_idx], self._value_cache[layer_idx]
     
