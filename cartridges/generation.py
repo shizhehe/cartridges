@@ -3,87 +3,8 @@ from transformers import DynamicCache, AutoTokenizer
 import torch
 from tqdm import tqdm
 
-class PackedCache(DynamicCache):
-    """A packed cache for generation with FlexAttention.
-    
-    The cache must do two things:
+from cartridges.cache import AttnConfig, TrainableCache
 
-    - Keep track of sequence membership of the cache and expose it to the model via
-    the seq_ids method. The model will use this once per forward pass to construct 
-    the appropriate block mask. 
-    - Keep track of keys and values and expose them to the model in a packed manner via 
-    the update method.
-    
-    TODO (Sabri): Ensure that tokens from the same sequence are contiguous.
-    """
-    def __init__(self):
-        super().__init__()
-        self._seq_ids = None
-        self._key_cache = []  # List of tensors per layer
-        self._value_cache = []  # List of tensors per layer
-        self._num_tokens = 0
-        self.prefix_length = 0
-
-    def update(
-        self, 
-        new_keys: torch.Tensor,
-        new_values: torch.Tensor,
-        new_seq_ids: torch.Tensor,
-        layer_idx: int,
-    ):
-        """Update the cache with new keys and values while maintaining sequence contiguity.
-        
-        Args:
-            new_keys: (1, num_heads, seq_len, head_dim) tensor of new keys
-            new_values: (1, num_heads, seq_len, head_dim) tensor of new values  
-            new_seq_ids: (seq_len,) tensor of sequence ids for the new tokens
-            layer_idx: index of the layer in the model.
-        """
-        assert new_seq_ids.shape[0] == new_keys.shape[2]
-        assert new_seq_ids.shape[0] == new_values.shape[2]
-
-        # Ensure we have enough cache layers
-        while len(self._key_cache) <= layer_idx:
-            self._key_cache.append(None)
-            self._value_cache.append(None)
-
-        if layer_idx == 0:
-            # we assume the same seq ids at every layer. This allows us to create
-            # a single block mask for the entire model. 
-            if self._seq_ids is None:
-                self._seq_ids = new_seq_ids
-            else:
-                self._seq_ids = torch.cat([self._seq_ids, new_seq_ids], dim=0)
-            self._num_tokens += new_keys.shape[2]
-
-        
-        if self._key_cache[layer_idx] is None:
-            # First time - initialize cache for this layer
-            self._key_cache[layer_idx] = new_keys
-            self._value_cache[layer_idx] = new_values
-        else:
-            # Concatenate along sequence dimension while maintaining contiguous sequences
-            self._key_cache[layer_idx] = torch.cat([self._key_cache[layer_idx], new_keys], dim=2)
-            self._value_cache[layer_idx] = torch.cat([self._value_cache[layer_idx], new_values], dim=2)
-
-        
-        return self._key_cache[layer_idx], self._value_cache[layer_idx]
-    
-    def set_seq_ids(self, seq_ids: torch.Tensor):
-        """Set the sequence IDs for the cache."""
-        if self._seq_ids is None:
-            self._seq_ids = seq_ids.clone()
-        else:
-            self._seq_ids = torch.cat([self._seq_ids, seq_ids], dim=0)
-
-    def num_tokens(self) -> int:
-        """Get the sequence length of the cache."""
-        return self._num_tokens + self.prefix_length
-    
-    def seq_ids(self) -> torch.Tensor:
-        """Returns the sequence ids of the cache."""
-        return self._seq_ids
-       
 
 
 def flex_generate(
@@ -117,7 +38,13 @@ def flex_generate(
         stop_token_ids = [tokenizer.eos_token_id] if tokenizer.eos_token_id is not None else []
     
     device = input_ids.device
-    cache = PackedCache()
+    cache = TrainableCache(
+        config=AttnConfig(
+            n_layers=model.config.num_hidden_layers,
+            n_heads=model.config.num_key_value_heads,
+            head_dim=model.config.head_dim,
+        ),
+    )
     
     # Initialize generated sequences
     generated_tokens = [[] for _ in range(seq_ids.max().item() + 1)]
@@ -193,10 +120,14 @@ def flex_generate(
 
 if __name__ == "__main__":
     from cartridges.models.llama.modeling_llama import FlexLlamaForCausalLM
+    from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
     from transformers import AutoTokenizer
 
-    model_name = "meta-llama/Llama-3.2-3B-Instruct"
-    model = FlexLlamaForCausalLM.from_pretrained(model_name).to("cuda")
+
+    # model_name = "meta-llama/Llama-3.2-3B-Instruct"
+    # model = FlexLlamaForCausalLM.from_pretrained(model_name).to("cuda")
+    model_name = "Qwen/Qwen3-4B"
+    model = FlexQwen3ForCausalLM.from_pretrained(model_name).to("cuda")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     convos = [

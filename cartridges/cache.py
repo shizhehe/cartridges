@@ -36,9 +36,9 @@ class TrainableCache(nn.Module):
 
     Args:
         config: The attention configuration, which we use to construct the 
-        trainable_keys (list[torch.Tensor], optional): A `config.n_layers` length list of 
+        init_keys (list[torch.Tensor], optional): A `config.n_layers` length list of 
             trainable keys for the cache, should be of shape (1, n_heads, num_trainable_tokens, head_dim).
-        trainable_values (list[torch.Tensor]): A `config.n_layers` length list of 
+        init_values (list[torch.Tensor]): A `config.n_layers` length list of 
             trainable values for the cache, should be of shape (1, n_heads, num_trainable_tokens, head_dim).
         num_frozen_tokens (int): The number of the trainable tokens to freeze at the 
             beginning of the cache.
@@ -142,8 +142,6 @@ class TrainableCache(nn.Module):
                 self._seq_ids = torch.cat([self._seq_ids, new_seq_ids], dim=0)
             self._num_tokens += new_keys.shape[2]
         
-        print(new_keys.shape)
-
         keys = [new_keys]
         values = [new_values]
 
@@ -169,6 +167,10 @@ class TrainableCache(nn.Module):
     def num_tokens(self) -> int:
         """Get the sequence length of the cache."""
         return self._num_frozen_tokens + self._num_trainable_tokens + self._num_tokens
+    
+    def num_cartridge_tokens(self) -> int:
+        """Get the number of tokens in the cartridge."""
+        return self._num_frozen_tokens + self._num_trainable_tokens
     
     def seq_ids(self) -> torch.Tensor:
         """Returns the sequence ids of the cache."""

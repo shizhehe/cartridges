@@ -442,7 +442,8 @@ class FlexLlamaModel(FlexLlamaPreTrainedModel):
             past_key_values = DynamicCache()
 
         cache_len = past_key_values.num_tokens() if past_key_values is not None else 0
-        position_ids = position_ids + cache_len
+        cartridge_len = past_key_values.num_cartridge_tokens() if past_key_values is not None else 0
+        position_ids = position_ids + cartridge_len
         
         # Build the block mask
         # --- begin build block mask ---
