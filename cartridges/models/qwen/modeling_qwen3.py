@@ -40,8 +40,8 @@ logger = logging.get_logger(__name__)
 # flex_attention = torch.compile(flex_attention, dynamic=True)
 # SE (07/22): The `mode="max-autotune-no-cudagraphs"` gives a ~2x speedup on 
 # backward running on a single A100.
-flex_attention_train = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
-flex_attention_dynamic = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
+# flex_attention_train = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
+# flex_attention_dynamic = torch.compile(flex_attention, dynamic=True)
 
 @dataclass
 class Qwen3Batch:
@@ -128,8 +128,8 @@ def flex_attention_forward(
     #     "BLOCK_N2": 32,
     #     **kernel_options,
     # }
-    attn = flex_attention_train if module.training else flex_attention_dynamic
-    breakpoint()
+    # attn = flex_attention_train if module.training else flex_attention_dynamic
+    attn = flex_attention_dynamic
     attn_output = attn(
         query,
         key,

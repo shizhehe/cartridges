@@ -55,7 +55,7 @@ class KVFromRandomText(KVCacheFactory):
             max_tokens=self.config.max_tokens,
         ).squeeze(0)
         
-        init_cache = DynamicCache()
+        init_cache = TrainableCache(config=attn_config)
         
         with torch.no_grad():
             input_ids = input_ids.to(model.device)
@@ -69,12 +69,10 @@ class KVFromRandomText(KVCacheFactory):
                 past_key_values=init_cache,
             )
 
-            num_tokens = input_ids.shape[-1]
             return TrainableCache(
                 config=attn_config,
-                num_tokens=num_tokens,
-                keys=list(init_cache.key_cache),
-                values=list(init_cache.value_cache),
+                init_keys=init_cache._keys,
+                init_values=init_cache._values,
                 num_frozen_tokens=self.config.num_frozen_tokens,
             )
 

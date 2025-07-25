@@ -41,10 +41,9 @@ config = TrainConfig(
 
     dataset=CartridgeTrainDataset.Config(
         data_sources=[
-            (source, 512)
+            (source, None)
             for source in data_sources
         ],
-        is_wandb=True,
         top_k_logits=20,
         packed_seq_length=4096,
         packing_mode="truncate",
@@ -60,7 +59,7 @@ config = TrainConfig(
 
     wandb=WandBConfig(
         project="cartridges",
-        tags=["train", "gmail"],
+        tags=["train", "longhealth"],
         entity="hazy-research",
     ),
     output_dir=os.environ["CARTRIDGES_OUTPUT_DIR"],

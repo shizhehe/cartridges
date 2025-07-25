@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import tempfile
 from functools import partial
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Tuple
 
 import concurrent.futures
 from matplotlib.figure import Figure

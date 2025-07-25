@@ -125,22 +125,22 @@ if __name__ == "__main__":
     from transformers import AutoTokenizer
 
 
-    # model_name = "meta-llama/Llama-3.2-3B-Instruct"
-    # model = FlexLlamaForCausalLM.from_pretrained(model_name).to("cuda")
-    model_name = "Qwen/Qwen3-4B"
-    model = FlexQwen3ForCausalLM.from_pretrained(model_name).to("cuda")
+    model_name = "meta-llama/Llama-3.2-3B-Instruct"
+    model = FlexLlamaForCausalLM.from_pretrained(model_name).to("cuda")
+    # model_name = "Qwen/Qwen3-4B"
+    # model = FlexQwen3ForCausalLM.from_pretrained(model_name).to("cuda")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     convos = [
         [
             {"role": "user", "content": "What is the capital of the moon?"},
         ],
-        # [
-        #     {"role": "user", "content": "Who are you?"},
-        # ],
-        # [
-        #     {"role": "user", "content": "Why is the sky blue?"},
-        # ],
+        [
+            {"role": "user", "content": "Who are you?"},
+        ],
+        [
+            {"role": "user", "content": "Why is the sky blue?"},
+        ],
     ]
 
     input_ids, seq_ids, position_ids = [], [], []
