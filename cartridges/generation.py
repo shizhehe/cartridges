@@ -135,12 +135,12 @@ if __name__ == "__main__":
         [
             {"role": "user", "content": "What is the capital of the moon?"},
         ],
-        [
-            {"role": "user", "content": "Who are you?"},
-        ],
-        [
-            {"role": "user", "content": "Why is the sky blue?"},
-        ],
+        # [
+        #     {"role": "user", "content": "Who are you?"},
+        # ],
+        # [
+        #     {"role": "user", "content": "Why is the sky blue?"},
+        # ],
     ]
 
     input_ids, seq_ids, position_ids = [], [], []

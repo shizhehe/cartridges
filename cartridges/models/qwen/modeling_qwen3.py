@@ -129,6 +129,7 @@ def flex_attention_forward(
     #     **kernel_options,
     # }
     attn = flex_attention_train if module.training else flex_attention_dynamic
+    breakpoint()
     attn_output = attn(
         query,
         key,
