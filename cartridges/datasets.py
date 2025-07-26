@@ -32,24 +32,6 @@ END_HEADER_ID = 128007
 USER_TOKEN_ID = 882
 ASSISTANT_TOKEN_ID = 78191
 
-# SE (03/08): We need to add {% generation %} to the template to get it to work
-# with `return_assistant_tokens_mask=True`.
-# Tested that the template is equivalent in scratch/sabri/m03d08_dev_tokenizer_tempalte.ipynb
-# RE(03/15): there were a few things that were not equivalent.
-TEMPLATE = """\
-{%- for message in messages %}
-    {%- if  (message.role == 'assistant') %}
-        {{- '<|start_header_id|>' + message['role'] + '<|end_header_id|>\n\n' }}{% generation %}{{- message['content'] | trim + '<|eot_id|>' }}{% endgeneration %}
-
-    {%- else %}
-        {{- '<|start_header_id|>' + message['role'] + '<|end_header_id|>\n\n'+ message['content'] | trim + '<|eot_id|>' }}
-        
-    {%- endif %}
-{%- endfor %}
-{%- if add_generation_prompt %}
-    {{- '<|start_header_id|>assistant<|end_header_id|>\n\n' }}
-{%- endif %}
-"""
 
 
 @dataclass

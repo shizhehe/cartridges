@@ -6,6 +6,7 @@ from transformers import PreTrainedTokenizerFast
 
 from cartridges.datasets import CartridgeGenerateDataset, CartridgeGenerateDatasetElement
 from cartridges.data.longhealth.utils import LongHealthQuestion, LongHealthPatient, load_longhealth_dataset
+from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE
 
 class LongHealthMultipleChoiceGenerateDataset(CartridgeGenerateDataset):
     class Config(ObjectConfig):
@@ -85,7 +86,7 @@ class LongHealthMultipleChoiceGenerateDataset(CartridgeGenerateDataset):
             [{"role": "user", "content": question.question}],
             add_generation_prompt=True,
             return_tensors="pt",
-            # chat_template=TEMPLATE,
+            chat_template=MODEL_TO_CHAT_TEMPLATE[self.tokenizer.name_or_path],
         )
 
         return CartridgeGenerateDatasetElement(

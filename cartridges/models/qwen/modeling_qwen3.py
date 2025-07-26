@@ -31,19 +31,12 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import auto_docstring, can_return_tuple, logging
 
 from .configuration_qwen3 import Qwen3Config
+from cartridges.models.attention import create_block_mask_w_cache, flex_attention_forward, repeat_kv
 
 
 logger = logging.get_logger(__name__)
 
-# SE (07/21): `dynamic=False` is necessary to avoid a "PassManager::run failed" error
-# when interacting with torch.amp.autocast during training. This is okay since we pack
-# all sequences to the same length during training.
-# SE (07/22): The `mode="max-autotune-no-cudagraphs"` gives a ~2x speedup on 
-# backward running on a single A100.
-# flex_attention_train = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
 
-# # SE (07/25): For generation, we need to use `dynamic=True` to avoid a "PassManager::run failed" error
-# flex_attention_generate = torch.compile(flex_attention, dynamic=True) 
 
 @dataclass
 class Qwen3Batch:
@@ -63,69 +56,6 @@ class Qwen3Batch:
             **kwargs,
         )
 
-
-def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
-    """
-    This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
-    num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
-    """
-    batch, num_key_value_heads, slen, head_dim = hidden_states.shape
-    if n_rep == 1:
-        return hidden_states
-    hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
-    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
-
-
-# https://github.com/pytorch/pytorch/issues/133254
-
-def flex_attention_forward(
-    module: torch.nn.Module,
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    attention_mask: Union[torch.Tensor, "BlockMask"],
-    scaling: Optional[float] = None,
-    softcap: Optional[float] = None,
-    mode: Literal["train", "generate"] = "train",
-    **kwargs,
-) -> tuple[torch.Tensor, torch.Tensor]:
-
-    if kwargs.get("dropout", 0.0) > 0:
-        raise ValueError(
-            "`flex_attention` does not support `dropout`. Please use it with inference"
-            " only (`model.eval()`) or turn off the attention dropout in the respective config."
-        )
-
-    block_mask = None
-    block_mask = attention_mask
-
-    enable_gqa = True
-    num_local_query_heads = query.shape[1]
-
-    # When running TP this helps:
-    # SE (07/25): This is a hack to avoid the GQA kernel.
-    if not ((num_local_query_heads & (num_local_query_heads - 1)) == 0):
-        key = repeat_kv(key, query.shape[1] // key.shape[1])
-        value = repeat_kv(value, query.shape[1] // value.shape[1])
-        enable_gqa = False
-
-    kernel_options = kwargs.get("kernel_options", {})
-    attn = flex_attention_train if mode == "train" else flex_attention_generate
-
-    attn_output = attn(
-        query,
-        key,
-        value,
-        block_mask=block_mask,
-        enable_gqa=enable_gqa,
-        scale=scaling,
-        kernel_options=kernel_options,
-        return_lse=False,
-    )
-    
-    attn_output = attn_output.transpose(1, 2).contiguous()
-
-    return attn_output
 
 
 
@@ -200,42 +130,6 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
     return q_embed, k_embed
 
 
-def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
-    """
-    This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
-    num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
-    """
-    batch, num_key_value_heads, slen, head_dim = hidden_states.shape
-    if n_rep == 1:
-        return hidden_states
-    hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
-    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
-
-
-def eager_attention_forward(
-    module: nn.Module,
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    attention_mask: Optional[torch.Tensor],
-    scaling: float,
-    dropout: float = 0.0,
-):
-    key_states = repeat_kv(key, module.num_key_value_groups)
-    value_states = repeat_kv(value, module.num_key_value_groups)
-
-    attn_weights = torch.matmul(query, key_states.transpose(2, 3)) * scaling
-    if attention_mask is not None:
-        causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
-        attn_weights = attn_weights + causal_mask
-
-    attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query.dtype)
-    attn_weights = nn.functional.dropout(attn_weights, p=dropout, training=module.training)
-    attn_output = torch.matmul(attn_weights, value_states)
-    attn_output = attn_output.transpose(1, 2).contiguous()
-
-    return attn_output, attn_weights
-
 
 class Qwen3Attention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
@@ -282,6 +176,7 @@ class Qwen3Attention(nn.Module):
         if past_key_value is not None:
             key_states, value_states = past_key_value.update(
                 key_states, value_states, batch.seq_ids, self.layer_idx,
+                skip_append=batch.mode == "train"
             )
   
         attn_output = flex_attention_forward(
@@ -445,23 +340,17 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
         if use_cache and past_key_values is None:
             past_key_values = DynamicCache()
 
-        cache_len = past_key_values.num_tokens() if past_key_values is not None else 0
         cartridge_len = past_key_values.num_cartridge_tokens() if past_key_values is not None else 0
         position_ids = position_ids + cartridge_len
         
         # Build the block mask
         # --- begin build block mask ---
-        kv_seq_ids = seq_ids
-        if cache_len > 0:
-            kv_seq_ids = torch.cat([past_key_values.seq_ids(), kv_seq_ids])
-    
-        def mask_func(_, _h, q_idx, kv_idx):
-            return (kv_seq_ids[kv_idx] == -1) | ((seq_ids[q_idx] == kv_seq_ids[kv_idx]) & (q_idx + cache_len >= kv_idx))
-
-        block_mask = create_block_mask(
-            mask_func, B=1, H=1, Q_LEN=len(seq_ids), KV_LEN=len(seq_ids) + cache_len, 
+        block_mask = create_block_mask_w_cache(
+            cache=past_key_values,
+            input_ids=input_ids,
+            seq_ids=seq_ids,
+            position_ids=position_ids,
             device=inputs_embeds.device,
-            # _compile=True
         )
         # --- end build block mask ---
 

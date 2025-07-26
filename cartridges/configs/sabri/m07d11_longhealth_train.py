@@ -26,8 +26,10 @@ data_sources = [
     # "/home/sabri/cartridges/outputs/2025-07-13-09-04-32-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_p10_n65536-0/artifact/dataset.pkl"
     # "/data/sabri/cartridges/2025-07-22-12-53-08-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_p10-0/artifact/dataset.pkl"
 
-    "/data/sabri/cartridges/2025-07-22-16-36-53-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_p10_n8192-0/artifact/dataset.pkl"
+    # "/data/sabri/cartridges/2025-07-22-16-36-53-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_p10_n8192-0/artifact/dataset.pkl"
     # "/data/sabri/cartridges/2025-07-26-09-59-55-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_qwen3-4b_p10_n8192-0/artifact/dataset.pkl"
+    # "/data/sabri/cartridges/2025-07-26-12-02-19-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_qwen3-4b_p10_n65536-0/artifact/dataset.pkl"
+    "/data/sabri/cartridges/2025-07-26-12-21-32-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_llama-3.2-3b_p10_n65536-0/artifact/dataset.pkl"
 ]
 
 config = TrainConfig(
@@ -43,7 +45,7 @@ config = TrainConfig(
     
     lr=2e-2,
     loss_type="logits",
-    epochs=1,
+    epochs=4,
     global_batch_size=32,
 
     dataset=CartridgeTrainDataset.Config(
@@ -52,20 +54,21 @@ config = TrainConfig(
             for source in data_sources
         ],
         top_k_logits=20,
-        packed_seq_length=4096,
+        packed_seq_length=2048,
         packing_mode="truncate",
     ),
 
     save_every_n_steps=512,
-    generate_every_n_steps=512,
+    generate_every_n_steps=128,
     generate_evals=[
         GenerationEvalConfig(
             dataset=LongHealthMultipleChoiceGenerateDataset.Config(
                 patient_ids=patient_ids,
             ),
             name_for_wandb=f"longhealth_{patients_str}",
-            generate_max_new_tokens=64,
+            generate_max_new_tokens=512,
             batch_size=32,
+            temperature=0.3,
         )
     ],
     eval_every_n_steps=256,
