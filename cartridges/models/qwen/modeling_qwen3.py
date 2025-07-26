@@ -40,11 +40,10 @@ logger = logging.get_logger(__name__)
 # all sequences to the same length during training.
 # SE (07/22): The `mode="max-autotune-no-cudagraphs"` gives a ~2x speedup on 
 # backward running on a single A100.
-flex_attention_train = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
+# flex_attention_train = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
 
-# SE (07/25): For generation, we need to use `dynamic=True` to avoid a "PassManager::run failed" error
-flex_attention_generate = torch.compile(flex_attention, dynamic=True) #, mode="max-autotune-no-cudagraphs")
-
+# # SE (07/25): For generation, we need to use `dynamic=True` to avoid a "PassManager::run failed" error
+# flex_attention_generate = torch.compile(flex_attention, dynamic=True) 
 
 @dataclass
 class Qwen3Batch:
@@ -435,6 +434,8 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
         """
         seq_ids (`torch.LongTensor` of shape `(sequence_length,)`):
             Sequence IDs for the input tokens.
+        mode (`Literal["train", "generate"]`): Whether running a forward pass for training/eval or
+            or generation.
         """
         input_ids = input_ids.unsqueeze(0)
         position_ids = position_ids.unsqueeze(0)
@@ -545,6 +546,8 @@ class FlexQwen3ForCausalLM(FlexQwen3PreTrainedModel, GenerationMixin):
             Labels for computing the masked language modeling loss. Indices should either be in `[0, ...,
             config.vocab_size]` or -100 (see `input_ids` docstring). Tokens with indices set to `-100` are ignored
             (masked), the loss is only computed for the tokens with labels in `[0, ..., config.vocab_size]`.
+        mode (`Literal["train", "generate"]`): Whether running a forward pass for training/eval or
+            or generation.
 
         Example:
 

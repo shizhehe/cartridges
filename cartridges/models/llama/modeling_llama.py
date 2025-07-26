@@ -48,15 +48,16 @@ logger = logging.get_logger(__name__)
 
 
 # SE (07/21): `dynamic=False` is necessary to avoid a "PassManager::run failed" error
-# when interacting with torch.amp.autocast.
+# when interacting with torch.amp.autocast. TODO (Sabri): This is not expected. Dig into
+# why it fails with `dynamic=True` for generation.
 # flex_attention = torch.compile(flex_attention, dynamic=False)
 # SE (07/22): The `mode="max-autotune-no-cudagraphs"` gives a ~2x speedup on 
-# backward running on a single A100.
+# backward running on 1xA100.
 flex_attention_train = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
 
 # SE (07/25): When I set `dynamic=True` with "max-autotune-no-cudagraphs" for 
 # generation, I get " AttributeError: 'Symbol' object has no attribute 'get_device' "
-flex_attention_generate = torch.compile(flex_attention, dynamic=True) 
+# flex_attention_generate = torch.compile(flex_attention, dynamic=True) 
 
 @dataclass
 class LlamaBatch:
@@ -227,10 +228,14 @@ def flex_attention_forward(
         value = repeat_kv(value, query.shape[1] // value.shape[1])
         enable_gqa = False
 
-        
-    
     kernel_options = kwargs.get("kernel_options", None)
     attn = flex_attention_train if mode == "train" else flex_attention_generate
+    
+    # print(f"{module.layer_idx=}: {query.requires_grad=}, {key.requires_grad=}, {value.requires_grad=}")
+
+    if key.requires_grad and not query.requires_grad:
+        query.requires_grad = True
+
     attn_output = attn(
         query,
         key,
@@ -314,6 +319,7 @@ class LlamaAttention(nn.Module):
         if past_key_value is not None:
             key_states, value_states = past_key_value.update(
                 key_states, value_states, batch.seq_ids, self.layer_idx,
+                skip_append=batch.mode == "train"
             )
 
         attn_output = flex_attention_forward(

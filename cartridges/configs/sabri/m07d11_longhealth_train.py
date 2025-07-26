@@ -5,8 +5,9 @@ import socket
 import pydrantic
 from pydrantic.variables import FormatStringVariable
 
-from cartridges.initialization.random import KVFromRandomText
+from cartridges.initialization.random import KVFromRandomText, KVFromRandomVectors
 from cartridges.models.llama.modeling_llama import FlexLlamaForCausalLM
+from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
 from cartridges.train import GenerationEvalConfig, TrainConfig
 from cartridges.models.config import HFModelConfig
 from cartridges.datasets import CartridgeTrainDataset
@@ -26,6 +27,7 @@ data_sources = [
     # "/data/sabri/cartridges/2025-07-22-12-53-08-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_p10-0/artifact/dataset.pkl"
 
     "/data/sabri/cartridges/2025-07-22-16-36-53-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_p10_n8192-0/artifact/dataset.pkl"
+    # "/data/sabri/cartridges/2025-07-26-09-59-55-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_qwen3-4b_p10_n8192-0/artifact/dataset.pkl"
 ]
 
 config = TrainConfig(
@@ -35,7 +37,7 @@ config = TrainConfig(
         pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
         model_cls=FlexLlamaForCausalLM,
     ),
-    kv_cache_initializer=KVFromRandomText.Config(
+    kv_cache_initializer=KVFromRandomVectors.Config(
         max_tokens=2048
     ),
     
@@ -50,7 +52,7 @@ config = TrainConfig(
             for source in data_sources
         ],
         top_k_logits=20,
-        packed_seq_length=4096,
+        packed_seq_length=1024,
         packing_mode="truncate",
     ),
 

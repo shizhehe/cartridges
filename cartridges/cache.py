@@ -122,6 +122,7 @@ class TrainableCache(nn.Module):
         new_values: torch.Tensor,
         new_seq_ids: torch.Tensor,
         layer_idx: int,
+        skip_append: bool = False,
     ):
         """Update the cache with new keys and values while maintaining sequence contiguity.
         
@@ -130,11 +131,13 @@ class TrainableCache(nn.Module):
             new_values: (1, num_heads, seq_len, head_dim) tensor of new values  
             new_seq_ids: (seq_len,) tensor of sequence ids for the new tokens
             layer_idx: index of the layer in the model.
+            skip_append: if True, do not append the new keys and values to the cache, 
+                just return the concatenation of the new_keys and values. 
         """
         assert new_seq_ids.shape[0] == new_keys.shape[2]
         assert new_seq_ids.shape[0] == new_values.shape[2]
 
-        if layer_idx == 0:
+        if layer_idx == 0 and not skip_append:
             # we assume the same seq ids at every layer. This allows us to create
             # a single block mask for the entire model. 
             if self._seq_ids is None:
@@ -151,8 +154,9 @@ class TrainableCache(nn.Module):
             keys = [self._keys[layer_idx]] + keys
             values = [self._values[layer_idx]] + values
 
-        self._keys[layer_idx] = torch.cat(keys, dim=2)
-        self._values[layer_idx] = torch.cat(values, dim=2)
+        if not skip_append:
+            self._keys[layer_idx] = torch.cat(keys, dim=2)
+            self._values[layer_idx] = torch.cat(values, dim=2)
         
         if self._num_trainable_tokens > 0:
             keys = [self.trainable_keys[layer_idx]] + keys
@@ -183,6 +187,7 @@ class TrainableCache(nn.Module):
         self._keys = [None] * self.config.n_layers
         self._values = [None] * self.config.n_layers
         self._num_tokens = 0
+        self._seq_ids = None
 
     def save(self, path: str):
         """Saves the trainable keys and values to the specified path."""
