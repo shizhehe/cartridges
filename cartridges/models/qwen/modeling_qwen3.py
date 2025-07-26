@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Callable, Optional, Union
+from typing import Callable, Literal, Optional, Union
 from dataclasses import dataclass
 
 import torch
@@ -36,11 +36,14 @@ from .configuration_qwen3 import Qwen3Config
 logger = logging.get_logger(__name__)
 
 # SE (07/21): `dynamic=False` is necessary to avoid a "PassManager::run failed" error
-# when interacting with torch.amp.autocast.
-# flex_attention = torch.compile(flex_attention, dynamic=True)
+# when interacting with torch.amp.autocast during training. This is okay since we pack
+# all sequences to the same length during training.
 # SE (07/22): The `mode="max-autotune-no-cudagraphs"` gives a ~2x speedup on 
 # backward running on a single A100.
-flex_attention = torch.compile(flex_attention, dynamic=True) #, mode="max-autotune-no-cudagraphs")
+flex_attention_train = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
+
+# SE (07/25): For generation, we need to use `dynamic=True` to avoid a "PassManager::run failed" error
+flex_attention_generate = torch.compile(flex_attention, dynamic=True) #, mode="max-autotune-no-cudagraphs")
 
 
 @dataclass
@@ -53,6 +56,7 @@ class Qwen3Batch:
     position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None
     attention_mask: Optional[torch.Tensor] = None
     use_cache: Optional[bool] = None
+    mode: Literal["train", "generate"] = "train"
 
     def update(self, **kwargs) -> "Qwen3Batch":
         return Qwen3Batch(
@@ -83,6 +87,7 @@ def flex_attention_forward(
     attention_mask: Union[torch.Tensor, "BlockMask"],
     scaling: Optional[float] = None,
     softcap: Optional[float] = None,
+    mode: Literal["train", "generate"] = "train",
     **kwargs,
 ) -> tuple[torch.Tensor, torch.Tensor]:
 
@@ -106,17 +111,9 @@ def flex_attention_forward(
         enable_gqa = False
 
     kernel_options = kwargs.get("kernel_options", {})
-    # kernel_options = {
-    #     "BLOCK_M": 64, 
-    #     "BLOCK_N": 64,
-    #     "BLOCK_M1": 32,
-    #     "BLOCK_N1": 64,
-    #     "BLOCK_M2": 64,
-    #     "BLOCK_N2": 32,
-    #     **kernel_options,
-    # }
-    print(query.dtype)
-    attn_output = flex_attention(
+    attn = flex_attention_train if mode == "train" else flex_attention_generate
+
+    attn_output = attn(
         query,
         key,
         value,
@@ -126,7 +123,6 @@ def flex_attention_forward(
         kernel_options=kernel_options,
         return_lse=False,
     )
-    # lse is returned in float32
     
     attn_output = attn_output.transpose(1, 2).contiguous()
 
@@ -296,6 +292,7 @@ class Qwen3Attention(nn.Module):
             value_states,
             attention_mask=batch.attention_mask,
             scaling=self.scaling,
+            mode=batch.mode,
         )
         attn_output = attn_output.reshape(*input_shape, -1).contiguous()
         attn_output = self.o_proj(attn_output)
@@ -433,6 +430,7 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
         past_key_values: Optional[Cache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         use_cache: Optional[bool] = None,
+        mode: Literal["train", "generate"] = "train",
     ) -> BaseModelOutputWithPast:
         """
         seq_ids (`torch.LongTensor` of shape `(sequence_length,)`):
@@ -480,6 +478,7 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
             past_key_values=past_key_values,
             position_embeddings=position_embeddings,
             attention_mask=block_mask,
+            mode=mode,
         )
 
         for decoder_layer in self.layers[: self.config.num_hidden_layers]:
@@ -537,6 +536,7 @@ class FlexQwen3ForCausalLM(FlexQwen3PreTrainedModel, GenerationMixin):
         labels: Optional[torch.LongTensor] = None,
         use_cache: Optional[bool] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
+        mode: Literal["train", "generate"] = "train",
     ) -> CausalLMOutputWithPast:
         r"""
         seq_ids (`torch.LongTensor` of shape `(sequence_length,)`):
@@ -569,6 +569,7 @@ class FlexQwen3ForCausalLM(FlexQwen3PreTrainedModel, GenerationMixin):
             past_key_values=past_key_values,
             inputs_embeds=inputs_embeds,
             use_cache=use_cache,
+            mode=mode,
         )
 
         hidden_states = outputs.last_hidden_state

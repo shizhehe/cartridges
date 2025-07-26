@@ -65,6 +65,7 @@ def flex_generate(
                 position_ids=current_position_ids,
                 past_key_values=cache,
                 use_cache=True,
+                mode="generate",
             )
         
         # Get logits for the last token of each sequence
@@ -120,15 +121,24 @@ def flex_generate(
     
 
 if __name__ == "__main__":
-    from cartridges.models.llama.modeling_llama import FlexLlamaForCausalLM
-    from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
+    import argparse
     from transformers import AutoTokenizer
 
+    # Define command line argument parser
+    parser = argparse.ArgumentParser(description="Select model type")
+    parser.add_argument("--model", choices=["llama", "qwen"], default="llama", help="Choose between 'llama' and 'qwen' models")
+    args = parser.parse_args()
 
-    model_name = "meta-llama/Llama-3.2-3B-Instruct"
-    model = FlexLlamaForCausalLM.from_pretrained(model_name).to("cuda").to(torch.bfloat16)
-    # model_name = "Qwen/Qwen3-4B"
-    # model = FlexQwen3ForCausalLM.from_pretrained(model_name).to("cuda").to(torch.bfloat16)
+    # Import the appropriate model based on the command line argument
+    if args.model == "llama":
+        from cartridges.models.llama.modeling_llama import FlexLlamaForCausalLM
+        model_name = "meta-llama/Llama-3.2-3B-Instruct"
+        model = FlexLlamaForCausalLM.from_pretrained(model_name).to("cuda").to(torch.bfloat16)
+    elif args.model == "qwen":
+        from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
+        model_name = "Qwen/Qwen3-4B"
+        model = FlexQwen3ForCausalLM.from_pretrained(model_name).to("cuda").to(torch.bfloat16)
+
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     convos = [

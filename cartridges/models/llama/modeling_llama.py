@@ -17,7 +17,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Callable, Optional, Union
+from typing import Callable, Literal, Optional, Union
 from dataclasses import dataclass
 
 import torch
@@ -52,9 +52,11 @@ logger = logging.get_logger(__name__)
 # flex_attention = torch.compile(flex_attention, dynamic=False)
 # SE (07/22): The `mode="max-autotune-no-cudagraphs"` gives a ~2x speedup on 
 # backward running on a single A100.
+flex_attention_train = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
+
 # SE (07/25): When I set `dynamic=True` with "max-autotune-no-cudagraphs" for 
 # generation, I get " AttributeError: 'Symbol' object has no attribute 'get_device' "
-flex_attention = torch.compile(flex_attention, dynamic=True)
+flex_attention_generate = torch.compile(flex_attention, dynamic=True) 
 
 @dataclass
 class LlamaBatch:
@@ -66,6 +68,7 @@ class LlamaBatch:
     position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None
     attention_mask: Optional[torch.Tensor] = None
     use_cache: Optional[bool] = None
+    mode: Literal["train", "generate"] = "train"
 
     def update(self, **kwargs) -> "LlamaBatch":
         return LlamaBatch(
@@ -198,6 +201,7 @@ def flex_attention_forward(
     value: torch.Tensor,
     attention_mask: Union[torch.Tensor, "BlockMask"],
     scaling: Optional[float] = None,
+    mode: Literal["train", "generate"] = "train",
     **kwargs,
 ) -> tuple[torch.Tensor, torch.Tensor]:
 
@@ -216,15 +220,19 @@ def flex_attention_forward(
 
     # SE (07/25): For grouped-query attention, to work, the `Number of shared query 
     # heads sharing the same KV head must be power of 2`
-    # So, if the number of query heads is not a power of 2, we need to repeat the key 
-    # and value and turn off GQA. :( 
+    # This is the case with 3.2-3B (24 qheads and 8 kvheads), so we need to repeat 
+    # the key  and value and turn off GQA. :( 
     if not ((num_local_query_heads & (num_local_query_heads - 1)) == 0):
         key = repeat_kv(key, query.shape[1] // key.shape[1])
         value = repeat_kv(value, query.shape[1] // value.shape[1])
         enable_gqa = False
+
+        
     
     kernel_options = kwargs.get("kernel_options", None)
-    attn_output = flex_attention(
+    attn = flex_attention_train if mode == "train" else flex_attention_generate
+
+    attn_output = attn(
         query,
         key,
         value,
@@ -233,9 +241,7 @@ def flex_attention_forward(
         scale=scaling,
         kernel_options=kernel_options,
         return_lse=False,
-    )
-    # lse is returned in float32
-    
+    )    
     attn_output = attn_output.transpose(1, 2).contiguous()
 
     return attn_output
@@ -318,6 +324,7 @@ class LlamaAttention(nn.Module):
             value_states,
             attention_mask=batch.attention_mask,
             scaling=self.scaling,
+            mode=batch.mode,
         )
         attn_output = attn_output.reshape(*input_shape, -1).contiguous()
         attn_output = self.o_proj(attn_output)
@@ -420,6 +427,7 @@ class FlexLlamaModel(FlexLlamaPreTrainedModel):
         past_key_values: Optional[Cache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         use_cache: Optional[bool] = None,
+        mode: Literal["train", "generate"] = "train",
     ) -> BaseModelOutputWithPast:
         """
         seq_ids (`torch.LongTensor` of shape `(sequence_length,)`):
@@ -467,6 +475,7 @@ class FlexLlamaModel(FlexLlamaPreTrainedModel):
             past_key_values=past_key_values,
             position_embeddings=position_embeddings,
             attention_mask=block_mask,
+            mode=mode,
         )
 
         for decoder_layer in self.layers[: self.config.num_hidden_layers]:
@@ -527,6 +536,7 @@ class FlexLlamaForCausalLM(FlexLlamaPreTrainedModel, GenerationMixin):
         labels: Optional[torch.LongTensor] = None,
         use_cache: Optional[bool] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
+        mode: Literal["train", "generate"] = "train",
     ) -> CausalLMOutputWithPast:
         r"""
         seq_ids (`torch.LongTensor` of shape `(sequence_length,)`):
@@ -559,6 +569,7 @@ class FlexLlamaForCausalLM(FlexLlamaPreTrainedModel, GenerationMixin):
             past_key_values=past_key_values,
             inputs_embeds=inputs_embeds,
             use_cache=use_cache,
+            mode=mode,
         )
 
         hidden_states = outputs.last_hidden_state
