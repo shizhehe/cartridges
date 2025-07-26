@@ -1,25 +1,25 @@
 from __future__ import annotations
 from abc import ABC
 from dataclasses import dataclass
+import asyncio
 import itertools
 import math
 import time
 from typing import Callable, Dict, List, Literal, Optional, Union
-import concurrent.futures
 
-from kvpress import DuoAttentionPress, ExpectedAttentionPress
+# from kvpress import DuoAttentionPress, ExpectedAttentionPress
 import pandas as pd
 from tqdm import tqdm
 from transformers import AutoTokenizer
 import wandb
 import pydrantic
 
-from cartridges.datasets import CartridgeGenerateDatasetElement
+from cartridges.data.resources import Resource
+from cartridges.datasets import CartridgeGenerateDatasetElement, CartridgeGenerateDataset
 from cartridges.clients.base import Client, ClientConfig, ClientResponse
 
 from cartridges.train import GenerationEvalConfig
 from cartridges.utils import WandBConfig, prepare_wandb, seed_everything, get_logger
-from cartridges.retrievers import Retriever
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 
@@ -45,75 +45,61 @@ class EvaluateConfig(pydrantic.RunConfig):
     seed: int = 42
 
     def run(self):
-        return evaluate_generation(self)
+        return asyncio.run(evaluate_generation(self))
 
 
-def evaluate_generation(config: EvaluateConfig):
+async def evaluate_generation(config: EvaluateConfig):
     seed_everything(config.seed)
 
     logger.info(f"ICL will be saved to {config.run_dir}")
     logger.info("Initializing tokenizer and dataset")
     # download_wandb_artifacts(config)
     tokenizer = AutoTokenizer.from_pretrained(config.tokenizer)
-    context = config.context.instantiate()
     
-    dataset=config.eval.dataset.instantiate(tokenizer=tokenizer)
-    generator = config.generator.instantiate(context=context)
+    dataset=config.eval.dataset.instantiate(tokenizer=tokenizer, seed=config.seed)
+    generator = config.generator.instantiate()
 
     if config.wandb is not None:
         config.wandb.name = config.name
         prepare_wandb(config.wandb, config.to_dict())
 
     dataset_batch_size = config.batch_size // config.eval.num_samples
-    total_batches = math.ceil(len(dataset.dataset) / dataset_batch_size)
+    total_batches = math.ceil(len(dataset) / dataset_batch_size)
     all_rows = []
-    if config.max_num_batches_in_parallel > 1:
-        if config.parallelism_strategy == "thread":
-            executor_cls = concurrent.futures.ThreadPoolExecutor
-        elif config.parallelism_strategy == "process":
-            executor_cls = concurrent.futures.ProcessPoolExecutor
 
-        with executor_cls(max_workers=config.max_num_batches_in_parallel) as executor:
-            futures = [
-                executor.submit(
-                    _process_batch,
-                    batch_start=batch_idx * dataset_batch_size,
-                    batch_end=min(
-                        (batch_idx + 1) * dataset_batch_size, len(dataset.dataset)
-                    ),
-                    generator=generator,
-                    dataset=dataset,
-                    config=config,
-                )
-                for batch_idx in range(total_batches)
-            ]
-            for future in tqdm(
-                concurrent.futures.as_completed(futures),
-                total=total_batches,
-                desc="Generating batches",
-            ):
-                batch_rows = future.result()
-                all_rows += batch_rows
+    # TODO: the generate dataset actually determines the temperature for training
+    # so to ensure fair comparison we assert that the temperature is the same
+    assert config.eval.temperature == config.generator.temperature
 
-    else:  # useful for debugging to run serially
-        for batch_idx in range(total_batches):
-            all_rows += _process_batch(
-                batch_start=batch_idx * dataset_batch_size,
-                batch_end=min(
-                    (batch_idx + 1) * dataset_batch_size, len(dataset.dataset)
-                ),
-                generator=generator,
-                dataset=dataset,
-                config=config,
-            )
+    # Use asyncio for concurrent execution
+    tasks = [
+        _process_batch(
+            batch_start=batch_idx * dataset_batch_size,
+            batch_end=min(
+                (batch_idx + 1) * dataset_batch_size, len(dataset)
+            ),
+            generator=generator,
+            dataset=dataset,
+            eval_config=config.eval,
+        )
+        for batch_idx in range(total_batches)
+    ]
+    
+    # Process in chunks to limit concurrency
+    chunk_size = config.max_num_batches_in_parallel
+    for i in tqdm(range(0, len(tasks), chunk_size), desc="Processing batch chunks"):
+        chunk_tasks = tasks[i:i + chunk_size]
+        batch_results = await asyncio.gather(*chunk_tasks)
+        for batch_rows in batch_results:
+            all_rows += batch_rows
 
-    prefix = f"generate_{dataset.name}"
+    prefix = f"generate_{config.eval.name_for_wandb}"
     df = pd.DataFrame(all_rows)
     score_cols = [col for col in df.columns if col.endswith("score")]
     avg_scores = {f"{prefix}/{col}": df[col].mean() for col in score_cols}
 
-    if hasattr(dataset.dataset, "batch_score_with_answers"):
-        batch_score = dataset.dataset.batch_score_with_answers(
+    if hasattr(dataset, "batch_score_with_answers"):
+        batch_score = dataset.batch_score_with_answers(
             df["pred"].tolist(), df["answer"].tolist()
         )
         if isinstance(batch_score, dict):
@@ -141,28 +127,24 @@ def evaluate_generation(config: EvaluateConfig):
         wandb.finish()
 
 
-def _process_batch(
+async def _process_batch(
     batch_start: int,
     batch_end: int,
     generator: BaselineGenerator,
-    dataset: GenerateDataset,
-    config: GenerateBaselineConfig,
+    dataset: CartridgeGenerateDataset,
+    eval_config: GenerationEvalConfig,
 ):
-    num_samples = dataset.num_samples
-    has_score = hasattr(dataset.dataset, "score")
-    elems = [dataset.dataset[elem_idx] for elem_idx in range(batch_start, batch_end)]
+    num_samples = eval_config.num_samples
+    has_score = hasattr(dataset, "score")
+    elems = [dataset[elem_idx] for elem_idx in range(batch_start, batch_end)]
     sample_idxs = sum([[i] * len(elems) for i in range(num_samples)], [])
     elems = elems * num_samples
-    responses: List[GenerateBaselineResponse] = generator.generate(elems)
-
-    # TODO: the generate dataset actually determines the temperature for training
-    # so to ensure fair comparison we assert that the temperature is the same
-    assert dataset.temperature == config.generator.temperature
+    responses: List[GenerateBaselineResponse] = await generator.generate(elems)
 
     results = []
     for response, element, sample_idx in zip(responses, elems, sample_idxs):
         if has_score:
-            metrics, extras = dataset.dataset.score(
+            metrics, extras = dataset.score(
                 pred=response.text, answer=element.answer, convo_id=element.convo_id
             )
         else:
@@ -208,7 +190,7 @@ class BaselineGenerator(ABC):
     def __init__(self, config: Config):
         self.config = config
 
-    def generate(
+    async def generate(
         self, elements: List[CartridgeGenerateDatasetElement]
     ) -> List[GenerateBaselineResponse]:
         raise NotImplementedError()
@@ -225,7 +207,7 @@ class ICLBaseline(BaselineGenerator):
         # The user prompt template which should contain {content}
         user_prompt_template: str = "{content}"
 
-        context: Union[str, Callable[[], str]]
+        context: Union[str, Resource.Config]
 
         # The system prompt template which should contain {title} and {content}
         # variables.
@@ -245,7 +227,10 @@ class ICLBaseline(BaselineGenerator):
         if isinstance(self.config.context, str):
             ctx_text = self.config.context
         else:
-            ctx_text = self.config.context()
+            resource = self.config.context.instantiate()
+            # TODO (SE): Need to handle this
+            ctx_text = resource.to_string()
+            breakpoint()
 
 
         if self.config.max_context_tokens is not None:
@@ -276,7 +261,7 @@ class ICLBaseline(BaselineGenerator):
     def post_process_system_prompt(self, system_prompt: str) -> str:
         return system_prompt
 
-    def generate(
+    async def generate(
         self, elements: List[CartridgeGenerateDatasetElement]
     ) -> List[GenerateBaselineResponse]:
 
@@ -300,7 +285,7 @@ class ICLBaseline(BaselineGenerator):
             )
             chats.append(messages)
 
-        response: ClientResponse = self.client.chat(
+        response: ClientResponse = await self.client.chat(
             chats=chats,
             max_completion_tokens=self.config.max_completion_tokens,
             temperature=self.config.temperature,
@@ -373,9 +358,37 @@ class ICLBaselineSummaryFromLargeModel(ICLBaseline):
     def __init__(self, config: Config, context: Context):
         self.summary_client = config.summary_client.instantiate()
         self.context = context
-        super().__init__(config, context)
+        # Don't call super().__init__ yet, we'll initialize system prompt separately
+        self.config = config
+        self.client = config.client.instantiate()
+        self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer)
+        self.metadata = {}
+        # System prompt will be set in async_init
 
-    def post_process_system_prompt(self, system_prompt):
+    async def async_init(self):
+        """Initialize the system prompt asynchronously"""
+        if isinstance(self.config.context, str):
+            ctx_text = self.config.context
+        else:
+            ctx_text = self.config.context()
+
+        if self.config.max_context_tokens is not None:
+            ctx_text = self.tokenizer.decode(
+                self.tokenizer.encode(ctx_text)[: self.config.max_context_tokens],
+                add_special_tokens=False,
+                max_length=999_999_999, 
+                truncation=True
+            )
+
+        if self.config.system_prompt_template is not None:
+            system_prompt = self.config.system_prompt_template.format(
+                content=ctx_text,
+            )
+            self.system_prompt = await self.post_process_system_prompt(system_prompt)
+        else:
+            self.system_prompt = None
+    
+    async def post_process_system_prompt(self, system_prompt):
         # decide if we need to chunk the context
         context_tokens = self.tokenizer.encode(self.context.text)
         if len(context_tokens) > MAX_CONTEXT_LENGTH:
@@ -412,7 +425,7 @@ class ICLBaselineSummaryFromLargeModel(ICLBaseline):
             )
 
         # ping client to get summary
-        response: ClientResponse = self.summary_client.chat(
+        response: ClientResponse = await self.summary_client.chat(
             chats=chats,
             max_completion_tokens=self.config.summary_tokens,
             temperature=self.config.temperature,
@@ -422,7 +435,14 @@ class ICLBaselineSummaryFromLargeModel(ICLBaseline):
         print("summary: ", summary)
         return self.config.system_prompt_template.format(
             content=summary,
-        )    
+        )
+        
+    async def generate(
+        self, elements: List[CartridgeGenerateDatasetElement]
+    ) -> List[GenerateBaselineResponse]:
+        # Ensure async initialization is complete
+        await self.async_init()
+        return await super().generate(elements)
 
 
 
@@ -554,7 +574,7 @@ class CartridgeBaseline(BaselineGenerator):
     def post_process_system_prompt(self, system_prompt: str) -> str:
         return system_prompt
 
-    def generate(
+    async def generate(
         self, elements: List[CapsuleGenerateDatasetElement]
     ) -> List[GenerateBaselineResponse]:
         
@@ -579,7 +599,7 @@ class CartridgeBaseline(BaselineGenerator):
             chats.append(messages)
 
         # Use cartridge_chat instead of regular chat
-        response: ClientResponse = self.client.cartridge_chat(
+        response: ClientResponse = await self.client.cartridge_chat(
             chats=chats,
             cartridges=self.config.cartridges,
             max_completion_tokens=self.config.max_completion_tokens,
