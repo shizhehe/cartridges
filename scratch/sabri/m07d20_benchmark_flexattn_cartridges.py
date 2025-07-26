@@ -24,7 +24,7 @@ torch._dynamo.config.cache_size_limit = 1000
 # flex_attention = torch.compile(flex_attention, dynamic=False)
 
 # For better performance, you can use:
-flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
+flex_attention = torch.compile(flex_attention, dynamic=True, mode="max-autotune-no-cudagraphs")
 
 data_type = torch.float16
 
@@ -50,9 +50,9 @@ def print_header(text):
 
 
 def test_mask(
-    num_heads: int = 16,
-    head_dim: int = 64,
-    seq_lens: List[int] = [128, 512, 768, 2048, 1024, 512],
+    num_heads: int = 24,
+    head_dim: int = 128,
+    seq_lens: List[int] = [32, 512, 768, 2048, 1024, 512],
     prefix_len: int = 1024,
     skip_correctness: bool = False,
     print_mask: bool = True,
@@ -243,8 +243,8 @@ if __name__ == "__main__":
 
     test_mask(
         skip_correctness=False, 
-        seq_lens=[128, 512, 768, 1024, 512],
-        prefix_len=8192
+        seq_lens=[1000, 606],
+        prefix_len=8
     )
 
     

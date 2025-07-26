@@ -40,8 +40,8 @@ logger = logging.get_logger(__name__)
 # flex_attention = torch.compile(flex_attention, dynamic=True)
 # SE (07/22): The `mode="max-autotune-no-cudagraphs"` gives a ~2x speedup on 
 # backward running on a single A100.
-# flex_attention_train = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
-# flex_attention_dynamic = torch.compile(flex_attention, dynamic=True)
+flex_attention = torch.compile(flex_attention, dynamic=True) #, mode="max-autotune-no-cudagraphs")
+
 
 @dataclass
 class Qwen3Batch:
@@ -93,26 +93,13 @@ def flex_attention_forward(
         )
 
     block_mask = None
-    score_mask = None
-    if isinstance(attention_mask, BlockMask):
-        block_mask = attention_mask
-    else:
-        score_mask = attention_mask
-
-    if score_mask is not None:
-        score_mask = score_mask[:, :, :, : key.shape[-2]]
-
-    def score_mod(score, batch_idx, head_idx, q_idx, kv_idx):
-        if softcap is not None:
-            score = softcap * torch.tanh(score / softcap)
-        if score_mask is not None:
-            score = score + score_mask[batch_idx][0][q_idx][kv_idx]
-        return score
+    block_mask = attention_mask
 
     enable_gqa = True
     num_local_query_heads = query.shape[1]
 
     # When running TP this helps:
+    # SE (07/25): This is a hack to avoid the GQA kernel.
     if not ((num_local_query_heads & (num_local_query_heads - 1)) == 0):
         key = repeat_kv(key, query.shape[1] // key.shape[1])
         value = repeat_kv(value, query.shape[1] // value.shape[1])
@@ -128,13 +115,11 @@ def flex_attention_forward(
     #     "BLOCK_N2": 32,
     #     **kernel_options,
     # }
-    # attn = flex_attention_train if module.training else flex_attention_dynamic
-    attn = flex_attention_dynamic
-    attn_output = attn(
+    print(query.dtype)
+    attn_output = flex_attention(
         query,
         key,
         value,
-        score_mod=score_mod,
         block_mask=block_mask,
         enable_gqa=enable_gqa,
         scale=scaling,
@@ -462,7 +447,8 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
             past_key_values = DynamicCache()
 
         cache_len = past_key_values.num_tokens() if past_key_values is not None else 0
-        position_ids = position_ids + cache_len
+        cartridge_len = past_key_values.num_cartridge_tokens() if past_key_values is not None else 0
+        position_ids = position_ids + cartridge_len
         
         # Build the block mask
         # --- begin build block mask ---
@@ -472,13 +458,13 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
     
         def mask_func(_, _h, q_idx, kv_idx):
             return (kv_seq_ids[kv_idx] == -1) | ((seq_ids[q_idx] == kv_seq_ids[kv_idx]) & (q_idx + cache_len >= kv_idx))
+
         block_mask = create_block_mask(
             mask_func, B=1, H=1, Q_LEN=len(seq_ids), KV_LEN=len(seq_ids) + cache_len, 
             device=inputs_embeds.device,
             # _compile=True
         )
         # --- end build block mask ---
-
 
 
         hidden_states = inputs_embeds

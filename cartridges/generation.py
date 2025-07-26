@@ -126,9 +126,9 @@ if __name__ == "__main__":
 
 
     model_name = "meta-llama/Llama-3.2-3B-Instruct"
-    model = FlexLlamaForCausalLM.from_pretrained(model_name).to("cuda")
+    model = FlexLlamaForCausalLM.from_pretrained(model_name).to("cuda").to(torch.bfloat16)
     # model_name = "Qwen/Qwen3-4B"
-    # model = FlexQwen3ForCausalLM.from_pretrained(model_name).to("cuda")
+    # model = FlexQwen3ForCausalLM.from_pretrained(model_name).to("cuda").to(torch.bfloat16)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     convos = [
@@ -138,9 +138,9 @@ if __name__ == "__main__":
         [
             {"role": "user", "content": "Who are you?"},
         ],
-        [
-            {"role": "user", "content": "Why is the sky blue?"},
-        ],
+        # [
+        #     {"role": "user", "content": "Why is the sky blue?"},
+        # ],
     ]
 
     input_ids, seq_ids, position_ids = [], [], []

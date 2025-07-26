@@ -45,12 +45,16 @@ from .configuration_llama import LlamaConfig
 
 logger = logging.get_logger(__name__)
 
+
+
 # SE (07/21): `dynamic=False` is necessary to avoid a "PassManager::run failed" error
 # when interacting with torch.amp.autocast.
 # flex_attention = torch.compile(flex_attention, dynamic=False)
 # SE (07/22): The `mode="max-autotune-no-cudagraphs"` gives a ~2x speedup on 
 # backward running on a single A100.
-flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
+# SE (07/25): When I set `dynamic=True` with "max-autotune-no-cudagraphs" for 
+# generation, I get " AttributeError: 'Symbol' object has no attribute 'get_device' "
+flex_attention = torch.compile(flex_attention, dynamic=True)
 
 @dataclass
 class LlamaBatch:
@@ -194,7 +198,6 @@ def flex_attention_forward(
     value: torch.Tensor,
     attention_mask: Union[torch.Tensor, "BlockMask"],
     scaling: Optional[float] = None,
-    softcap: Optional[float] = None,
     **kwargs,
 ) -> tuple[torch.Tensor, torch.Tensor]:
 
@@ -205,26 +208,16 @@ def flex_attention_forward(
         )
 
     block_mask = None
-    score_mask = None
     if isinstance(attention_mask, BlockMask):
         block_mask = attention_mask
-    else:
-        score_mask = attention_mask
-
-    if score_mask is not None:
-        score_mask = score_mask[:, :, :, : key.shape[-2]]
-
-    def score_mod(score, batch_idx, head_idx, q_idx, kv_idx):
-        if softcap is not None:
-            score = softcap * torch.tanh(score / softcap)
-        if score_mask is not None:
-            score = score + score_mask[batch_idx][0][q_idx][kv_idx]
-        return score
 
     enable_gqa = True
     num_local_query_heads = query.shape[1]
 
-    # When running TP this helps:
+    # SE (07/25): For grouped-query attention, to work, the `Number of shared query 
+    # heads sharing the same KV head must be power of 2`
+    # So, if the number of query heads is not a power of 2, we need to repeat the key 
+    # and value and turn off GQA. :( 
     if not ((num_local_query_heads & (num_local_query_heads - 1)) == 0):
         key = repeat_kv(key, query.shape[1] // key.shape[1])
         value = repeat_kv(value, query.shape[1] // value.shape[1])
@@ -235,7 +228,6 @@ def flex_attention_forward(
         query,
         key,
         value,
-        score_mod=score_mod,
         block_mask=block_mask,
         enable_gqa=enable_gqa,
         scale=scaling,
@@ -453,6 +445,7 @@ class FlexLlamaModel(FlexLlamaPreTrainedModel):
     
         def mask_func(_, _h, q_idx, kv_idx):
             return (kv_seq_ids[kv_idx] == -1) | ((seq_ids[q_idx] == kv_seq_ids[kv_idx]) & (q_idx + cache_len >= kv_idx))
+
         block_mask = create_block_mask(
             mask_func, B=1, H=1, Q_LEN=len(seq_ids), KV_LEN=len(seq_ids) + cache_len, 
             device=inputs_embeds.device,
