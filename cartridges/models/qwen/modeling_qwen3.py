@@ -347,9 +347,7 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
         # --- begin build block mask ---
         block_mask = create_block_mask_w_cache(
             cache=past_key_values,
-            input_ids=input_ids,
             seq_ids=seq_ids,
-            position_ids=position_ids,
             device=inputs_embeds.device,
         )
         # --- end build block mask ---

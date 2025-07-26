@@ -31,13 +31,10 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
 
 def create_block_mask_w_cache(
     cache: Optional[TrainableCache],
-    input_ids: torch.LongTensor, # [sum(seq_lens)]
     seq_ids: torch.LongTensor, # [sum(seq_lens)]
-    position_ids: torch.LongTensor, # [sum(seq_lens)]
     device: torch.device,
 ):
     cache_len = cache.num_tokens() if cache is not None else 0
-    cartridge_len = cache.num_cartridge_tokens() if cache is not None else 0
 
     # Build the block mask
     # --- begin build block mask ---
@@ -53,6 +50,7 @@ def create_block_mask_w_cache(
         device=device,
         # _compile=True
     )
+    return block_mask
     # --- end build block mask ---
 
 

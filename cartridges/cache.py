@@ -63,6 +63,7 @@ class TrainableCache(nn.Module):
             self.frozen_keys, self.frozen_values = None, None
             self.trainable_keys, self.trainable_values = None, None
             self._seq_ids = None
+            self._init_seq_ids = None
         else:
             self._num_init_tokens = init_keys[0].shape[2]
             self._num_frozen_tokens = num_frozen_tokens

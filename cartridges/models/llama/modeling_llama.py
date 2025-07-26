@@ -455,7 +455,6 @@ class FlexLlamaModel(FlexLlamaPreTrainedModel):
         # create position embeddings to be shared across the decoder layers
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
 
-
         batch = LlamaBatch(
             hidden_states=hidden_states,
             input_ids=input_ids,
