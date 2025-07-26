@@ -78,6 +78,7 @@ class TrainableCache(nn.Module):
                 fill_value=CARTRIDGE_SEQ_ID, 
                 dtype=torch.long,
             )
+            self.register_buffer("_init_seq_ids", _seq_ids)
             self.register_buffer("_seq_ids", _seq_ids)  # .to moves the tensor to the correct device
 
             for vec in itertools.chain(init_keys, init_values):
@@ -187,7 +188,7 @@ class TrainableCache(nn.Module):
         self._keys = [None] * self.config.n_layers
         self._values = [None] * self.config.n_layers
         self._num_tokens = 0
-        self._seq_ids = None
+        self._seq_ids = self._init_seq_ids
 
     def save(self, path: str):
         """Saves the trainable keys and values to the specified path."""

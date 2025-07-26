@@ -67,6 +67,7 @@ class KVFromRandomText(KVCacheFactory):
                 position_ids=position_ids,
                 use_cache=True,
                 past_key_values=init_cache,
+                mode="generate",
             )
 
             return TrainableCache(

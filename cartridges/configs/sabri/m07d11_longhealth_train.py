@@ -37,7 +37,7 @@ config = TrainConfig(
         pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
         model_cls=FlexLlamaForCausalLM,
     ),
-    kv_cache_initializer=KVFromRandomVectors.Config(
+    kv_cache_initializer=KVFromRandomText.Config(
         max_tokens=2048
     ),
     
@@ -52,7 +52,7 @@ config = TrainConfig(
             for source in data_sources
         ],
         top_k_logits=20,
-        packed_seq_length=1024,
+        packed_seq_length=4096,
         packing_mode="truncate",
     ),
 

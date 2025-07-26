@@ -57,7 +57,7 @@ flex_attention_train = torch.compile(flex_attention, dynamic=False, mode="max-au
 
 # SE (07/25): When I set `dynamic=True` with "max-autotune-no-cudagraphs" for 
 # generation, I get " AttributeError: 'Symbol' object has no attribute 'get_device' "
-# flex_attention_generate = torch.compile(flex_attention, dynamic=True) 
+flex_attention_generate = torch.compile(flex_attention, dynamic=True) 
 
 @dataclass
 class LlamaBatch:
