@@ -913,7 +913,7 @@ def evaluate_generations(
 
     if is_ddp:
         dist.barrier()
-
+    
     return results
 
 

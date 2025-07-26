@@ -117,6 +117,13 @@ def flex_generate(
         current_input_ids = torch.tensor(next_tokens, device=device, dtype=torch.long)
         current_seq_ids = torch.tensor(next_seq_ids, device=device, dtype=torch.long)
         current_position_ids = torch.tensor(next_position_ids, device=device, dtype=torch.long)
+        
+    # SE (07/26): Very important to clear the cache after generation, otherwise, during
+    # training, the keys and values from the last generation will be included
+    # This issue is silent when training on a single GPU, but becomes apparent when
+    # training on multiple GPUs. We get a crash on flex attention I guess because the 
+    # cache sizes differ between GPUs.
+    cache.clear()
     
     return generated_tokens
     

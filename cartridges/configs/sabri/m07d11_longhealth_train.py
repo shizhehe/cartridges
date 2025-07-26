@@ -59,14 +59,14 @@ config = TrainConfig(
     save_every_n_steps=512,
     generate_every_n_steps=512,
     generate_evals=[
-        # GenerationEvalConfig(
-        #     dataset=LongHealthMultipleChoiceGenerateDataset.Config(
-        #         patient_ids=patient_ids,
-        #     ),
-        #     name_for_wandb=f"longhealth_{patients_str}",
-        #     generate_max_new_tokens=64,
-        #     batch_size=32,
-        # )
+        GenerationEvalConfig(
+            dataset=LongHealthMultipleChoiceGenerateDataset.Config(
+                patient_ids=patient_ids,
+            ),
+            name_for_wandb=f"longhealth_{patients_str}",
+            generate_max_new_tokens=64,
+            batch_size=32,
+        )
     ],
     eval_every_n_steps=256,
     eval_datasets=[],
