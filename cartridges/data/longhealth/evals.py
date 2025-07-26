@@ -85,7 +85,6 @@ class LongHealthMultipleChoiceGenerateDataset(CartridgeGenerateDataset):
         # convo: ContextConvo = ContextConvo.model_validate(self.data[index])
         question: LongHealthQuestion = self.questions[index]
 
-
         kwargs = {}
         if self.tokenizer.name_or_path in MODELS_WITH_THINKING:
             kwargs["enable_thinking"] = self.config.cot
@@ -97,7 +96,6 @@ class LongHealthMultipleChoiceGenerateDataset(CartridgeGenerateDataset):
             chat_template=MODEL_TO_CHAT_TEMPLATE.get(self.tokenizer.name_or_path, None),
             **kwargs,
         )
-
 
         return CartridgeGenerateDatasetElement(
             input_ids=input_ids,
