@@ -22,7 +22,7 @@ from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 
 from cartridges.initialization.random import KVFromRandomText
-from cartridges.train import EvalDatasetConfig, GenerateDatasetConfig, TrainConfig
+from cartridges.train import PerplexityEvalConfig, GenerationEvalConfig, TrainConfig
 from cartridges.models.config import HFModelConfig
 from cartridges.datasets import CartridgeTrainDataset
 from cartridges.utils import WandBConfig

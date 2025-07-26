@@ -5,16 +5,21 @@ import socket
 import pydrantic
 from pydrantic.variables import FormatStringVariable
 
-from cartridges.initialization.random import KVFromRandomText, KVFromRandomVectors
-from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
+from cartridges.initialization.random import KVFromRandomText
 from cartridges.models.llama.modeling_llama import FlexLlamaForCausalLM
-from cartridges.train import EvalDatasetConfig, GenerateDatasetConfig, TrainConfig
+from cartridges.train import GenerationEvalConfig, TrainConfig
 from cartridges.models.config import HFModelConfig
 from cartridges.datasets import CartridgeTrainDataset
 from cartridges.utils import WandBConfig
+from cartridges.data.longhealth.evals import LongHealthMultipleChoiceGenerateDataset
 
 file_name = Path(__file__).stem
 bs = 4
+
+NUM_PATIENTS = 10
+patient_idxs = list(range(1, NUM_PATIENTS + 1))
+patients_str = f"p{NUM_PATIENTS}"
+patient_ids = [f"patient_{idx:02d}" for idx in patient_idxs]
 
 data_sources = [
     # "/home/sabri/cartridges/outputs/2025-07-13-09-04-32-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_p10_n65536-0/artifact/dataset.pkl"
@@ -51,8 +56,16 @@ config = TrainConfig(
 
     save_every_n_steps=512,
     generate_every_n_steps=512,
-    generate_max_new_tokens=512,
-    generate_datasets=[],
+    generate_evals=[
+        # GenerationEvalConfig(
+        #     dataset=LongHealthMultipleChoiceGenerateDataset.Config(
+        #         patient_ids=patient_ids,
+        #     ),
+        #     name_for_wandb=f"longhealth_{patients_str}",
+        #     generate_max_new_tokens=64,
+        #     batch_size=32,
+        # )
+    ],
     eval_every_n_steps=256,
     eval_datasets=[],
     distributed_backend="gloo",

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from abc import abstractmethod
 from collections import deque
 import pickle
 from pathlib import Path
@@ -395,7 +396,6 @@ class CartridgeTrainDataset(Dataset):
         )
 
 
-
 @dataclass
 class CartridgeGenerateDatasetElement:
     input_ids: torch.Tensor
@@ -409,41 +409,16 @@ class CartridgeGenerateDatasetElement:
     # are structured as prior messages
     prompt_messages: Optional[List[Dict[str,str]]] = None
 
-class CartridgeGenerateDataset(CartridgeTrainDataset):
+class CartridgeGenerateDataset(Dataset):
     class Config(ObjectConfig):
         _pass_as_config = True
-        data_sources: list[tuple[str, int | None],]  # path, limit
-        is_wandb: bool = False
-        label_type: Literal["tokens"] | Literal["logits"]
-        top_k_logits: int = 20
-        dataset_weights: Optional[list[float]] = None
-        user_prompt_prefix: list[str] | None = None
-        # system_prompt: str | None = None
+    
+    def __init__(self, config: Config, tokenizer: PreTrainedTokenizerFast, seed: int):
+        self.config = config
+        self.tokenizer = tokenizer
+        self.seed = seed
 
+    @abstractmethod
     def __getitem__(self, index: int) -> CartridgeGenerateDatasetElement:
-        convo: ContextConvo = self.data[index]
-
-        prompt = convo.messages[0].content
-
-        input_ids = self.tokenizer.apply_chat_template(
-            (
-                # [{"role": "system", "content": self.config.system_prompt}]
-                # if self.config.system_prompt is not None
-                # else []
-                []
-            )
-            + [{"role": "user", "content": prompt}],
-            add_generation_prompt=True,
-            return_tensors="pt",
-            chat_template=TEMPLATE,
-        )
-
-        return CartridgeGenerateDatasetElement(
-            input_ids=input_ids,
-            prompt=prompt,
-            answer=convo.messages[1].content,
-            convo_id=convo.id,
-            metadata={
-                "idx": index,
-            },
-        )
+        raise NotImplementedError
+        

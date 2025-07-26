@@ -9,10 +9,10 @@ from cartridges.cache import AttnConfig, TrainableCache
 
 def flex_generate(
     model,
+    tokenizer: AutoTokenizer,
     input_ids: torch.Tensor,
     seq_ids: torch.Tensor,
     position_ids: torch.Tensor,
-    tokenizer: AutoTokenizer,
     cache: Optional[TrainableCache] = None,
     stop_token_ids: Optional[List[int]] = None,
     max_new_tokens: int = 32,
@@ -35,11 +35,11 @@ def flex_generate(
     
     This implementation relies on the PackedCache above.
     """
+    device = input_ids.device
     model.eval()
     if stop_token_ids is None:
         stop_token_ids = [tokenizer.eos_token_id] if tokenizer.eos_token_id is not None else []
     
-    device = input_ids.device
     if cache is None:
         cache = TrainableCache(
             config=AttnConfig(

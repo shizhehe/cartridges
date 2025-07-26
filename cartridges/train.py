@@ -41,7 +41,7 @@ from cartridges.utils.wandb import download_artifacts, figure_to_wandb
 logger = get_logger(__name__)
 
 
-class EvalDatasetConfig(BaseConfig):
+class PerplexityEvalConfig(BaseConfig):
 
     seq_length: Optional[int] = 2048
     dataset: ObjectConfig
@@ -50,31 +50,11 @@ class EvalDatasetConfig(BaseConfig):
     dataloader_num_workers: int = 0
 
 
-@dataclass
-class EvalDataset:
-    dataset: CartridgeTrainDataset
-    batch_size: int
-    name: str
-    only_eval_rank_0: bool = False
-    dataloader_num_workers: int = 0
-
-
-class GenerateDatasetConfig(BaseConfig):
+class GenerationEvalConfig(BaseConfig):
     dataset: ObjectConfig
 
     name_for_wandb: str
-    dataloader_num_workers: int = 0
-    num_samples: int = 1
-    num_samples_final: Optional[int] = None
-    temperature: float = 0.0
-    batch_size: int = 1
-    override_max_tokens: int | None = None
-
-
-@dataclass
-class GenerateDataset:
-    dataset: CartridgeGenerateDataset
-    name: str
+    generate_max_new_tokens: int = 128
     dataloader_num_workers: int = 0
     num_samples: int = 1
     num_samples_final: Optional[int] = None
@@ -94,7 +74,7 @@ class TrainConfig(RunConfig):
     # with the `optimizer_step` variable. This is different than the number of batches
     # processed, which is given by `iter_idx`.
     eval_every_n_steps: Optional[int] = None
-    eval_datasets: list[EvalDatasetConfig] = field(default_factory=list)
+    eval_datasets: list[PerplexityEvalConfig] = field(default_factory=list)
     eval_log_table: bool = True
     eval_max_samples: Optional[int] = None
 
@@ -103,8 +83,7 @@ class TrainConfig(RunConfig):
     # with the `optimizer_step` variable. This is different than the number of batches
     # processed, which is given by `iter_idx`.
     generate_every_n_steps: Optional[int] = None
-    generate_datasets: list[GenerateDatasetConfig] = field(default_factory=list)
-    generate_max_new_tokens: int = 128
+    generate_evals: list[GenerationEvalConfig] = field(default_factory=list)
 
     # the `global_batch_size` is the total batch size across all devices and gradient
     # accumulation steps. We will infer the number of gradient accumulation steps from the
@@ -155,7 +134,7 @@ def download_wandb_artifacts(config: TrainConfig):
     artifact_names = get_dataset_names(config.dataset)
 
     for eval_or_gen_ds in itertools.chain(
-        config.eval_datasets, config.generate_datasets
+        config.eval_datasets, config.generate_evals
     ):
         if isinstance(
             eval_or_gen_ds.dataset,
@@ -208,16 +187,16 @@ def train(config: TrainConfig):
         f"Fininshed loading training dataset from disk, took {(time.time() - t0):.3}s"
     )
 
-    eval_datasets: list[tuple[EvalDatasetConfig, CartridgeTrainDataset]] = [    
+    eval_datasets: list[tuple[PerplexityEvalConfig, CartridgeTrainDataset]] = [    
         (ds_config, ds_config.dataset.instantiate(tokenizer=tokenizer, seed=config.seed))
         for ds_config in config.eval_datasets
     ]
-    generate_datasets: list[tuple[GenerateDatasetConfig, CartridgeGenerateDataset]] = [
-        (ds_config, ds_config.dataset.instantiate(tokenizer=tokenizer, seed=config.seed))
-        for ds_config in config.generate_datasets
+    generate_evals: list[tuple[GenerationEvalConfig, CartridgeGenerateDataset]] = [
+        (eval_config, eval_config.dataset.instantiate(tokenizer=tokenizer, seed=config.seed))
+        for eval_config in config.generate_evals
     ]
     logger.info(
-        f"Finished to loading eval and generate datasets from disk, took {(time.time() - t0):.2}s"
+        f"Finished loading eval and generate datasets from disk, took {(time.time() - t0):.2}s"
     )
 
     model = config.model.instantiate().to(local_rank).to(torch.bfloat16)
@@ -359,15 +338,9 @@ def train(config: TrainConfig):
             )
 
     def do_evaluate_generations(step: int = None, final: bool = False):
-        for ds_config, generate_dataset in generate_datasets:
-            eval_fn = (
-                evaluate_generations
-                if generate_dataset.batch_size == 1
-                else evaluate_generations_batch
-            )
-            eval_fn = evaluate_generations_batch
-            eval_fn(
-                config=config,
+        for eval_config, generate_dataset in generate_evals:
+            evaluate_generations(
+                config=eval_config,
                 model=wrapped_model,
                 tokenizer=tokenizer,
                 dataset=generate_dataset,
@@ -375,6 +348,7 @@ def train(config: TrainConfig):
                 local_rank=local_rank,
                 step=step,
                 final=final,
+                log_to_wandb=config.wandb is not None,
             )
 
     if config.lr_scheduler is not None:
@@ -424,7 +398,6 @@ def train(config: TrainConfig):
             with ddp_ctx_manager:
                 with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
                     
-
                     outputs = wrapped_model(
                         input_ids=batch.input_ids.to(local_rank),
                         seq_ids=batch.element_ids.to(local_rank),
@@ -565,7 +538,7 @@ def evaluate(
     model,  # Can be either CacheAndModel or a PEFT model
     cache: Optional[TrainableCache],
     eval_dataset: CartridgeTrainDataset,
-    ds_config: EvalDatasetConfig,
+    ds_config: PerplexityEvalConfig,
     optimizer_step: int,
     epoch: int,
     local_rank: int,
@@ -760,223 +733,92 @@ def evaluate(
         dist.barrier()
 
 
+
 def evaluate_generations(
-    config: TrainConfig,
-    model,  # Can be either CacheAndModel or a PEFT model
+    config: GenerationEvalConfig,
+    
+    model: CacheAndModel,
     tokenizer: AutoTokenizer,
-    dataset: GenerateDataset,
+    dataset: CartridgeGenerateDataset,
     optimizer_step: int,
     local_rank,
     step: int = None,
     final: bool = False,
+    log_to_wandb: bool = True,
 ):
-    from cartridges.generation import generate, generate_samples
+    from cartridges.generation import flex_generate
 
     is_ddp = "LOCAL_RANK" in os.environ
     is_rank_zero = (not is_ddp) or (dist.get_rank() == 0)
     world_size = dist.get_world_size() if is_ddp else 1
 
-    logger.info(
-        f"Generating `{dataset.name}` (n={len(dataset.dataset)}, {len(dataset.dataset) // world_size} per device)"
-    )
-
-    has_score = hasattr(dataset.dataset, "score")
-    has_batch_score = hasattr(dataset.dataset, "batch_score")
-    prefix = f"generate_{dataset.name}"
-    # if step is not None:
-    #     prefix += f"_step{step}"
-    if dataset.num_samples_final is not None and final:
-        num_samples = dataset.num_samples_final
+    
+    if is_ddp:
+        cache = model.module.cache
+        model = model.module.model
     else:
-        num_samples = dataset.num_samples
-
-    indexes = list(range(len(dataset.dataset)))
-    if is_ddp:
-        indexes = indexes[local_rank::world_size]
-
-    results = []
-    for index in tqdm(
-        indexes,
-        desc=f"Generating [step={optimizer_step}] ({dataset.name})",
-        leave=False,
-        disable=not is_rank_zero,
-    ):
-        if index not in indexes:
-            continue
-
-        element: CartridgeGenerateDatasetElement = dataset.dataset[index]
-
-        kwargs = dict(
-            input_ids=element.input_ids.to(local_rank),
-            cache_and_model=model,
-            tokenizer=tokenizer,
-            max_new_tokens=(
-                config.generate_max_new_tokens
-                if dataset.override_max_tokens is None
-                else dataset.override_max_tokens
-            ),
-        )
-
-        if num_samples > 1 or dataset.temperature > 0.0:
-
-            preds = generate_samples(
-                **kwargs, num_samples=num_samples, temperature=dataset.temperature
-            )
-        else:
-            pred = generate(**kwargs)
-            preds = [pred]
-
-        for sample_idx, pred in enumerate(preds):
-            if has_score:
-                metrics, extras = dataset.dataset.score(
-                    pred=pred, answer=element.answer, convo_id=element.convo_id
-                )
-            else:
-                metrics, extras = None, {}
-
-            if not isinstance(metrics, dict):
-                # Support for older datasets that return a single bool or float as metrics
-                metrics = {"score": metrics}
-            else:
-                metrics = {f"{k}_score": v for k, v in metrics.items()}
-
-            results.append(
-                {
-                    "index": index,
-                    "optimizer_step": optimizer_step,
-                    "prompt": element.prompt,
-                    "answer": element.answer,
-                    "pred": pred,
-                    "convo_id": element.convo_id,
-                    "sample_idx": sample_idx,
-                    "num_system_and_user_tokens": element.input_ids.shape[1],
-                    "num_assistant_tokens": len(tokenizer.encode(pred)),
-                    **metrics,
-                    **element.metadata,
-                    **extras,
-                }
-            )
-
-    batch_score = None
-    if has_batch_score:
-        answers = [(result["index"], result["pred"], result["answer"]) for result in results]
-
-        if is_ddp:
-            gathered_answers = [None for _ in range(dist.get_world_size())]
-            dist.all_gather_object(gathered_answers, answers)
-            # flatten the list of lists
-            answers = [item for sublist in gathered_answers for item in sublist]
-
-        if is_rank_zero:
-            pred = [i[1] for i in answers]
-            gt = [i[2] for i in answers]
-            batch_score = dataset.dataset.batch_score_with_answers(pred, gt)
-
-    if is_ddp:
-        dist.barrier()
-        gathered_results = [None for _ in range(dist.get_world_size())]
-        dist.all_gather_object(gathered_results, results)
-        # flatten the list of lists
-        results = [item for sublist in gathered_results for item in sublist]
-
-    if is_rank_zero:
-        df = pd.DataFrame(results)
-
-        if not df.duplicated(subset=["convo_id", "sample_idx"]).any():
-            logger.warning(
-                "There are duplicate convo_ids in the generation results, dropping duplicates rows."
-            )
-            df = df.drop_duplicates(subset=["convo_id", "sample_idx"])
-
-        score_cols = [col for col in df.columns if col.endswith("score")]
-        avg_scores = {f"{prefix}/{col}": df[col].mean() for col in score_cols}
-
-        if config.wandb is not None:
-            log_dict = {
-                **avg_scores,
-                f"{prefix}/table": df,
-                f"{prefix}/num_system_and_user_tokens": df[
-                    "num_system_and_user_tokens"
-                ].mean(),
-                f"{prefix}/num_assistant_tokens": df["num_assistant_tokens"].mean(),
-            }
-
-            if batch_score is not None:
-                log_dict[f"{prefix}/batch_score"] = batch_score
-
-            wandb.log(
-                log_dict,
-                step=optimizer_step,
-            )
-
-    if is_ddp:
-        dist.barrier()
-
-    return results
-
-
-def evaluate_generations_batch(
-    config: TrainConfig,
-    model,  # Can be either CacheAndModel or a PEFT model
-    tokenizer: AutoTokenizer,
-    dataset: GenerateDataset,
-    optimizer_step: int,
-    local_rank,
-    step: int = None,
-    final: bool = False,
-):
-    from cartridges.generation import generate_batch
-
-    is_ddp = "LOCAL_RANK" in os.environ
-    is_rank_zero = (not is_ddp) or (dist.get_rank() == 0)
-    world_size = dist.get_world_size() if is_ddp else 1
+        cache = model.cache
+        model = model.model
 
     logger.info(
-        f"Generating `{dataset.name}` (n={len(dataset.dataset)}, {len(dataset.dataset) // world_size} per device)"
+        f"Generating `{config.name_for_wandb}` (n={len(dataset)}, {len(dataset) // world_size} per device)"
     )
 
-    has_score = hasattr(dataset.dataset, "score")
-    has_batch_score = hasattr(dataset.dataset, "batch_score")
-    prefix = f"generate_{dataset.name}"
+    has_score = hasattr(dataset, "score")
+    has_batch_score = hasattr(dataset, "batch_score")
+    prefix = f"generate_{config.name_for_wandb}"
 
-    if dataset.num_samples_final is not None and final:
-        num_samples = dataset.num_samples_final
+    if config.num_samples_final is not None and final:
+        num_samples = config.num_samples_final
     else:
-        num_samples = dataset.num_samples
+        num_samples = config.num_samples
 
-    batch_size = dataset.batch_size
-    indexes = list(range(len(dataset.dataset)))
+    batch_size = config.batch_size
+    indexes = list(range(len(dataset)))
     if is_ddp:
         indexes = indexes[local_rank::world_size]
 
     results = []
     for batch_start in tqdm(
         range(0, len(indexes), batch_size),
-        desc=f"Generating [step={optimizer_step}] ({dataset.name})",
+        desc=f"Generating [step={optimizer_step}] ({config.name_for_wandb})",
         leave=False,
         disable=not is_rank_zero,
     ):
 
         elements = [
-            (i, dataset.dataset[indexes[i]])
+            (i, dataset[indexes[i]])
             for i in range(batch_start, batch_start + batch_size)
             if i < len(indexes)
         ]
         if len(elements) == 0:
             continue
-
-        preds = generate_batch(
-            input_ids=[element.input_ids[0].to(local_rank) for _, element in elements],
-            cache_and_model=model,
+        input_ids = torch.cat([elem.input_ids[0] for _, elem in elements]).to(local_rank)
+        seq_ids = torch.cat(
+            [
+                torch.full((elem.input_ids.shape[1],), idx, dtype=torch.long, device=local_rank)
+                for idx, elem in elements
+            ]
+        )
+        position_ids = torch.cat(
+            [torch.arange(elem.input_ids.shape[1], device=local_rank) for _, elem in elements]
+        )
+        pred_ids = flex_generate(
+            input_ids=input_ids,
+            seq_ids=seq_ids,
+            position_ids=position_ids,
+            cache=cache,
+            model=model,
             tokenizer=tokenizer,
             max_new_tokens=(
                 config.generate_max_new_tokens
-                if dataset.override_max_tokens is None
-                else dataset.override_max_tokens
+                if config.override_max_tokens is None
+                else config.override_max_tokens
             ),
-            num_samples=num_samples,
-            temperature=dataset.temperature,
+            # num_samples=num_samples,
+            temperature=config.temperature,
         )
+        pred = tokenizer.batch_decode(pred_ids, skip_special_tokens=True)
 
         elements = [
             (index, sample_idx, elem)
@@ -984,9 +826,10 @@ def evaluate_generations_batch(
             for sample_idx in range(num_samples)
         ]
 
-        for pred, (index, sample_idx, element) in zip(preds, elements):
+        for pred_ids, pred, (index, sample_idx, element) in zip(pred_ids, pred, elements):
+            
             if has_score:
-                metrics, extras = dataset.dataset.score(
+                metrics, extras = dataset.score(
                     pred=pred, answer=element.answer, convo_id=element.convo_id
                 )
             else:
@@ -997,7 +840,7 @@ def evaluate_generations_batch(
                 metrics = {"score": metrics}
             else:
                 metrics = {f"{k}_score": v for k, v in metrics.items()}
-
+            
             results.append(
                 {
                     "index": index,
@@ -1008,7 +851,7 @@ def evaluate_generations_batch(
                     "convo_id": element.convo_id,
                     "sample_idx": sample_idx,
                     "num_system_and_user_tokens": element.input_ids.shape[1],
-                    "num_assistant_tokens": len(tokenizer.encode(pred)),
+                    "num_assistant_tokens": len(pred_ids),
                     **metrics,
                     **element.metadata,
                     **extras,
@@ -1028,7 +871,7 @@ def evaluate_generations_batch(
         if is_rank_zero:
             pred = [i[1] for i in answers]
             gt = [i[2] for i in answers]
-            batch_score = dataset.dataset.batch_score_with_answers(pred, gt)
+            batch_score = dataset.batch_score_with_answers(pred, gt)
 
     if is_ddp:
         dist.barrier()
@@ -1049,7 +892,7 @@ def evaluate_generations_batch(
         score_cols = [col for col in df.columns if col.endswith("score")]
         avg_scores = {f"{prefix}/{col}": df[col].mean() for col in score_cols}
 
-        if config.wandb is not None:
+        if log_to_wandb:
             log_dict = {
                 **avg_scores,
                 f"{prefix}/table": df,

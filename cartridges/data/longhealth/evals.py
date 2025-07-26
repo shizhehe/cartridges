@@ -1,5 +1,13 @@
+from typing import List, Optional, Tuple, Dict
+import random
 
-class LongHealthMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
+from pydrantic import ObjectConfig
+from transformers import PreTrainedTokenizerFast
+
+from cartridges.datasets import CartridgeGenerateDataset, CartridgeGenerateDatasetElement
+from cartridges.data.longhealth.utils import LongHealthQuestion, LongHealthPatient, load_longhealth_dataset
+
+class LongHealthMultipleChoiceGenerateDataset(CartridgeGenerateDataset):
     class Config(ObjectConfig):
         _pass_as_config = True
         patient_ids: Optional[List[str]] = None
@@ -8,7 +16,7 @@ class LongHealthMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
         cot: bool = True
 
 
-    def __init__(self, config: Config, tokenizer: PreTrainedTokenizerFast):
+    def __init__(self, config: Config, tokenizer: PreTrainedTokenizerFast, seed: int):
         self.config = config
         
         self.patients = load_longhealth_dataset(config.patient_ids)
@@ -54,7 +62,7 @@ class LongHealthMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
             for patient in self.patients
             for question in patient.questions
         ]
-        random.Random(42).shuffle(self.questions)
+        random.Random(seed).shuffle(self.questions)
 
 
         if self.config.max_questions is not None:
@@ -69,7 +77,7 @@ class LongHealthMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
 
     def __getitem__(
         self, index: int
-    ) -> CapsuleGenerateDatasetElement:
+    ) -> CartridgeGenerateDatasetElement:
         # convo: ContextConvo = ContextConvo.model_validate(self.data[index])
         question: LongHealthQuestion = self.questions[index]
 
@@ -77,10 +85,10 @@ class LongHealthMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
             [{"role": "user", "content": question.question}],
             add_generation_prompt=True,
             return_tensors="pt",
-            chat_template=TEMPLATE,
+            # chat_template=TEMPLATE,
         )
 
-        return CapsuleGenerateDatasetElement(
+        return CartridgeGenerateDatasetElement(
             input_ids=input_ids,
             prompt=question.question,
             answer=question.correct,
@@ -125,76 +133,76 @@ class LongHealthMultipleChoiceGenerateDataset(CapsuleGenerateDataset):
             pred = question.answer_a
             return pred.strip().lower() == answer.strip().lower(), {"extracted_pred": None}
         
-class LongHealthEvalDataset(CapsuleDataset):
-    class Config(CapsuleDataset.Config):
-        _pass_as_config = True
-        patient_ids: Optional[List[str]] = None
+# class LongHealthEvalDataset(CapsuleDataset):
+#     class Config(CapsuleDataset.Config):
+#         _pass_as_config = True
+#         patient_ids: Optional[List[str]] = None
 
-        max_questions: Optional[int] = None
+#         max_questions: Optional[int] = None
 
 
 
-    def __init__(self, config: Config, tokenizer: PreTrainedTokenizerFast):
-        self.config = config
+#     def __init__(self, config: Config, tokenizer: PreTrainedTokenizerFast):
+#         self.config = config
         
-        self.patients = load_longhealth_dataset(config.patient_ids)
+#         self.patients = load_longhealth_dataset(config.patient_ids)
         
-        def wrap_question(question: LongHealthQuestion, patient: LongHealthPatient):
-            options = (
-                f"<option>{question.answer_a}</option>\n"
-                f"<option>{question.answer_b}</option>\n"
-                f"<option>{question.answer_c}</option>\n"
-                f"<option>{question.answer_d}</option>\n"
-                f"<option>{question.answer_e}</option>\n"
-            )
-            return (
-                "Please answer the question below about the following patient: "
-                f"ID {patient.patient_id}, Name: {patient.name}, Birthday: {patient.birthday}, Diagnosis: {patient.diagnosis}"
-                f"\n\n <question>\n{question.question}\n</question>"
-                f"\n\n <options>\n{options}\n</options>\n"
-                "Answer the question with the following format, outputting only the answer:"
-                f"\n\n<answer>\n{{answer}}\n</answer>"
-            )
+#         def wrap_question(question: LongHealthQuestion, patient: LongHealthPatient):
+#             options = (
+#                 f"<option>{question.answer_a}</option>\n"
+#                 f"<option>{question.answer_b}</option>\n"
+#                 f"<option>{question.answer_c}</option>\n"
+#                 f"<option>{question.answer_d}</option>\n"
+#                 f"<option>{question.answer_e}</option>\n"
+#             )
+#             return (
+#                 "Please answer the question below about the following patient: "
+#                 f"ID {patient.patient_id}, Name: {patient.name}, Birthday: {patient.birthday}, Diagnosis: {patient.diagnosis}"
+#                 f"\n\n <question>\n{question.question}\n</question>"
+#                 f"\n\n <options>\n{options}\n</options>\n"
+#                 "Answer the question with the following format, outputting only the answer:"
+#                 f"\n\n<answer>\n{{answer}}\n</answer>"
+#             )
          
-        self.questions = [
-            LongHealthQuestion(
-                question_id=question.question_id,
-                question=wrap_question(question, patient),
-                correct=question.correct,
-                answer_a=question.answer_a,
-                answer_b=question.answer_b,
-                answer_c=question.answer_c,
-                answer_d=question.answer_d,
-                answer_e=question.answer_e,
-                answer_location=question.answer_location,
-            )
-            for patient in self.patients
-            for question in patient.questions
-        ]
-        random.Random(42).shuffle(self.questions)
+#         self.questions = [
+#             LongHealthQuestion(
+#                 question_id=question.question_id,
+#                 question=wrap_question(question, patient),
+#                 correct=question.correct,
+#                 answer_a=question.answer_a,
+#                 answer_b=question.answer_b,
+#                 answer_c=question.answer_c,
+#                 answer_d=question.answer_d,
+#                 answer_e=question.answer_e,
+#                 answer_location=question.answer_location,
+#             )
+#             for patient in self.patients
+#             for question in patient.questions
+#         ]
+#         random.Random(42).shuffle(self.questions)
 
-        if self.config.max_questions is not None:
-            self.questions = self.questions[:self.config.max_questions]
+#         if self.config.max_questions is not None:
+#             self.questions = self.questions[:self.config.max_questions]
 
-        self.data = [
-            ContextConvo(
-                messages=[
-                    Message(
-                        role="user",
-                        content=question.question,
-                    ),
-                    Message(
-                        role="assistant",
-                        content=f"<answer>{question.correct}</answer>",
-                    )
-                ],
-                type="LongHealthEval",
-                metadata={
-                    "question_id": question.question_id,
-                }
-            )
-            for question in self.questions
-        ]
+#         self.data = [
+#             ContextConvo(
+#                 messages=[
+#                     Message(
+#                         role="user",
+#                         content=question.question,
+#                     ),
+#                     Message(
+#                         role="assistant",
+#                         content=f"<answer>{question.correct}</answer>",
+#                     )
+#                 ],
+#                 type="LongHealthEval",
+#                 metadata={
+#                     "question_id": question.question_id,
+#                 }
+#             )
+#             for question in self.questions
+#         ]
 
 
-        self.tokenizer = tokenizer
+#         self.tokenizer = tokenizer

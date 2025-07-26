@@ -32,7 +32,8 @@ class TrainableCache(nn.Module):
     - Keep track of keys and values and expose them to the model in a packed manner via 
     the update method.
     
-    TODO (Sabri): Ensure that tokens from the same sequence are contiguous.
+    TODO (Sabri): Ensure that tokens from the same sequence are contiguous. Eventually,
+    should just page the keys and values.
 
     Args:
         config: The attention configuration, which we use to construct the 

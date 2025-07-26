@@ -6,7 +6,7 @@ import pydrantic
 from pydrantic.variables import FormatStringVariable
 
 from cartridges.initialization.random import KVFromRandomText
-from cartridges.train import EvalDatasetConfig, GenerateDatasetConfig, TrainConfig
+from cartridges.train import PerplexityEvalConfig, GenerationEvalConfig, TrainConfig
 from cartridges.models.config import HFModelConfig
 from cartridges.datasets import CartridgeTrainDataset
 from cartridges.utils import WandBConfig
@@ -48,7 +48,7 @@ config = TrainConfig(
     save_every_n_steps=512,
     generate_every_n_steps=512,
     generate_max_new_tokens=512,
-    generate_datasets=[],
+    generate_evals=[],
     eval_every_n_steps=256,
     eval_datasets=[],
     distributed_backend="gloo",
