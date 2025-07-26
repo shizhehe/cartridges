@@ -434,18 +434,20 @@ def load_model_and_cache_from_wandb(
     train_config = TrainConfig.from_wandb(wandb_run_id, strict=False)
 
     model = train_config.model.instantiate().to(device)
-    tokenizer = AutoTokenizer.from_pretrained(train_config.tokenizer)
+    # tokenizer = AutoTokenizer.from_pretrained(train_config.tokenizer)
 
     if is_rank_zero:
         out = wandb.restore(
             f"cache-step{step}.pt", run_path=wandb_run_id, root=train_config.run_dir
         )
     
-    dist.barrier()
+    if is_ddp:
+        dist.barrier()
+
     cache = TrainableCache.from_pretrained(
         os.path.join(train_config.run_dir, f"cache-step{step}.pt"), 
         device=device
     )
 
-    return CacheAndModel(cache=cache, model=model), tokenizer
+    return CacheAndModel(cache=cache, model=model)
 

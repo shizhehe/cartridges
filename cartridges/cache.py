@@ -149,6 +149,9 @@ class TrainableCache(nn.Module):
             # Concatenate along sequence dimension while maintaining contiguous sequences
             keys = [self._keys[layer_idx]] + keys
             values = [self._values[layer_idx]] + values
+
+        self._keys[layer_idx] = torch.cat(keys, dim=2)
+        self._values[layer_idx] = torch.cat(values, dim=2)
         
         if self._num_trainable_tokens > 0:
             keys = [self.trainable_keys[layer_idx]] + keys
@@ -157,12 +160,11 @@ class TrainableCache(nn.Module):
         if self._num_frozen_tokens > 0:
             keys = [self.frozen_keys[layer_idx]] + keys
             values = [self.frozen_values[layer_idx]] + values
+        
+        if self._num_trainable_tokens == 0 and self._num_frozen_tokens == 0:
+            return self._keys[layer_idx], self._values[layer_idx]
 
-
-        self._keys[layer_idx] = torch.cat(keys, dim=2)
-        self._values[layer_idx] = torch.cat(values, dim=2)
-
-        return self._keys[layer_idx], self._values[layer_idx]
+        return torch.cat(keys, dim=2), torch.cat(values, dim=2)
     
     def num_tokens(self) -> int:
         """Get the sequence length of the cache."""
@@ -232,8 +234,7 @@ class TrainableCache(nn.Module):
 
         return cls(
             config=config,
-            num_tokens=num_tokens + num_frozen_tokens,
-            keys=[
+            init_keys=[
                 (
                     torch.cat([fixed, trainable], dim=2).contiguous()
                     if num_frozen_tokens > 0
@@ -243,7 +244,7 @@ class TrainableCache(nn.Module):
                     checkpoint["frozen_keys"], checkpoint["trainable_keys"]
                 )
             ],
-            values=[
+            init_values=[
                 (
                     torch.cat([fixed, trainable], dim=2).contiguous()
                     if num_frozen_tokens > 0

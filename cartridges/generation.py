@@ -13,6 +13,7 @@ def flex_generate(
     seq_ids: torch.Tensor,
     position_ids: torch.Tensor,
     tokenizer: AutoTokenizer,
+    cache: Optional[TrainableCache] = None,
     stop_token_ids: Optional[List[int]] = None,
     max_new_tokens: int = 32,
     temperature: float = 0.0,
@@ -39,14 +40,15 @@ def flex_generate(
         stop_token_ids = [tokenizer.eos_token_id] if tokenizer.eos_token_id is not None else []
     
     device = input_ids.device
-    cache = TrainableCache(
-        config=AttnConfig(
-            n_layers=model.config.num_hidden_layers,
-            n_heads=model.config.num_key_value_heads,
-            head_dim=model.config.head_dim,
-        ),
-    )
-    
+    if cache is None:
+        cache = TrainableCache(
+            config=AttnConfig(
+                n_layers=model.config.num_hidden_layers,
+                n_heads=model.config.num_key_value_heads,
+                head_dim=model.config.head_dim,
+            ),
+        )
+        
     # Initialize generated sequences
     generated_tokens = [[] for _ in range(seq_ids.max().item() + 1)]
     
@@ -124,9 +126,12 @@ if __name__ == "__main__":
     import argparse
     from transformers import AutoTokenizer
 
+    from cartridges.utils.wandb import load_model_and_cache_from_wandb
+
+
     # Define command line argument parser
     parser = argparse.ArgumentParser(description="Select model type")
-    parser.add_argument("--model", choices=["llama", "qwen"], default="llama", help="Choose between 'llama' and 'qwen' models")
+    parser.add_argument("--model", default="llama", help="Choose between 'llama' and 'qwen' models")
     args = parser.parse_args()
 
     # Import the appropriate model based on the command line argument
@@ -134,10 +139,23 @@ if __name__ == "__main__":
         from cartridges.models.llama.modeling_llama import FlexLlamaForCausalLM
         model_name = "meta-llama/Llama-3.2-3B-Instruct"
         model = FlexLlamaForCausalLM.from_pretrained(model_name).to("cuda").to(torch.bfloat16)
+        cache = None
     elif args.model == "qwen":
         from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
         model_name = "Qwen/Qwen3-4B"
         model = FlexQwen3ForCausalLM.from_pretrained(model_name).to("cuda").to(torch.bfloat16)
+        cache = None
+
+    elif args.model.startswith("hazy-research"):
+        cache_and_model = load_model_and_cache_from_wandb(
+            wandb_run_id="hazy-research/cartridges/ehij7vlt",
+            step=29,
+        )
+        model_name = cache_and_model.model.name_or_path
+        cache = cache_and_model.cache.to("cuda").to(torch.bfloat16)
+        model = cache_and_model.model.to("cuda").to(torch.bfloat16)
+    else:
+        raise ValueError(f"Model {args.model} not supported")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
@@ -146,7 +164,7 @@ if __name__ == "__main__":
             {"role": "user", "content": "What is the capital of the moon?"},
         ],
         [
-            {"role": "user", "content": "Who are you?"},
+            {"role": "user", "content": "Who is the patient?"},
         ],
         # [
         #     {"role": "user", "content": "Why is the sky blue?"},
@@ -185,6 +203,7 @@ if __name__ == "__main__":
         tokenizer=tokenizer,
         max_new_tokens=128,  # Reduce for testing
         show_progress=True,
+        cache=cache,
     )
     print("Generated tokens:", output)
     
