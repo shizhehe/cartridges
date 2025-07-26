@@ -86,7 +86,7 @@ class LongHealthMultipleChoiceGenerateDataset(CartridgeGenerateDataset):
             [{"role": "user", "content": question.question}],
             add_generation_prompt=True,
             return_tensors="pt",
-            chat_template=MODEL_TO_CHAT_TEMPLATE[self.tokenizer.name_or_path],
+            chat_template=MODEL_TO_CHAT_TEMPLATE.get(self.tokenizer.name_or_path, None),
         )
 
         return CartridgeGenerateDatasetElement(

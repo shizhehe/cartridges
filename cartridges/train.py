@@ -109,6 +109,7 @@ class TrainConfig(RunConfig):
     save_after_training: bool = True
     keep_last_n_saved: int = 1
     save_to_wandb: bool = True
+    log_time: bool = False
 
     max_optimizer_steps: int = -1
 
@@ -397,12 +398,16 @@ def train(config: TrainConfig):
             )
             with ddp_ctx_manager:
                 with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
-                    
+
+                    t0 = time.time()
                     outputs = wrapped_model(
                         input_ids=batch.input_ids.to(local_rank),
                         seq_ids=batch.element_ids.to(local_rank),
                         position_ids=batch.position_ids.to(local_rank),
                     )
+                    if config.log_time:
+                        torch.cuda.synchronize()
+                        logger.info(f"Forward pass time: {time.time() - t0:.2f}s")
 
                     topk_pred_logprobs = F.log_softmax(outputs.logits, dim=-1)[
                         0, 
@@ -421,7 +426,11 @@ def train(config: TrainConfig):
                 # the backward pass should go outside of the automated-mixed precision context
                 # see here for an example: https://pytorch.org/docs/stable/notes/amp_examples.html
                 # but it should go inside the ddp context manager
+                t0 = time.time()
                 loss.backward()
+                if config.log_time:
+                    torch.cuda.synchronize()
+                    logger.info(f"Backward pass time: {time.time() - t0:.2f}s")
 
             # Update the accumulated metrics
             accum_loss += loss.detach()

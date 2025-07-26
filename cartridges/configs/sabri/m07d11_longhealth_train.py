@@ -22,23 +22,29 @@ patient_idxs = list(range(1, NUM_PATIENTS + 1))
 patients_str = f"p{NUM_PATIENTS}"
 patient_ids = [f"patient_{idx:02d}" for idx in patient_idxs]
 
-data_sources = [
-    # "/home/sabri/cartridges/outputs/2025-07-13-09-04-32-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_p10_n65536-0/artifact/dataset.pkl"
-    # "/data/sabri/cartridges/2025-07-22-12-53-08-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_p10-0/artifact/dataset.pkl"
-
-    # "/data/sabri/cartridges/2025-07-22-16-36-53-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_p10_n8192-0/artifact/dataset.pkl"
-    # "/data/sabri/cartridges/2025-07-26-09-59-55-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_qwen3-4b_p10_n8192-0/artifact/dataset.pkl"
-    # "/data/sabri/cartridges/2025-07-26-12-02-19-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_qwen3-4b_p10_n65536-0/artifact/dataset.pkl"
-    "/data/sabri/cartridges/2025-07-26-12-21-32-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_llama-3.2-3b_p10_n65536-0/artifact/dataset.pkl"
-]
-
-config = TrainConfig(
-    model=HFModelConfig(
-        # pretrained_model_name_or_path="Qwen/Qwen3-4b",
-        # model_cls=FlexQwen3ForCausalLM,
+MODEL = os.environ.get("MODEL", "qwen")
+if MODEL == "llama":
+    data_sources = [
+        "/data/sabri/cartridges/2025-07-26-12-21-32-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_llama-3.2-3b_p10_n65536-0/artifact/dataset.pkl",
+        "/data/sabri/cartridges/2025-07-26-13-40-44-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_llama-3.2-3b_p10_n65536-0/artifact/dataset.pkl"
+    ]
+    model = HFModelConfig(
         pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
         model_cls=FlexLlamaForCausalLM,
-    ),
+    )
+elif MODEL == "qwen":
+    data_sources = [
+        "/data/sabri/cartridges/2025-07-26-12-02-19-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_qwen3-4b_p10_n65536-0/artifact/dataset.pkl"
+    ]
+    model=HFModelConfig(
+        pretrained_model_name_or_path="Qwen/Qwen3-4b",
+        model_cls=FlexQwen3ForCausalLM,
+    )
+else:
+    raise ValueError(f"Invalid model: {MODEL}")
+
+config = TrainConfig(
+    model=model,
     kv_cache_initializer=KVFromRandomText.Config(
         max_tokens=2048
     ),
