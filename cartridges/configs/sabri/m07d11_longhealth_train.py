@@ -22,7 +22,7 @@ patient_idxs = list(range(1, NUM_PATIENTS + 1))
 patients_str = f"p{NUM_PATIENTS}"
 patient_ids = [f"patient_{idx:02d}" for idx in patient_idxs]
 
-
+NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "1024"))
 
 MODEL = os.environ.get("MODEL", "qwen")
 if MODEL == "llama":
@@ -36,7 +36,9 @@ if MODEL == "llama":
     )
 elif MODEL == "qwen":
     data_sources = [
-        "/data/sabri/cartridges/2025-07-26-12-02-19-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_qwen3-4b_p10_n65536-0/artifact/dataset.pkl"
+        # "/data/sabri/cartridges/2025-07-26-12-02-19-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_qwen3-4b_p10_n65536-0/artifact/dataset.pkl"
+
+        "/data/sabri/cartridges/2025-07-27-14-11-52-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_qwen3-4b_p10_n65536-0/artifact/dataset.pkl"
     ]
     model=HFModelConfig(
         pretrained_model_name_or_path="Qwen/Qwen3-4b",
@@ -48,7 +50,7 @@ else:
 config = TrainConfig(
     model=model,
     kv_cache_initializer=KVFromRandomText.Config(
-        max_tokens=8192
+        max_tokens=NUM_TOKENS
     ),
     
     lr=2e-2,
