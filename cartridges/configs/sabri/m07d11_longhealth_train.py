@@ -22,6 +22,8 @@ patient_idxs = list(range(1, NUM_PATIENTS + 1))
 patients_str = f"p{NUM_PATIENTS}"
 patient_ids = [f"patient_{idx:02d}" for idx in patient_idxs]
 
+
+
 MODEL = os.environ.get("MODEL", "qwen")
 if MODEL == "llama":
     data_sources = [
@@ -46,12 +48,12 @@ else:
 config = TrainConfig(
     model=model,
     kv_cache_initializer=KVFromRandomText.Config(
-        max_tokens=2048
+        max_tokens=8192
     ),
     
     lr=2e-2,
     loss_type="logits",
-    epochs=4,
+    epochs=2,
     global_batch_size=32,
 
     dataset=CartridgeTrainDataset.Config(
@@ -72,7 +74,7 @@ config = TrainConfig(
                 patient_ids=patient_ids,
             ),
             name_for_wandb=f"longhealth_{patients_str}",
-            generate_max_new_tokens=512,
+            generate_max_new_tokens=1024,
             batch_size=32,
             temperature=0.3,
         )
