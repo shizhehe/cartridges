@@ -1,34 +1,69 @@
-from collections import defaultdict
 import os
-from typing import Any, Dict, List, Literal, Optional, Type, Union
+from typing import Any, Dict, List, Optional, Type
 import openai
 from openai.types.chat.chat_completion import ChatCompletion
 import asyncio
-
-from pydrantic import ObjectConfig
 import tiktoken
-from cartridges.clients.base import Client, Sample, SelectedToken, TopToken, ClientConfig, ClientResponse
-from cartridges.clients.usage import Usage, num_tokens_from_messages_openai
+import numpy as np
+from cartridges.clients.base import Client, ClientSample, ClientConfig, ClientResponse, TopLogprobs
+from cartridges.clients.usage import Usage, num_tokens_from_messages_flexible
 from cartridges.utils import get_logger
-
-# SE (2025-01-15): This is a hack to share a single event loop across all calls to Chat
-loop: Optional[asyncio.AbstractEventLoop] = None
 
 
 class OpenAIClient(Client):
-    client_class: Type[openai.AsyncOpenAI] = openai.OpenAI
+    """This client works with any inference server that supports the OpenAI API.
+    It is simply a wrapper around the OpenAI Python client that handles retrying and
+    exposes a batch interface with async parallel execution.
+
+    Features:
+    - Async batch processing with asyncio.gather for parallel requests
+    - Flexible tokenizer support: automatically uses tiktoken for OpenAI models 
+      and falls back to Huggingface AutoTokenizer for other models (e.g., Qwen)
+    - Message truncation and retry logic for context length issues
+    - Conversation tracking for prompt caching
+    - Works with any OpenAI-compatible API endpoint
+
+    Example:
+        config = OpenAIClient.Config(
+            model_name="Qwen/Qwen2.5-7B-Instruct",  # HF model
+            base_url="https://your-endpoint.modal.run/v1"
+        )
+        client = OpenAIClient(config)
+        
+        response = await client.chat(
+            chats=[
+                [{"role": "user", "content": "Hello"}],
+                [{"role": "user", "content": "How are you?"}]
+            ],
+            temperature=0.7,
+            max_completion_tokens=100
+        )
+
+    Note: although Tokasaurus also supports the OpenAI API, we have a separate 
+    `TokasaurusClient` you should use for self-study (and synthetic data generation). 
+    There are two issues with the standard OpenAI API: (1) for very large batch sizes,
+    we bottleneck the server with so many concurrent requests -- the batch endpoint is
+    not a great option because it requires two calls (one create and one retrieve) that
+    need to hit the same replica, which is annoying to orchestrate with e.g. modal 
+    autoscaling. (2) the openai api stores logprobs very inefficiently -- it returns a 
+    separate object for each logprob, which is very slow to parse.
+    Our TokasaurusClient uses a custom batch endpoint that packs logprobs into the 
+    the response more efficiently.
+    """
+
+    client_class: Type[openai.AsyncOpenAI] = openai.AsyncOpenAI
 
     class Config(ClientConfig):
         """Configuration options for the OpenAIClient."""
         _pass_as_config: bool = True
 
         model_name: str = "gpt-4o"
+        base_url: Optional[str] = None
         api_key: Optional[str] = None
 
         # if we max out the context length, retry truncating the messages to fit in the 
         # max length
         truncate_messages_and_retry: bool = True  
-
 
 
     def __init__(self, config: Config):
@@ -40,77 +75,86 @@ class OpenAIClient(Client):
         
         self.client = self.client_class(
             api_key=config.api_key if config.api_key else os.getenv("OPENAI_API_KEY"),
+            base_url=config.base_url,
         )
         self.logger = get_logger("OpenAIClient")
 
         self.conversations = {}
 
-        self.encoding = tiktoken.encoding_for_model(self.config.model_name)
+        # Initialize tokenizer - try tiktoken first, then fall back to Huggingface
+        self.tokenizer = self._init_tokenizer()
 
-    def complete(
-        self, 
-        prompts: List[Union[str, List[int]]], 
-        temperature: float = 0.6, 
-        stop: List[str] = [], 
-        max_completion_tokens: int = 1,
-        **kwargs
-    ) -> Sample:
-        raise NotImplementedError(
-            "OpenAI does not support a completion API."
-        )
-    
+    def _init_tokenizer(self):
+        """Initialize tokenizer - try tiktoken first, then fall back to Huggingface."""
+        
+        # First, try to use tiktoken for OpenAI models
+        try:
+            encoding = tiktoken.encoding_for_model(self.config.model_name)
+            self.logger.info(f"Using tiktoken encoding for model {self.config.model_name}")
+            return encoding
+        except KeyError:
+            self.logger.info(f"Model {self.config.model_name} not found in tiktoken, trying Huggingface tokenizer")
+            pass
+        
+        # Fall back to Huggingface tokenizer
+        try:
+            from transformers import AutoTokenizer
+            
+            tokenizer = AutoTokenizer.from_pretrained(self.config.model_name)
+            self.logger.info(f"Using Huggingface tokenizer for model {self.config.model_name}")
+            return tokenizer
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to load Huggingface tokenizer for {self.config.model_name}: {e}")
+            
+            # Final fallback: create a dummy tokenizer that does character-based estimation
+            class CharBasedTokenizer:
+                def __init__(self, model_name):
+                    self.model_name = model_name
+                
+                def encode(self, text, add_special_tokens=True):
+                    # Very rough estimation: 4 characters per token
+                    return list(range(len(text) // 4 + 1))
+            
+            self.logger.warning(f"Using character-based token estimation for {self.config.model_name}")
+            return CharBasedTokenizer(self.config.model_name)
 
-    def chat(
+    async def chat(
         self,
         chats: List[List[Dict[str, Any]]],
         temperature: float = 0.6,
         stop: List[str] = [],
         max_completion_tokens: Optional[int] = None,
-
         conversation_id: Optional[str] = None,
         **kwargs
     ) -> ClientResponse:
         assert len(chats) > 0
-        # Flatten the top-level list of message lists (assuming only one chat set for demonstration)
-        # If multiple chats are needed, you should call the API multiple times or adapt accordingly.
-        if isinstance(chats[0], Dict):
-            chats = [(chats, 1)]
         
-        # find duplicate chats
-        chat_to_count = defaultdict(list)
-        for idx, messages in enumerate(chats):
-            tup = tuple(frozenset(message.items()) for message in messages)
-            chat_to_count[tup].append(idx)
-                    
-        responses = [None] * len(chats)
-        usage = Usage(prompt_tokens=0, completion_tokens=0)
-        for messages, idxs in chat_to_count.items():
-            messages = [dict(message) for message in messages]  # convert back
-
-            
-            def chat(m: List[Dict[str, Any]]) -> ChatCompletion:
-                return openai.chat.completions.create(
+        # Handle legacy single chat format
+        if isinstance(chats[0], Dict):
+            chats = [chats]
+        
+        # Create individual async tasks for each chat
+        async def process_single_chat(messages: List[Dict[str, Any]]) -> tuple[ChatCompletion, List[Dict[str, Any]]]:
+            async def chat_single(m: List[Dict[str, Any]]) -> ChatCompletion:
+                return await self.client.chat.completions.create(
                     model=self.config.model_name,
                     messages=m,
                     max_tokens=max_completion_tokens,
                     temperature=temperature,
                     stop=stop if stop else None,
-                    n=len(idxs),
+                    n=1,
                     logprobs=True,
                     **kwargs
                 )
             
-            # SE (01/20): If a BadRequestError occurs due to messages being too long, 
-            # we handle it by retrying with progressively truncated messages. 
-            # This is only done if the config option 'truncate_messages_and_retry' is set to True. 
-            # We start by removing the first message and continue truncating until a 
-            # valid response is received or all messages are exhausted.
+            # Handle message truncation with retry logic
             error = None
             for num_truncated_messages in range(len(messages)):
                 try:
                     used_messages = messages[num_truncated_messages:]
-                    response: ChatCompletion = chat(used_messages)
-                    break
+                    response: ChatCompletion = await chat_single(used_messages)
+                    return response, used_messages
                 except openai.BadRequestError as e:
                     error = e
                     if e.body.get("code", "") not in ("context_length_exceeded", "too_many_messages"):    
@@ -132,16 +176,23 @@ class OpenAIClient(Client):
                     "Even though you have set truncate_messages_and_retry=True, "
                     "the last message is still too long."
                 )
-            
-            # Count new prompt tokens: In the block below, we keep track of message prefixes which
-            # previously appeared in the conversation history. We then use this to 
-            # calculate a new_prompt_tokens field.
-            # ---- start of new prompt token counting ----
+        
+        # Execute all chats in parallel using asyncio.gather
+        chat_results = await asyncio.gather(*[process_single_chat(messages) for messages in chats])
+        
+        # Process results
+        responses = []
+        usage = Usage(prompt_tokens=0, completion_tokens=0)
+        
+        for response, used_messages in chat_results:
+            # Handle usage counting
             curr_usage = Usage(
                 prompt_tokens=response.usage.prompt_tokens,
                 completion_tokens=response.usage.completion_tokens,
-                cached_prompt_tokens=response.usage.prompt_tokens_details.cached_tokens,
+                cached_prompt_tokens=response.usage.prompt_tokens_details.cached_tokens if response.usage.prompt_tokens_details else 0,
             )
+            
+            # Handle conversation tracking for caching
             if conversation_id is not None:
                 if conversation_id not in self.conversations:
                     self.conversations[conversation_id] = []
@@ -156,145 +207,53 @@ class OpenAIClient(Client):
                     if len(matched_messages) > len(max_matched_messages):
                         max_matched_messages = matched_messages
 
-                curr_usage.seen_prompt_tokens = num_tokens_from_messages_openai(max_matched_messages, encoding=self.encoding)        
+                curr_usage.seen_prompt_tokens = num_tokens_from_messages_flexible(max_matched_messages, tokenizer=self.tokenizer)        
                 
-                # SE (01/20): Add the newly generated messages to the conversation 
-                # history since those will technically be in the cache as well so 
-                # shouldn't be double-counted.
-                self.conversations[conversation_id].extend([
-                    used_messages + [{"role": "assistant","content": choice.message.content}] 
-                    for choice in response.choices
-                ])
-            # ---- end of new prompt token counting ----
-            usage += curr_usage
-
-            for idx, choice in zip(idxs, response.choices):
-                # Because the ChatCompletion API typically doesn't return per-token logprobs in the same format,
-                # you may not have fully granular data. Below is for demonstration; it may be an empty list.
-                tokens = [
-                    SelectedToken(
-                        text=token.token,
-                        logprob=token.logprob,
-                        top_logprobs=[
-                            TopToken(
-                                text=top_token.token,
-                                logprob=top_token.logprob,
-                            )
-                            for top_token in token.top_logprobs
-                        ],
-                        # SE (03/02/2025): OpenAI does not return token ids.
-                        id=None,
-                    )
-                    for token in choice.logprobs.content
-                ]
-
-                if choice.finish_reason == "stop":
-                    stop_reason = "stop"
-                elif choice.finish_reason == "length":
-                    stop_reason = "max_tokens"
-                else:
-                    stop_reason = "stop"  # fallback
-
-                # If you want each token, you can rely on earlier approach or add a fallback:
-                # for demonstration, we parse the entire assistant message as a single token sequence
-                # when logprobs is not provided.
-                if not tokens:
-                    text_content = choice.message.content
-                    tokens = [text_content] if text_content else []
-                
-                responses[idx] = Sample(
-                    text=choice.message.content,
-                    tokens=tokens,
-                    stop_reason=stop_reason,
+                # Add to conversation history
+                choice = response.choices[0]
+                self.conversations[conversation_id].append(
+                    used_messages + [{"role": "assistant", "content": choice.message.content}]
                 )
+            
+            usage += curr_usage
+            
+            # Process the response choice
+            choice = response.choices[0]
+            
+            # Extract token IDs if available from logprobs
+            token_ids = None
+            top_logprobs = None
+            
+            if choice.logprobs and choice.logprobs.content:
+                # For now, we don't have token IDs from OpenAI API, but we can extract logprobs
+                
+                # Create logprobs matrix (simplified version)
+                logprobs_list = []
+                for token in choice.logprobs.content:
+                    token_logprobs = [token.logprob]
+                    if token.top_logprobs:
+                        token_logprobs.extend([t.logprob for t in token.top_logprobs])
+                    logprobs_list.append(token_logprobs)
+                
+                if logprobs_list:
+                    # Pad all rows to same length
+                    max_len = max(len(row) for row in logprobs_list)
+                    padded_logprobs = []
+                    for row in logprobs_list:
+                        padded_row = row + [-1000.0] * (max_len - len(row))
+                        padded_logprobs.append(padded_row)
+                    
+                    # Create TopLogprobs object - simplified since we don't have token IDs
+                    top_logprobs = TopLogprobs(
+                        logprobs=np.array(padded_logprobs, dtype=np.float32),
+                        token_ids=np.full((len(padded_logprobs), max_len), -1, dtype=np.int32)
+                    )
+            
+            responses.append(ClientSample(
+                text=choice.message.content,
+                token_ids=token_ids,
+                top_logprobs=top_logprobs,
+            ))
+        
         return ClientResponse(samples=responses, usage=usage)
 
-
-
-class AsyncOpenAIClient(OpenAIClient):
-
-    def chat(
-        self,
-        chats: List[List[Dict[str, Any]]],
-        temperature: float = 0.6,
-        stop: List[str] = [],
-        max_completion_tokens: Optional[int] = None,
-        **kwargs
-    ) -> ClientResponse:
-        """
-        Calls the OpenAI ChatCompletion endpoint, sending a single combined chat message array.
-        If you want to handle multiple parallel chats, you'd need to adapt this accordingly.
-
-        Add support async chats
-        """
-        assert len(chats) > 0
-        # Flatten the top-level list of message lists (assuming only one chat set for demonstration)
-        # If multiple chats are needed, you should call the API multiple times or adapt accordingly.
-        if isinstance(chats[0], Dict):
-            chats = [(chats, 1)]
-        
-        def _build_responses(chat_to_count, results: List[ChatCompletion]):
-            # We transform the raw results into a final responses list
-            # using your existing logic.
-            usage = Usage(prompt_tokens=0, completion_tokens=0)
-            responses = [None] * len(chats)
-            for (idxs, response) in zip(chat_to_count.values(), results):
-                usage += Usage(
-                    prompt_tokens=response.usage.prompt_tokens,
-                    completion_tokens=response.usage.completion_tokens
-                )
-                for idx, choice in zip(idxs, response.choices):
-                    tokens = []
-                    logprobs = []
-                    for logprob in getattr(choice.logprobs, "content", []):
-                        tokens.append(logprob.token)
-                        logprobs.append(logprob.logprob)
-                    if choice.finish_reason == "stop":
-                        stop_reason = "stop_string"
-                    elif choice.finish_reason == "length":
-                        stop_reason = "max_tokens"
-                    else:
-                        stop_reason = "stop_string"
-                    if not tokens:
-                        text_content = choice.message.content
-                        tokens = [text_content] if text_content else []
-                    responses[idx] = Sample(
-                        tokens=tokens,
-                        token_ids=None,
-                        logprob=logprobs,
-                        stop_reason=stop_reason,
-                    )
-            return responses, usage
-
-        async def _async_chat():
-            chat_to_count = defaultdict(list)
-            for idx, messages in enumerate(chats):
-                tup = tuple(frozenset(message.items()) for message in messages)
-                chat_to_count[tup].append(idx)
-            tasks = []
-            for messages, idxs in chat_to_count.items():
-                messages = [dict(message) for message in messages]
-                tasks.append(
-                    asyncio.create_task(
-                        self.client.chat.completions.create(
-                            model=self.config.model_name,
-                            messages=messages,
-                            max_tokens=max_completion_tokens,
-                            temperature=temperature,
-                            stop=stop if stop else None,
-                            n=len(idxs),
-                            logprobs=True,
-                            **kwargs
-                        )
-                    )
-                )
-            results = await asyncio.gather(*tasks)
-            return chat_to_count, results
-
-        global loop
-        if loop is None:
-            loop = asyncio.get_event_loop()
-        chat_to_count, results = loop.run_until_complete(_async_chat())
-        # breakpoint()
-        final_responses, usage = _build_responses(chat_to_count, results)
-        return ClientResponse(samples=final_responses, usage=usage)

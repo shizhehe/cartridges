@@ -14,6 +14,16 @@ The patients medical record consists of {num_notes} notes.
 {text}
 </{note_id}>"""
 
+FULL_STRING_TEMPLATE = """\
+<patient-record-{patient_id}>
+Below is patient {name}'s medical record (ID: {patient_id}). 
+They were born on {birthday} and have the following diagnosis: {diagnosis}.
+The patients medical record consists of {num_notes} notes included below.
+<notes>
+{notes}
+</notes>
+</patient-record-{patient_id}>"""
+
 class LongHealthResource(Resource):
     class Config(Resource.Config):
         patient_ids: Optional[List[str]] = None
@@ -40,3 +50,19 @@ class LongHealthResource(Resource):
         )
         seed_prompts = sample_seed_prompts(self.config.seed_prompts, batch_size)
         return ctx, seed_prompts
+
+    def to_string(self) -> str:
+        out = f"Below is a panel of patient records."
+        for patient in self.patients:
+            notes = "\n".join([f"<{note_id}>\n{text}\n</{note_id}>" for note_id, text in patient.texts.items()])
+            out += "\n\n"
+            out += FULL_STRING_TEMPLATE.format(
+                name=patient.name,
+                patient_id=patient.patient_id,
+                birthday=patient.birthday,
+                diagnosis=patient.diagnosis,
+                num_notes=len(patient.texts),
+                notes=notes,
+            )
+        return out
+        
