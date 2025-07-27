@@ -63,7 +63,7 @@ vllm_image = (
 MODEL_NAME = "Qwen/Qwen3-4b"
 USE_YARN = True
 GPU_COUNT = 1
-GPU_TYPE: Literal["H100", "H200", "B200", "A100-80GB"] = "A100-80GB"
+GPU_TYPE: Literal["H100", "H200", "B200", "A100-80GB"] = "H100"
 
 hf_cache_vol = modal.Volume.from_name("huggingface-cache", create_if_missing=True)
 vllm_cache_vol = modal.Volume.from_name("vllm-cache", create_if_missing=True)

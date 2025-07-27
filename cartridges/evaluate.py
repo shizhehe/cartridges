@@ -228,9 +228,8 @@ class ICLBaseline(BaselineGenerator):
             ctx_text = self.config.context
         else:
             resource = self.config.context.instantiate()
-            # TODO (SE): Need to handle this
+            # TODO (SE): Need to properly call the resource setup!
             ctx_text = resource.to_string()
-            breakpoint()
 
 
         if self.config.max_context_tokens is not None:
