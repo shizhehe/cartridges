@@ -34,7 +34,10 @@ SYSTEM_PROMPT_TEMPLATE = f"""Please answer the question below about the followin
 </context>
 """
 
-NIAH_PATH = "/home/sabri/code/cartridges/cartridges/data/ruler/_data/qwen3_4b-l100000-n1-k128-v1_2-essay-key_words-val_numbers--1660737731696865120.json"
+BASE_PATH = "/home/sabri/code/cartridges/cartridges/data/ruler/_data"
+NIAH_PATH = f"{BASE_PATH}/qwen3_4b-l100000-n1-k128-v1_2-essay-key_words-val_numbers--1660737731696865120.json"
+NIAH_PATH = f"{BASE_PATH}/qwen3_4b-l100000-n1-k128-v1_1-essay-key_words-val_numbers-e83970e8.json"
+
 
 configs = [
     EvaluateConfig(

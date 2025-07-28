@@ -27,6 +27,7 @@ python niah.py \
 """
 from copy import copy
 from dataclasses import dataclass
+import hashlib
 import os
 import re
 import json
@@ -97,8 +98,9 @@ class GenerateNIAHConfig(RunConfig):
 
         # get a hash of the config
         tokenizer_str = self.niah.tokenizer.split("/")[-1].replace("-", "_").lower()
+        config_hash = hashlib.sha256(str(self.niah.model_dump()).encode()).hexdigest()[:8]
         num_needle_v_str = f"{self.niah.num_needle_v[0]}_{self.niah.num_needle_v[1]}" if isinstance(self.niah.num_needle_v, tuple) else self.niah.num_needle_v
-        config_str = f"{tokenizer_str}-l{self.niah.max_seq_length}-n{self.niah.num_samples}-k{self.niah.num_needle_k}-v{num_needle_v_str}-{self.niah.type_haystack}-key_{self.niah.type_needle_k}-val_{self.niah.type_needle_v}-{hash(str(self.niah))}"
+        config_str = f"{tokenizer_str}-l{self.niah.max_seq_length}-n{self.niah.num_samples}-k{self.niah.num_needle_k}-v{num_needle_v_str}-{self.niah.type_haystack}-key_{self.niah.type_needle_k}-val_{self.niah.type_needle_v}-{config_hash}"
         save_file = Path(self.save_dir) / f'{config_str}.json'
         save_file.parent.mkdir(parents=True, exist_ok=True)
         samples = generate_samples(
@@ -408,7 +410,7 @@ if __name__ == "__main__":
             context_template=CONTEXT_TEMPLATE,
             query_template=QUERY_TEMPLATE,
             num_needle_k=128,
-            num_needle_v=(1,2),
+            num_needle_v=(1,1),
             type_haystack='essay',
             type_needle_k='words',
             tokens_to_generate=128,

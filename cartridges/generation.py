@@ -1,4 +1,5 @@
-from typing import Any, List, Optional
+from collections import defaultdict
+from typing import Any, Dict, List, Optional
 from transformers import DynamicCache, AutoTokenizer
 import torch
 from tqdm import tqdm
@@ -18,7 +19,7 @@ def flex_generate(
     max_new_tokens: int = 32,
     temperature: float = 0.0,
     show_progress: bool = False,
-):
+) -> Dict[int, List[int]]:
     """Autoregressive generation with FlexAttention (e.g. FlexLlamaModel, FlexQwen3Model).
     
     Args:
@@ -50,7 +51,7 @@ def flex_generate(
         )
         
     # Initialize generated sequences
-    generated_tokens = [[] for _ in range(seq_ids.max().item() + 1)]
+    generated_tokens: Dict[int, List[int]] = defaultdict(list)
     
     # Current state
     current_input_ids = input_ids

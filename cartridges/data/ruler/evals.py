@@ -81,7 +81,7 @@ class NIAHGenerateDataset(CartridgeGenerateDataset):
         convo_id: str
     ) -> Tuple[bool, Dict[str, Optional[str]]]:
         
-        pred_answers = pred.split(":")[-1].strip("{}'\"")
+        pred_answers = pred.split(":")[-1].strip("{}'\" ")
 
         if len(answer) == 1:
             correct = str(answer[0]) == str(pred_answers)

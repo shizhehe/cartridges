@@ -1,0 +1,114 @@
+import os
+from pathlib import Path
+import socket
+
+import pydrantic
+from pydrantic.variables import FormatStringVariable
+
+from cartridges.data.ruler.evals import NIAHGenerateDataset
+from cartridges.initialization.random import KVFromRandomText, KVFromRandomVectors
+from cartridges.models.llama.modeling_llama import FlexLlamaForCausalLM
+from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
+from cartridges.train import GenerationEvalConfig, TrainConfig
+from cartridges.models.config import HFModelConfig
+from cartridges.datasets import CartridgeTrainDataset
+from cartridges.utils import WandBConfig
+from cartridges.data.longhealth.evals import LongHealthMultipleChoiceGenerateDataset
+
+file_name = Path(__file__).stem
+bs = 4
+
+NUM_PATIENTS = 10
+patient_idxs = list(range(1, NUM_PATIENTS + 1))
+patients_str = f"p{NUM_PATIENTS}"
+patient_ids = [f"patient_{idx:02d}" for idx in patient_idxs]
+
+NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "1024"))
+
+NUM_KEYS = 1
+
+MODEL = os.environ.get("MODEL", "llama")
+if MODEL == "llama":
+    DATA_SOURCES = {
+        2: [
+            "/data/sabri/cartridges/2025-07-28-10-41-03-m07d28_niah_synthesize/m07d28_niah_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl",
+
+            "/data/sabri/cartridges/2025-07-28-11-40-25-m07d28_niah_synthesize/m07d28_niah_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl",
+
+            "/data/sabri/cartridges/2025-07-28-11-46-58-m07d28_niah_synthesize/m07d28_niah_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl",
+
+            "/data/sabri/cartridges/2025-07-28-12-08-34-m07d28_niah_synthesize/m07d28_niah_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl",
+        ],
+        1: [
+            "/data/sabri/cartridges/2025-07-28-12-18-54-m07d28_niah_synthesize/m07d28_niah_synthesize_llama-3.2-3b_n65536_k1-0/artifact/dataset.pkl",
+            "/data/sabri/cartridges/2025-07-28-12-28-46-m07d28_niah_synthesize/m07d28_niah_synthesize_llama-3.2-3b_n65536_k1-0/artifact/dataset.pkl",
+        ]
+    }
+    model = HFModelConfig(
+        pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
+        model_cls=FlexLlamaForCausalLM,
+    )
+else:
+    raise ValueError(f"Invalid model: {MODEL}")
+
+
+NUM_KEYS_TO_PATH = {
+    1: "/home/sabri/code/cartridges/cartridges/data/ruler/_data/qwen3_4b-l100000-n1-k128-v1_1-essay-key_words-val_numbers-e83970e8.json",
+    2: "/home/sabri/code/cartridges/cartridges/data/ruler/_data/qwen3_4b-l100000-n1-k128-v1_2-essay-key_words-val_numbers--1660737731696865120.json",
+}
+
+data_sources = DATA_SOURCES[NUM_KEYS]
+niah_path = NUM_KEYS_TO_PATH[NUM_KEYS]
+
+config = TrainConfig(
+    model=model,
+    kv_cache_initializer=KVFromRandomText.Config(
+        max_tokens=NUM_TOKENS
+    ),
+    
+    lr=2e-2,
+    loss_type="logits",
+    epochs=2,
+    global_batch_size=32,
+
+    dataset=CartridgeTrainDataset.Config(
+        data_sources=[
+            (source, None)
+            for source in data_sources
+        ],
+        top_k_logits=20,
+        packed_seq_length=2048,
+        packing_mode="truncate",
+    ),
+
+    save_every_n_steps=512,
+    generate_every_n_steps=128,
+    generate_evals=[
+        GenerationEvalConfig(
+            dataset=NIAHGenerateDataset.Config(
+                niah_path=niah_path,
+                thinking=False,
+            ),
+            name_for_wandb=f"niah_mc",
+            num_samples=1,
+            temperature=0.0,
+            batch_size=16,
+        ),
+        
+    ],
+    eval_every_n_steps=512,
+    eval_datasets=[],
+    distributed_backend="gloo",
+
+    wandb=WandBConfig(
+        project="cartridges",
+        tags=["train", "longhealth"],
+        entity="hazy-research",
+    ),
+    output_dir=os.environ["CARTRIDGES_OUTPUT_DIR"],
+    name=FormatStringVariable(f"{file_name}_lr{{lr}}_toks{{kv_cache_initializer.max_tokens}}_k{NUM_KEYS}"),
+)
+
+
+if __name__ == "__main__":
+    pydrantic.main(config)

@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import re
 import time
-from typing import Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 import pandas as pd
 from pydrantic import BaseConfig, ObjectConfig, RunConfig
@@ -813,7 +813,7 @@ def evaluate_generations(
             position_ids = torch.cat(
                 [torch.arange(elem.input_ids.shape[1], device=local_rank) for _, elem in elements]
             )
-            pred_ids = flex_generate(
+            pred_ids: Dict[int, List[int]] = flex_generate(
                 input_ids=input_ids,
                 seq_ids=seq_ids,
                 position_ids=position_ids,
@@ -828,14 +828,16 @@ def evaluate_generations(
                 temperature=config.temperature,
                 show_progress=True
             )
+            
             pred = tokenizer.batch_decode(pred_ids, skip_special_tokens=True)
 
-            elements = [
-                (index, elem)
-                for index, elem in elements
-            ]
+            elements = {seq_id: elem for seq_id, elem in elements}
 
-            for pred_ids, pred, (index, element) in zip(pred_ids, pred, elements):
+            for  (seq_id, curr_pred_ids) in pred_ids.items():
+                element = elements[seq_id]
+                pred = tokenizer.decode(curr_pred_ids, skip_special_tokens=True)
+
+                
                 
                 if has_score:
                     metrics, extras = dataset.score(
@@ -852,7 +854,7 @@ def evaluate_generations(
                 
                 results.append(
                     {
-                        "index": index,
+                        "index": indexes[seq_id],
                         "optimizer_step": optimizer_step,
                         "prompt": element.prompt,
                         "answer": element.answer,
