@@ -40,7 +40,6 @@ import random
 import sys
 from collections import defaultdict
 from transformers import AutoTokenizer
-# from manifest_utils import write_manifest
 from nltk.tokenize import sent_tokenize
 import logging
 from pydrantic import BaseConfig, RunConfig
@@ -55,11 +54,16 @@ CONTEXT_TEMPLATE = """Some special magic keys are hidden within the following te
 
 QUERY_TEMPLATE = """What are all the special magic {type_needle_v} for {query} mentioned in the provided text?"""
 
+ANSWER_PROMPT_TEMPLATE = """Please answer with the following format.
+"The special magic {type_needle_v} for {query} mentioned in the provided text are: {{ {placeholder} }} "
+Do not include any other text in your answer."""
+
+
 
 from cartridges.data.ruler.constants import TASKS
 
 class NIAHConfig(BaseConfig):
-    max_seq_length: int = 32768
+    max_seq_length: int = 100_000
     num_samples: int = 1
     tokens_to_generate: int = 128
     tokenizer: str = "Qwen/Qwen3-4B"
@@ -129,6 +133,7 @@ class GenerateNIAHConfig(RunConfig):
 class NIAHQuery:
     query: str
     answers: List[str]
+    answer_prompt: str
 
 @dataclass
 class NIAHSample:
@@ -277,6 +282,7 @@ def generate_input_output(num_haystack, config: NIAHConfig):
     queries = []
     for key, needles in needles_by_key.items():
         answers = [needle.values for needle in needles]
+
         if len(answers) == 1:
             query_template = QUERY_TEMPLATE.replace('are all', 'is')
             type_needle_v = config.type_needle_v[:-1] # remove "s"
@@ -285,12 +291,19 @@ def generate_input_output(num_haystack, config: NIAHConfig):
             type_needle_v = config.type_needle_v
         query_str = query_template.format(type_needle_v=type_needle_v, query=key)
 
+        answer_prompt = ANSWER_PROMPT_TEMPLATE.format(
+            type_needle_v=type_needle_v, 
+            query=key, 
+            placeholder="your comma separated answers" if len(answers) > 1 else "your answer"
+        )
+
         if len(answers) == 1:
             query_str = query_str.replace('are all', 'is')
         queries.append(
             NIAHQuery(
                 query=query_str,
                 answers=answers,
+                answer_prompt=answer_prompt
             )
         )
         
@@ -394,7 +407,7 @@ if __name__ == "__main__":
             seed=42,
             context_template=CONTEXT_TEMPLATE,
             query_template=QUERY_TEMPLATE,
-            num_needle_k=64,
+            num_needle_k=128,
             num_needle_v=(1,2),
             type_haystack='essay',
             type_needle_k='words',

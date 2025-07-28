@@ -33,7 +33,7 @@ h.escape_all = True
 h.reference_links = False
 h.mark_code = False
 
-with open('PaulGrahamEssays_URLs.txt') as f:
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'PaulGrahamEssays_URLs.txt')) as f:
     urls = [line.strip() for line in f]
 
 
@@ -74,8 +74,10 @@ text = ""
 for file in files_repo + files_html:
     with open(file, 'r') as f:
         text += f.read()
-        
-with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '_data', 'PaulGrahamEssays.json'), 'w') as f:
+
+directory = os.path.join(os.path.dirname(os.path.abspath(__file__)), '_data')
+os.makedirs(directory, exist_ok=True)
+with open(os.path.join(directory, 'PaulGrahamEssays.json'), 'w') as f:
     json.dump({"text": text}, f)
 
 

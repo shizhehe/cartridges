@@ -166,7 +166,7 @@ class TokasaurusClient(Client):
         stop: Optional[List[str]] = None,
         top_logprobs: Optional[int] = None,
         modal_upstream_id: Optional[str] = None,
-        enable_thinking: bool = True,
+        enable_thinking: bool = False,
         **kwargs,
     ) -> ClientResponse:
         """
@@ -197,12 +197,14 @@ class TokasaurusClient(Client):
             # this provides the kwargs needed for the apply_chat_template to enable
             # thinking. 
             thinking_overrides = MODEL_TO_THINKING_OVERRIDES[self.config.model_name.lower()](enable_thinking)
-        else:
+        elif enable_thinking:
             # if the model is not in the MODEL_TO_THINKING_OVERRIDES, we add a
             # thinking prompt to the last message of the chat. 
             thinking_overrides = {}
             for chat in chats:
                 chat[-1]["content"] = add_thinking_prompt(chat[-1]["content"])
+        else:
+            thinking_overrides = {}
 
 
         def _construct_request(chat: List[Dict[str, Any]]) -> dict:

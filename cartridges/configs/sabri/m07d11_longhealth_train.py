@@ -47,7 +47,6 @@ elif MODEL == "qwen":
     )
 else:
     raise ValueError(f"Invalid model: {MODEL}")
-
 config = TrainConfig(
     model=model,
     kv_cache_initializer=KVFromRandomText.Config(
@@ -77,12 +76,12 @@ config = TrainConfig(
                 patient_ids=patient_ids,
             ),
             name_for_wandb=f"longhealth_{patients_str}",
-            generate_max_new_tokens=1024,
+            generate_max_new_tokens=2048,
             batch_size=32,
             temperature=0.3,
         )
     ],
-    eval_every_n_steps=256,
+    eval_every_n_steps=512,
     eval_datasets=[],
     distributed_backend="gloo",
 
