@@ -177,6 +177,9 @@ def discover_datasets(output_dir: Optional[str] = Query(None)):
                 print(f"Error checking {pkl_file}: {e}")
                 continue
     
+    # Sort datasets by relative path for consistent ordering
+    datasets.sort(key=lambda d: d['relative_path'])
+    
     return datasets
 
 @app.get("/api/dataset/{dataset_path:path}")
