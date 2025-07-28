@@ -22,6 +22,10 @@ class Resource(abc.ABC):
     @abc.abstractmethod
     async def sample_prompt(self, batch_size: int) -> tuple[str, List[str]]:
         raise NotImplementedError()
+    
+    
+    def to_string(self) -> str:
+        raise NotImplementedError("This resource does not implement a string representation.")
 
 SEED_TYPES = Literal[
     "structuring", "summarization", "aggregation", "question", "use_case", "creative", 'generic'

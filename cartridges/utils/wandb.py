@@ -3,18 +3,22 @@ import os
 from pathlib import Path
 import tempfile
 from functools import partial
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Tuple
 
 import concurrent.futures
 from matplotlib.figure import Figure
 import pandas as pd
 import torch
 from tqdm import tqdm
+from transformers import AutoTokenizer
 import wandb
 from pydrantic import BaseConfig
 from pydantic import Field
 
 import torch.distributed as dist
+
+if TYPE_CHECKING:
+    from cartridges.train import CacheAndModel
 
 
 class WandBConfig(BaseConfig):
@@ -414,3 +418,36 @@ def figure_to_wandb(fig: Figure) -> wandb.Image:
     wandb_img = wandb.Image(pil_img)
     plt.close(fig)
     return wandb_img
+
+
+def load_model_and_cache_from_wandb(
+    wandb_run_id: str,
+    step: int,
+    device: str = "cuda",
+) -> tuple["CacheAndModel", AutoTokenizer]:
+    from cartridges.train import TrainConfig, CacheAndModel
+    from cartridges.cache import TrainableCache
+
+    is_ddp = "LOCAL_RANK" in os.environ
+    is_rank_zero = (not is_ddp) or (dist.get_rank() == 0)
+
+    train_config = TrainConfig.from_wandb(wandb_run_id, strict=False)
+
+    model = train_config.model.instantiate().to(device)
+    # tokenizer = AutoTokenizer.from_pretrained(train_config.tokenizer)
+
+    if is_rank_zero:
+        out = wandb.restore(
+            f"cache-step{step}.pt", run_path=wandb_run_id, root=train_config.run_dir
+        )
+    
+    if is_ddp:
+        dist.barrier()
+
+    cache = TrainableCache.from_pretrained(
+        os.path.join(train_config.run_dir, f"cache-step{step}.pt"), 
+        device=device
+    )
+
+    return CacheAndModel(cache=cache, model=model)
+

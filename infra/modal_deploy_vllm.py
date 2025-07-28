@@ -60,9 +60,10 @@ vllm_image = (
 # A single B200 GPUs has enough VRAM to store a 70,000,000,000 parameter model,
 # like Llama 3.3, in eight bit precision, along with a very large KV cache.
 
-MODEL_NAME = "Qwen/Qwen3-32B"
-GPU_COUNT = 2
-GPU_TYPE: Literal["H100", "H200", "B200", "A100-80GB"] = "A100-80GB"
+MODEL_NAME = "Qwen/Qwen3-4b"
+USE_YARN = True
+GPU_COUNT = 1
+GPU_TYPE: Literal["H100", "H200", "B200", "A100-80GB"] = "H100"
 
 hf_cache_vol = modal.Volume.from_name("huggingface-cache", create_if_missing=True)
 vllm_cache_vol = modal.Volume.from_name("vllm-cache", create_if_missing=True)
@@ -121,6 +122,9 @@ def serve():
 
     # assume multiple GPUs are for splitting up large matrix multiplications
     cmd += ["--pipeline-parallel-size", str(GPU_COUNT)]
+
+    if USE_YARN:
+        cmd += ["--rope-scaling '{\"rope_type\":\"yarn\",\"factor\":4.0,\"original_max_position_embeddings\":32768}' --max-model-len 131072"]
 
     print(cmd)
 

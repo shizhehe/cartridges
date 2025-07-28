@@ -1,12 +1,23 @@
-# React + Vite
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
-Currently, two official plugins are available:
+## Starting the server
+If your data is on a remote machine, you need to start the server and frontend on different machines. 
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+First run the following on the remote machine in Cursor/VSCode so that the port is automatically forwarded to your local machine:
+```bash
+uvicorn viz.src.server:app --host 0.0.0.0 --port 8001 --reload
+```
 
-## Expanding the ESLint configuration
+Then run the following on your local machine:
+```bash
+cd viz
+VITE_API_TARGET=http://localhost:8001 npm run dev
+```
+Make sure the `VITE_API_TARGET` is set to forwarded port. You can check this in VSCode by going to "Ports: Focus on Ports View" from the command palette (cmd+shift+p).
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+
+
+
+
+
+

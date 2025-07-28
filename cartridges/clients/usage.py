@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import tiktoken
 
@@ -72,3 +72,82 @@ def num_tokens_from_messages_openai(
     if include_reply_prompt:
         num_tokens += 3  # every reply is primed with <|start|>assistant<|message|>
     return num_tokens
+
+
+def num_tokens_from_messages_flexible(
+    messages: List[Dict[str, str]], 
+    tokenizer: Union[tiktoken.Encoding, Any],
+    include_reply_prompt: bool = False,
+):
+    """Return the number of tokens used by a list of messages.
+    
+    Works with both tiktoken.Encoding and Huggingface tokenizers.
+    """
+    
+    # Check if it's a tiktoken encoding
+    if hasattr(tokenizer, 'encode') and hasattr(tokenizer, 'name'):
+        # Use the original OpenAI counting logic for tiktoken
+        return num_tokens_from_messages_openai(messages, tokenizer, include_reply_prompt)
+    
+    # Handle Huggingface tokenizers
+    try:
+        # Import here to avoid dependency issues if transformers isn't installed
+        from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
+        
+        if isinstance(tokenizer, (PreTrainedTokenizer, PreTrainedTokenizerFast)):
+            # For Huggingface tokenizers, we need to estimate the overhead
+            # Different models have different chat templates and overhead
+            tokens_per_message = 3  # Conservative estimate
+            tokens_per_name = 1
+            
+            num_tokens = 0
+            for message in messages:
+                num_tokens += tokens_per_message
+                for key, value in message.items():
+                    # Use the tokenizer's encode method
+                    tokens = tokenizer.encode(value, add_special_tokens=False)
+                    num_tokens += len(tokens)
+                    if key == "name":
+                        num_tokens += tokens_per_name
+                        
+            if include_reply_prompt:
+                num_tokens += 3  # Rough estimate for reply prompt
+                
+            return num_tokens
+        
+    except ImportError:
+        pass
+    
+    # Fallback: if we can't identify the tokenizer type, try to use it anyway
+    # This handles custom tokenizers that implement an encode method
+    if hasattr(tokenizer, 'encode'):
+        tokens_per_message = 3
+        tokens_per_name = 1
+        
+        num_tokens = 0
+        for message in messages:
+            num_tokens += tokens_per_message
+            for key, value in message.items():
+                try:
+                    tokens = tokenizer.encode(value)
+                    # Handle different return types (list of ints, tensor, etc.)
+                    if hasattr(tokens, '__len__'):
+                        num_tokens += len(tokens)
+                    else:
+                        # Fallback to character-based estimation
+                        num_tokens += len(value) // 4  # Rough estimate: 4 chars per token
+                except Exception:
+                    # Last resort: character-based estimation
+                    num_tokens += len(value) // 4
+                    
+                if key == "name":
+                    num_tokens += tokens_per_name
+                    
+        if include_reply_prompt:
+            num_tokens += 3
+            
+        return num_tokens
+    
+    # Final fallback: character-based estimation
+    total_chars = sum(len(str(message.get(key, ""))) for message in messages for key in message)
+    return total_chars // 4  # Very rough estimate

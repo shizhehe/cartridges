@@ -131,10 +131,7 @@ class HFModelConfig(ModelConfig):
             self.pretrained_model_name_or_path,
             **self.load_kwargs
         )
-        
-        if self.attn_implementation is not None:
-            model.config._attn_implementation = self.attn_implementation
-        
+
         if self.tuning_method == 'peft' and self.peft.enabled:
             from peft import get_peft_model
             peft_config = self.peft.get_peft_config()

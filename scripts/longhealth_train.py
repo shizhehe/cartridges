@@ -10,7 +10,7 @@ from cartridges.models.llama import LlamaForCausalLM
 from cartridges.tasks.longhealth import LongHealthEvalDataset, LongHealthMultipleChoiceGenerateDataset
 from cartridges.tasks.longhealth.context import LongHealthStructuredContextConfig
 from cartridges.tasks.mmlu import MMLUGenerateDataset
-from cartridges.train import EvalDatasetConfig, GenerateDatasetConfig, TrainConfig
+from cartridges.train import PerplexityEvalConfig, GenerationEvalConfig, TrainConfig
 from cartridges.models.config import HFModelConfig
 from cartridges.datasets import CartridgeTrainDataset
 from cartridges.utils import WandBConfig
@@ -58,8 +58,8 @@ config = TrainConfig(
     save_every_n_steps=512,
     generate_every_n_steps=512,
     generate_max_new_tokens=512,
-    generate_datasets=[
-        GenerateDatasetConfig(
+    generate_evals=[
+        GenerationEvalConfig(
             dataset=LongHealthMultipleChoiceGenerateDataset.Config(
                 patient_ids=patient_ids, 
                 cot=True,
@@ -70,7 +70,7 @@ config = TrainConfig(
             batch_size=16,
             temperature=0.3
         ),
-        GenerateDatasetConfig(
+        GenerationEvalConfig(
             dataset=MMLUGenerateDataset.Config(
                 num_problems=512,
             ),
