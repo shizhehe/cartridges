@@ -2,15 +2,21 @@
 # before responding. 
 import random
 
-def add_thinking_prompt(content: str) -> str:
-    return f"{content}\n\n{random.choice(COT_INSTRUCTIONS)}"
+def add_thinking_prompt(content: str, random_cot: bool = True) -> str:
+    if random_cot:
+        cot_instruction = random.choice(COT_INSTRUCTIONS)
+    else:
+        cot_instruction = DEFAULT_COT
+    return f"{content}\n\n{cot_instruction}"
 
 MODEL_TO_THINKING_OVERRIDES = {
     "qwen/qwen3-4b": lambda enable_thinking: dict(enable_thinking=enable_thinking),
 }
 
+DEFAULT_COT = "Think before responding. Put your chain of thought between the <thinking> and </thinking> tags before providing your final response."
 
 COT_INSTRUCTIONS = [
+    DEFAULT_COT,
     "If helpful, you can think before responding. Put your thinking between <thinking> and </thinking> tags. Then, provide your final response between <response> and </response> tags.",
     "Respond in the following format: <thinking>...</thinking> <response>...</response>",
     "Explain your reasoning before providing your final response.",

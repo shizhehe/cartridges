@@ -35,18 +35,29 @@ SYSTEM_PROMPT_TEMPLATE = f"""Please answer the question below about the followin
 """
 
 BASE_PATH = "/home/sabri/code/cartridges/cartridges/data/ruler/_data"
-NIAH_PATH = f"{BASE_PATH}/qwen3_4b-l100000-n1-k128-v1_2-essay-key_words-val_numbers--1660737731696865120.json"
-NIAH_PATH = f"{BASE_PATH}/qwen3_4b-l100000-n1-k128-v1_1-essay-key_words-val_numbers-e83970e8.json"
+
+NUM_KEYS = (2, 2)
+num_keys_str = f"k{NUM_KEYS[0]}_{NUM_KEYS[1]}"
+
+# enable_thinking = not (NUM_KEYS == (1, 1))
+
+NUM_KEYS_TO_PATH = {
+    (1, 1): f"{BASE_PATH}/qwen3_4b-l100000-n1-k128-v1_1-essay-key_words-val_numbers-e83970e8.json",
+    (1, 2): f"{BASE_PATH}/qwen3_4b-l100000-n1-k128-v1_2-essay-key_words-val_numbers--1660737731696865120.json",
+    (2, 2): f"{BASE_PATH}/qwen3_4b-l100000-n1-k128-v2_2-essay-key_words-val_numbers-a7104531.json"
+}
+
+NIAH_PATH = NUM_KEYS_TO_PATH[NUM_KEYS]
 
 
 configs = [
     EvaluateConfig(
-        name=f"{file_name}",
+        name=f"{file_name}_{num_keys_str}",
         generator=ICLBaseline.Config(
             client=client,
             system_prompt_template=SYSTEM_PROMPT_TEMPLATE,
-            temperature=0.0,
-            max_completion_tokens=128,
+            temperature=0.3,
+            max_completion_tokens=256,
             context=NIAHResource.Config(niah_path=NIAH_PATH),
         ),
         eval=GenerationEvalConfig(
@@ -56,7 +67,7 @@ configs = [
             ),
             name_for_wandb=f"niah_mc",
             num_samples=1,
-            temperature=0.0,
+            temperature=0.3,
         ),
         max_num_batches_in_parallel=4,
         batch_size=32,

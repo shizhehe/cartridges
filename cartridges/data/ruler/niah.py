@@ -182,7 +182,7 @@ words = sorted(list(set(words)))
 
 
 # Positions
-DEPTHS = list(np.round(np.linspace(0, 100, num=256, endpoint=True)).astype(int))
+DEPTHS = list(np.round(np.linspace(0, 100, num=512, endpoint=True)).astype(int))
 
 
 def generate_random_number(num_digits=7):
@@ -410,7 +410,7 @@ if __name__ == "__main__":
             context_template=CONTEXT_TEMPLATE,
             query_template=QUERY_TEMPLATE,
             num_needle_k=128,
-            num_needle_v=(1,1),
+            num_needle_v=(2,2),
             type_haystack='essay',
             type_needle_k='words',
             tokens_to_generate=128,
