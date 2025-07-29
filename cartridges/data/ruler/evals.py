@@ -52,8 +52,19 @@ class NIAHGenerateDataset(CartridgeGenerateDataset):
         kwargs = {}
         if self.tokenizer.name_or_path in MODELS_WITH_THINKING:
             kwargs["enable_thinking"] = self.config.thinking
+        elif self.config.thinking:
+            cot_prompt = "Think before responding. Put your chain of thought between the <thinking> and </thinking> tags before providing your answer."
+        else:
+            cot_prompt = ""
 
-        prompt = f"{queries.query}\n\n{queries.answer_prompt}"
+        answer_prompt = queries.answer_prompt
+        if len(queries.answers) > 1:
+            answer_prompt = answer_prompt.replace("The special magic", f"The {len(queries.answers)} different special magic")
+            duplicate_prompt = "Do not output the same value twice."
+        else:
+            duplicate_prompt = ""
+
+        prompt = f"{queries.query}\n\n{cot_prompt}{answer_prompt}{duplicate_prompt}"
 
         input_ids = self.tokenizer.apply_chat_template(
             [{"role": "user", "content": prompt}],
@@ -82,7 +93,7 @@ class NIAHGenerateDataset(CartridgeGenerateDataset):
         convo_id: str
     ) -> Tuple[bool, Dict[str, Optional[str]]]:
         
-        pred_answers = pred.split(":")[-1].strip("{}'\" ")
+        pred_answers = pred.split(":")[-1].strip("{}'\" .,\t\n")
 
         if len(answer) == 1:
             correct = str(answer[0]) == str(pred_answers)

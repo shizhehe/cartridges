@@ -15,7 +15,7 @@ root = Path(__file__).parent.parent.parent
 # --- BEGIN ARGS ---
 PORT = 8080
 BRANCH = os.environ.get("BRANCH", "sabri/batch")
-MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen3-4B") # "Meta-Llama/Llama-3.2-3B-Instruct"
+MODEL_NAME = os.environ.get("MODEL_NAME", "Meta-Llama/Llama-3.1-8B-Instruct") # "Qwen/Qwen3-4B") 
 DP_SIZE = int(os.environ.get("DP_SIZE", 1))
 PP_SIZE = int(os.environ.get("PP_SIZE", 1))
 MAX_TOPK_LOGPROBS = int(os.environ.get("MAX_TOPK_LOGPROBS", 20))
@@ -50,9 +50,6 @@ hf_cache_vol = modal.Volume.from_name(
 flashinfer_cache_vol = modal.Volume.from_name(
     "flashinfer-cache", create_if_missing=True
 )
-
-
-
 
 gpu_count = DP_SIZE * PP_SIZE
 model_short = MODEL_NAME.lower().split("/")[-1]

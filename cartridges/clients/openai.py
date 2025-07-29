@@ -126,6 +126,7 @@ class OpenAIClient(Client):
         stop: List[str] = [],
         max_completion_tokens: Optional[int] = None,
         conversation_id: Optional[str] = None,
+        enable_thinking: Optional[bool] = None,
         **kwargs
     ) -> ClientResponse:
         assert len(chats) > 0
@@ -133,6 +134,13 @@ class OpenAIClient(Client):
         # Handle legacy single chat format
         if isinstance(chats[0], Dict):
             chats = [chats]
+
+        if enable_thinking is not None:
+            extra_body = {
+                "chat_template_kwargs": {"enable_thinking": enable_thinking}
+            }
+        else:
+            extra_body = {}
         
         # Create individual async tasks for each chat
         async def process_single_chat(messages: List[Dict[str, Any]]) -> tuple[ChatCompletion, List[Dict[str, Any]]]:
@@ -145,6 +153,7 @@ class OpenAIClient(Client):
                     stop=stop if stop else None,
                     n=1,
                     logprobs=True,
+                    extra_body=extra_body,
                     **kwargs
                 )
             
