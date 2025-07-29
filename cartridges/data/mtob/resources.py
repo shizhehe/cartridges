@@ -20,7 +20,7 @@ class MTOBResource(Resource):
         self.config = config
         self.content = prompt_generic(
             grammar_book=(
-                "medium" if self.setup == "medium_and_sentences" else "latex"
+                "medium" if config.setup == "medium_and_sentences" else "latex"
             ),
             include_wordlist=False,
             include_sentences=True,

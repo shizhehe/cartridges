@@ -46,7 +46,7 @@ def extract_answer_from_cot(text: str) -> str:
         return text.strip()
 
 
-class MtobGenerateDataset(CartridgeGenerateDataset):
+class MTOBGenerateDataset(CartridgeGenerateDataset):
     class Config(CartridgeGenerateDataset.Config):
         _pass_as_config = True
         use_cot: bool = False  # Added CoT config flag
@@ -66,7 +66,7 @@ class MtobGenerateDataset(CartridgeGenerateDataset):
         # Select prompt based on config
         kwargs = {}
         if self.tokenizer.name_or_path in MODELS_WITH_THINKING:
-            kwargs["enable_thinking"] = self.config.cot
+            kwargs["enable_thinking"] = self.config.use_cot
 
         if self.config.use_cot:
             prompt_func = prompt_cot
@@ -137,11 +137,11 @@ class MtobGenerateDataset(CartridgeGenerateDataset):
 # --- Generation Datasets using TEST data ---
 
 
-class MtobEnglishToKalamangGenerateDataset(MtobGenerateDataset):
-    class Config(MtobGenerateDataset.Config):  # Inherit from base Config
+class MTOBEnglishToKalamangGenerateDataset(MTOBGenerateDataset):
+    class Config(MTOBGenerateDataset.Config):  # Inherit from base Config
         pass  # No changes needed here unless specific overrides
 
-    def __init__(self, config: Config, tokenizer):
+    def __init__(self, config: Config, tokenizer, seed: int):
         super().__init__(config, tokenizer)  # Call parent __init__
         # load_test_ek() returns [{'original': ..., 'ground_truth': ...}]
         self.data = load_test_ek()
@@ -149,11 +149,11 @@ class MtobEnglishToKalamangGenerateDataset(MtobGenerateDataset):
         self.target = "Kalamang"
 
 
-class MtobKalamangToEnglishGenerateDataset(MtobGenerateDataset):
-    class Config(MtobGenerateDataset.Config):  # Inherit from base Config
+class MTOBKalamangToEnglishGenerateDataset(MTOBGenerateDataset):
+    class Config(MTOBGenerateDataset.Config):  # Inherit from base Config
         pass  # No changes needed here unless specific overrides
 
-    def __init__(self, config: Config, tokenizer):
+    def __init__(self, config: Config, tokenizer, seed: int):
         super().__init__(config, tokenizer)  # Call parent __init__
         # load_test_ke() returns [{'original': ..., 'ground_truth': ...}]
         self.data = load_test_ke()
@@ -174,14 +174,14 @@ def mtob_generate_datasets(
     return [
         GenerationEvalConfig(
             name_for_wandb=f"mmtob-ke-test{cot_suffix}",
-            dataset=MtobKalamangToEnglishGenerateDataset.Config(use_cot=use_cot),
+            dataset=MTOBKalamangToEnglishGenerateDataset.Config(use_cot=use_cot),
             batch_size=batch_size,
             num_samples=num_samples,
             temperature=temperature,
         ),
         GenerationEvalConfig(
             name_for_wandb=f"mmtob-ek-test{cot_suffix}",
-            dataset=MtobEnglishToKalamangGenerateDataset.Config(use_cot=use_cot),
+            dataset=MTOBEnglishToKalamangGenerateDataset.Config(use_cot=use_cot),
             batch_size=batch_size,
             num_samples=num_samples,
             temperature=temperature,

@@ -214,6 +214,7 @@ class ICLBaseline(BaselineGenerator):
         system_prompt_template: str = "{title}\n\n{content}"
         max_completion_tokens: int = 384
         max_context_tokens: Optional[int] = None  # will truncate if longer
+        enable_thinking: Optional[bool] = None
 
         log_system_prompt: bool = False
 
@@ -289,6 +290,7 @@ class ICLBaseline(BaselineGenerator):
             chats=chats,
             max_completion_tokens=self.config.max_completion_tokens,
             temperature=self.config.temperature,
+            enable_thinking=self.config.enable_thinking,
         )
         assert len(response.samples) == len(chats)
 

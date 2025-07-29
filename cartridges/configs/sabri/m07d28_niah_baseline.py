@@ -63,7 +63,7 @@ configs = [
         eval=GenerationEvalConfig(
             dataset=NIAHGenerateDataset.Config(
                 niah_path=NIAH_PATH,
-                thinking=False,
+                thinking=True,
             ),
             name_for_wandb=f"niah_mc",
             num_samples=1,

@@ -137,10 +137,7 @@ def download_wandb_artifacts(config: TrainConfig):
     for eval_or_gen_ds in itertools.chain(
         config.eval_datasets, config.generate_evals
     ):
-        if isinstance(
-            eval_or_gen_ds.dataset,
-            (CartridgeTrainDataset.Config, CartridgeGenerateDataset.Config),
-        ):
+        if isinstance(eval_or_gen_ds.dataset, (CartridgeTrainDataset.Config)):
             artifact_names += get_dataset_names(eval_or_gen_ds.dataset)
 
     download_artifacts(artifact_names)
