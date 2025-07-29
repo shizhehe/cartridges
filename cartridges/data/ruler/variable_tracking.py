@@ -306,7 +306,7 @@ def generate_input_output(num_noises, config: VariableTrackingConfig, is_icl=Fal
         
         query_text = f"Find all variables that are assigned the value {initial_value} in the text above."
         
-        answer_prompt = f"According to the chain(s) of variable assignment in the text above, {len(answers)} variables are assigned the value {initial_value}, they are:"
+        answer_prompt = f"According to the chain(s) of variable assignment in the text above, {len(answers)} variables are assigned the value {initial_value}. List only the variable names (without the VAR keyword) inside <answer></answer> tags, one per line:"
         
         queries.append(VariableTrackingQuery(
             query=query_text,
@@ -408,7 +408,7 @@ if __name__ == "__main__":
             num_chains=128,
             num_hops=3,
             type_haystack='noise',
-            tokens_to_generate=30,
+            tokens_to_generate=128,
             num_samples=1,
             tokenizer="Qwen/Qwen3-4B",
             max_seq_length=100_000,  # Much smaller for testing

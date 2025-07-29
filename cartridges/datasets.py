@@ -117,7 +117,12 @@ def llama_messages_to_element(
     )
 
 MODEL_TO_MESSAGE_CONVERTER = {
+    "Qwen/Qwen3-0.6b": qwen_messages_to_element,
+    "Qwen/Qwen3-1.7b": qwen_messages_to_element,
     "Qwen/Qwen3-4b": qwen_messages_to_element,
+    "Qwen/Qwen3-8b": qwen_messages_to_element,
+    "Qwen/Qwen3-14b": qwen_messages_to_element,
+    "Qwen/Qwen3-32b": qwen_messages_to_element,
     "meta-llama/Llama-3.2-3B-Instruct": llama_messages_to_element,
 }
 MODEL_TO_MESSAGE_CONVERTER = {k.lower(): v for k, v in MODEL_TO_MESSAGE_CONVERTER.items()}

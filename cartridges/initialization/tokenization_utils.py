@@ -44,7 +44,12 @@ MODEL_TO_SYSTEM_PROMPT_TOKENIZER = {
     "meta-llama/Llama-3.2-1B-Instruct": llama_tokenize_data_into_system_prompt,
     "meta-llama/Llama-3.2-3B-Instruct": llama_tokenize_data_into_system_prompt,
     "meta-llama/Llama-3.1-8B-Instruct": llama_tokenize_data_into_system_prompt,
+    "Qwen/Qwen3-0.6b": qwen_tokenize_data_into_system_prompt,
+    "Qwen/Qwen3-1.7b": qwen_tokenize_data_into_system_prompt,
     "Qwen/Qwen3-4b": qwen_tokenize_data_into_system_prompt,
+    "Qwen/Qwen3-8b": qwen_tokenize_data_into_system_prompt,
+    "Qwen/Qwen3-14b": qwen_tokenize_data_into_system_prompt,
+    "Qwen/Qwen3-32b": qwen_tokenize_data_into_system_prompt,
 }
 MODEL_TO_SYSTEM_PROMPT_TOKENIZER = {k.lower(): v for k, v in MODEL_TO_SYSTEM_PROMPT_TOKENIZER.items()}
 
@@ -123,5 +128,10 @@ MODEL_TO_CHAT_TEMPLATE = {
 
 
 MODELS_WITH_THINKING = {
+    "Qwen/Qwen3-0.6b",
+    "Qwen/Qwen3-1.7b",
     "Qwen/Qwen3-4b",
+    "Qwen/Qwen3-8b",
+    "Qwen/Qwen3-14b",
+    "Qwen/Qwen3-32b",
 }

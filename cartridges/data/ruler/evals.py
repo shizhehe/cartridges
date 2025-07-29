@@ -134,9 +134,13 @@ class VariableTrackingGenerateDataset(CartridgeGenerateDataset):
         kwargs = {}
         if self.tokenizer.name_or_path in MODELS_WITH_THINKING:
             kwargs["enable_thinking"] = self.config.thinking
+        elif self.config.thinking:
+            cot_prompt = "Think before responding. Put your chain of thought between the <thinking> and </thinking> tags before providing your answer.\n\n"
+        else:
+            cot_prompt = ""
 
         # Combine context and query for variable tracking
-        full_prompt = f"{self.sample.context}\n\nQuestion: {query.query}\n\n{query.answer_prompt}"
+        full_prompt = f"{self.sample.context}\n\nQuestion: {query.query}\n\n{cot_prompt}{query.answer_prompt}"
 
         input_ids = self.tokenizer.apply_chat_template(
             [{"role": "user", "content": full_prompt}],
@@ -164,34 +168,40 @@ class VariableTrackingGenerateDataset(CartridgeGenerateDataset):
         convo_id: str
     ) -> Tuple[bool, Dict[str, Optional[str]]]:
         
-        # Extract predicted variables from the response
-        # Look for the part after "they are:" or similar
-        pred_lower = pred.lower()
-        if "they are:" in pred_lower:
-            pred_answers = pred.split("they are:")[-1].strip()
-        elif "are:" in pred_lower:
-            pred_answers = pred.split("are:")[-1].strip()
-        else:
-            pred_answers = pred.strip()
+        import re
         
-        # Clean up the prediction - remove punctuation and split by commas
-        pred_answers = pred_answers.strip("{}'\".,; ")
+        # Extract predicted variables from <answer></answer> tags
         pred_variables = set()
         
-        if pred_answers:
-            # Split by common delimiters and clean each variable
-            for var in pred_answers.replace(",", " ").replace(";", " ").split():
-                var = var.strip("{}'\".,; ")
-                if var:
-                    pred_variables.add(var.upper())
+        # Look for content within <answer></answer> tags
+        answer_match = re.search(r'<answer>(.*?)</answer>', pred, re.DOTALL | re.IGNORECASE)
+        if answer_match:
+            answer_content = answer_match.group(1).strip()
+            # Split by lines and clean each variable name
+            for line in answer_content.split('\n'):
+                var = line.strip().upper()
+                if var and var.isalpha():  # Only keep alphabetic variable names
+                    pred_variables.add(var)
         
         # Convert expected answers to set for comparison
         expected_variables = set(str(var).upper() for var in answer)
         
-        # Check if prediction matches expected variables
-        correct = pred_variables == expected_variables
+        # Calculate F1-score
+        true_positives = len(pred_variables & expected_variables)
+        false_positives = len(pred_variables - expected_variables)
+        false_negatives = len(expected_variables - pred_variables)
         
-        return correct, {
+        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
+        recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
+        f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+        
+        return f1_score, {
             "pred_variables": sorted(list(pred_variables)),
-            "expected_variables": sorted(list(expected_variables))
+            "expected_variables": sorted(list(expected_variables)),
+            "precision": precision,
+            "recall": recall,
+            "f1_score": f1_score,
+            "true_positives": true_positives,
+            "false_positives": false_positives,
+            "false_negatives": false_negatives
         }
