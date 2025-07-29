@@ -419,10 +419,34 @@ def figure_to_wandb(fig: Figure) -> wandb.Image:
     plt.close(fig)
     return wandb_img
 
+def _list_cache_files(run_id: str) -> list[str]:
+    import wandb
+    import re
+
+    api = wandb.Api()
+
+    # Get all files from the run
+    files = [file.name for file in api.run(run_id).files()]
+
+    # Filter for cache-*.pt files using regex
+    cache_files = [file for file in files if re.match(r"^cache-.*\.pt$", file)]
+
+    # Extract the epoch or step number from each cache file and create a mapping
+    file_to_step = {}
+    for file in cache_files:
+        # Try to match both epoch and step patterns
+        match = re.search(r"cache-(epoch|step)(\d+)\.pt", file)
+        if match:
+            step_num = int(match.group(2))
+            file_to_step[file] = step_num
+
+    # Sort the files by their step/epoch number
+    sorted_cache_files = sorted(cache_files, key=lambda x: file_to_step.get(x, 0), reverse=True)
+    return sorted_cache_files
 
 def load_model_and_cache_from_wandb(
     wandb_run_id: str,
-    step: int,
+    filename: Optional[str] = None,
     device: str = "cuda",
 ) -> tuple["CacheAndModel", AutoTokenizer]:
     from cartridges.train import TrainConfig, CacheAndModel
@@ -436,16 +460,27 @@ def load_model_and_cache_from_wandb(
     model = train_config.model.instantiate().to(device)
     # tokenizer = AutoTokenizer.from_pretrained(train_config.tokenizer)
 
+
+    cache_files = _list_cache_files(wandb_run_id)
+    if len(cache_files) == 0:
+        raise ValueError(f"No cache checkpoints found for wandb run {wandb_run_id}")
+    
+    if filename is not None:
+        assert filename in cache_files, f"Cache file {filename} not found in wandb run {wandb_run_id}"
+    else:
+        filename = cache_files[0]
+    print(f"Loading cache from {filename}")
+
     if is_rank_zero:
         out = wandb.restore(
-            f"cache-step{step}.pt", run_path=wandb_run_id, root=train_config.run_dir
+            filename, run_path=wandb_run_id, root=train_config.run_dir
         )
     
     if is_ddp:
         dist.barrier()
 
     cache = TrainableCache.from_pretrained(
-        os.path.join(train_config.run_dir, f"cache-step{step}.pt"), 
+        os.path.join(train_config.run_dir, filename), 
         device=device
     )
 
