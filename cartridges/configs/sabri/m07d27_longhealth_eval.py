@@ -5,6 +5,7 @@ import socket
 import pydrantic
 from pydrantic.variables import FormatStringVariable
 
+from cartridges.initialization.pretrained import KVCacheFromPretrained
 from cartridges.initialization.random import KVFromRandomText, KVFromRandomVectors
 from cartridges.models.llama.modeling_llama import FlexLlamaForCausalLM
 from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
@@ -47,15 +48,18 @@ elif MODEL == "qwen":
     )
 else:
     raise ValueError(f"Invalid model: {MODEL}")
+
+WANDB_RUN_ID = "hazy-research/cartridges/2mjcsueh"
+
 config = TrainConfig(
     model=model,
-    kv_cache_initializer=KVFromRandomText.Config(
-        max_tokens=NUM_TOKENS
+    kv_cache_initializer=KVCacheFromPretrained.Config(
+        wandb_run_id=WANDB_RUN_ID,
     ),
     
     lr=2e-2,
     loss_type="logits",
-    epochs=2,
+    epochs=0,
     global_batch_size=32,
 
     dataset=CartridgeTrainDataset.Config(
@@ -76,12 +80,12 @@ config = TrainConfig(
                 patient_ids=patient_ids,
             ),
             name_for_wandb=f"longhealth_{patients_str}",
-            generate_max_new_tokens=2048,
+            generate_max_new_tokens=1024,
             batch_size=32,
             temperature=0.3,
         )
     ],
-    eval_every_n_steps=512,
+    eval_every_n_steps=256,
     eval_datasets=[],
     distributed_backend="gloo",
 
@@ -91,7 +95,7 @@ config = TrainConfig(
         entity="hazy-research",
     ),
     output_dir=os.environ["CARTRIDGES_OUTPUT_DIR"],
-    name=FormatStringVariable(f"{file_name}_lr{{lr}}_toks{{kv_cache_initializer.max_tokens}}"),
+    name=FormatStringVariable(f"{file_name}_lr{{lr}}_{WANDB_RUN_ID}"),
 )
 
 

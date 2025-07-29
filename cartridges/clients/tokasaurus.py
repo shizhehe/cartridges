@@ -19,6 +19,7 @@ from cartridges.clients.base import (
 )
 from cartridges.clients.usage import Usage
 from cartridges.utils import get_logger
+from cartridges.utils.thinking import MODEL_TO_THINKING_OVERRIDES, add_thinking_prompt
 
 
 logger = get_logger(__name__)
@@ -165,7 +166,7 @@ class TokasaurusClient(Client):
         stop: Optional[List[str]] = None,
         top_logprobs: Optional[int] = None,
         modal_upstream_id: Optional[str] = None,
-        enable_thinking: bool = True,
+        enable_thinking: bool = False,
         **kwargs,
     ) -> ClientResponse:
         """
@@ -192,15 +193,27 @@ class TokasaurusClient(Client):
         t0 = time.time()
         logger.info(f"[batch={modal_upstream_id}] Sending batch chat request")
 
+        if self.config.model_name.lower() in MODEL_TO_THINKING_OVERRIDES:
+            # this provides the kwargs needed for the apply_chat_template to enable
+            # thinking. 
+            thinking_overrides = MODEL_TO_THINKING_OVERRIDES[self.config.model_name.lower()](enable_thinking)
+        elif enable_thinking:
+            # if the model is not in the MODEL_TO_THINKING_OVERRIDES, we add a
+            # thinking prompt to the last message of the chat. 
+            thinking_overrides = {}
+            for chat in chats:
+                chat[-1]["content"] = add_thinking_prompt(chat[-1]["content"])
+        else:
+            thinking_overrides = {}
+
+
         def _construct_request(chat: List[Dict[str, Any]]) -> dict:
             request = {
                 "messages": chat,
                 "model": self.config.model_name,
                 "max_completion_tokens": max_completion_tokens,
                 "temperature": temperature,
-                "apply_chat_template_overrides": dict(
-                    enable_thinking=enable_thinking,
-                ),
+                "apply_chat_template_overrides": thinking_overrides,
                 "logprobs_in_fingerprint": True,
             }
             if top_logprobs is not None:
@@ -251,3 +264,4 @@ class TokasaurusClient(Client):
         
         assert len(samples) == len(chats), f"Expected {len(chats)} samples, got {len(samples)}"
         return ClientResponse(samples=samples, usage=usage)
+

@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import re
 import time
-from typing import Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 import pandas as pd
 from pydrantic import BaseConfig, ObjectConfig, RunConfig
@@ -794,78 +794,80 @@ def evaluate_generations(
         leave=False,
         disable=not is_rank_zero,
     ):
+        for sample_idx in range(num_samples):
 
-        elements = [
-            (i, dataset[indexes[i]])
-            for i in range(batch_start, batch_start + batch_size)
-            if i < len(indexes)
-        ]
-        if len(elements) == 0:
-            continue
-        input_ids = torch.cat([elem.input_ids[0] for _, elem in elements]).to(local_rank)
-        seq_ids = torch.cat(
-            [
-                torch.full((elem.input_ids.shape[1],), idx, dtype=torch.long, device=local_rank)
-                for idx, elem in elements
+            elements = [
+                (i, dataset[indexes[i]])
+                for i in range(batch_start, batch_start + batch_size)
+                if i < len(indexes)
             ]
-        )
-        position_ids = torch.cat(
-            [torch.arange(elem.input_ids.shape[1], device=local_rank) for _, elem in elements]
-        )
-        pred_ids = flex_generate(
-            input_ids=input_ids,
-            seq_ids=seq_ids,
-            position_ids=position_ids,
-            cache=cache,
-            model=model,
-            tokenizer=tokenizer,
-            max_new_tokens=(
-                config.generate_max_new_tokens
-                if config.override_max_tokens is None
-                else config.override_max_tokens
-            ),
-            # num_samples=num_samples,
-            temperature=config.temperature,
-        )
-        pred = tokenizer.batch_decode(pred_ids, skip_special_tokens=True)
-
-        elements = [
-            (index, sample_idx, elem)
-            for index, elem in elements
-            for sample_idx in range(num_samples)
-        ]
-
-        for pred_ids, pred, (index, sample_idx, element) in zip(pred_ids, pred, elements):
-            
-            if has_score:
-                metrics, extras = dataset.score(
-                    pred=pred, answer=element.answer, convo_id=element.convo_id
-                )
-            else:
-                metrics, extras = None, {}
-
-            if not isinstance(metrics, dict):
-                # Support for older datasets that return a single bool or float as metrics
-                metrics = {"score": metrics}
-            else:
-                metrics = {f"{k}_score": v for k, v in metrics.items()}
-            
-            results.append(
-                {
-                    "index": index,
-                    "optimizer_step": optimizer_step,
-                    "prompt": element.prompt,
-                    "answer": element.answer,
-                    "pred": pred,
-                    "convo_id": element.convo_id,
-                    "sample_idx": sample_idx,
-                    "num_system_and_user_tokens": element.input_ids.shape[1],
-                    "num_assistant_tokens": len(pred_ids),
-                    **metrics,
-                    **element.metadata,
-                    **extras,
-                }
+            if len(elements) == 0:
+                continue
+            input_ids = torch.cat([elem.input_ids[0] for _, elem in elements]).to(local_rank)
+            seq_ids = torch.cat(
+                [
+                    torch.full((elem.input_ids.shape[1],), idx, dtype=torch.long, device=local_rank)
+                    for idx, elem in elements
+                ]
             )
+            position_ids = torch.cat(
+                [torch.arange(elem.input_ids.shape[1], device=local_rank) for _, elem in elements]
+            )
+            pred_ids: Dict[int, List[int]] = flex_generate(
+                input_ids=input_ids,
+                seq_ids=seq_ids,
+                position_ids=position_ids,
+                cache=cache,
+                model=model,
+                tokenizer=tokenizer,
+                max_new_tokens=(
+                    config.generate_max_new_tokens
+                    if config.override_max_tokens is None
+                    else config.override_max_tokens
+                ),
+                temperature=config.temperature,
+                show_progress=True
+            )
+            
+            pred = tokenizer.batch_decode(pred_ids, skip_special_tokens=True)
+
+            elements = {seq_id: elem for seq_id, elem in elements}
+
+            for  (seq_id, curr_pred_ids) in pred_ids.items():
+                element = elements[seq_id]
+                pred = tokenizer.decode(curr_pred_ids, skip_special_tokens=True)
+
+                
+                
+                if has_score:
+                    metrics, extras = dataset.score(
+                        pred=pred, answer=element.answer, convo_id=element.convo_id
+                    )
+                else:
+                    metrics, extras = None, {}
+
+                if not isinstance(metrics, dict):
+                    # Support for older datasets that return a single bool or float as metrics
+                    metrics = {"score": metrics}
+                else:
+                    metrics = {f"{k}_score": v for k, v in metrics.items()}
+                
+                results.append(
+                    {
+                        "index": indexes[seq_id],
+                        "optimizer_step": optimizer_step,
+                        "prompt": element.prompt,
+                        "answer": element.answer,
+                        "pred": pred,
+                        "convo_id": element.convo_id,
+                        "sample_idx": sample_idx,
+                        "num_system_and_user_tokens": element.input_ids.shape[1],
+                        "num_assistant_tokens": len(pred_ids),
+                        **metrics,
+                        **element.metadata,
+                        **extras,
+                    }
+                )
 
     batch_score = None
     if has_batch_score:

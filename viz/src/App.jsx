@@ -22,7 +22,9 @@ function App() {
         const response = await fetch('/api/datasets')
         const data = await response.json()
         console.log('Datasets received:', data)
-        setDatasets(data)
+        // Ensure datasets are sorted by relative path (reverse alphabetical)
+        const sortedData = data.sort((a, b) => b.relative_path.localeCompare(a.relative_path))
+        setDatasets(sortedData)
       } catch (error) {
         console.error('Failed to discover datasets:', error)
       }
@@ -355,6 +357,22 @@ function App() {
               <h2 className="text-2xl font-semibold text-gray-800">Examples Overview</h2>
               <div className="text-sm text-gray-600">
                 {totalExamples} total examples
+              </div>
+            </div>
+            
+            <div className="mb-4 p-3 bg-gray-50 rounded-lg border">
+              <div className="flex items-center justify-between">
+                <div className="flex-1 mr-3">
+                  <div className="text-xs text-gray-500 mb-1">Dataset Path:</div>
+                  <div className="text-sm font-mono text-gray-700 break-all">{selectedDataset}</div>
+                </div>
+                <button
+                  onClick={() => navigator.clipboard.writeText(selectedDataset)}
+                  className="px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border border-blue-300 whitespace-nowrap"
+                  title="Copy path to clipboard"
+                >
+                  Copy
+                </button>
               </div>
             </div>
             

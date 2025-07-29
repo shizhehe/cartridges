@@ -8,7 +8,6 @@ import torch
 import torch.distributed as dist
 import wandb
 
-from cartridges.structs import Context
 from cartridges.cache import AttnConfig, KVCacheFactory, TrainableCache
 from cartridges.utils import get_logger
 
@@ -50,9 +49,8 @@ class KVCacheFromPretrained(KVCacheFactory):
     def __init__(self, config: Config):
         self.config = config
 
-    def initalize_kv_cache(
+    def initialize_kv_cache(
         self,
-        context: Optional[Context]=None,
         tokenizer: Optional[AutoTokenizer]=None,
         model: Optional[torch.nn.Module]=None,
         attn_config: Optional[AttnConfig]=None,
@@ -86,7 +84,8 @@ class KVCacheFromPretrained(KVCacheFactory):
                     run_path=self.config.wandb_run_id, 
                     root=cache_dir,
                 )
-            dist.barrier()
+            if is_ddp:
+                dist.barrier()
 
         logger.info(f"Loading cache from {cache_dir / filename}")
         cache = TrainableCache.from_pretrained(

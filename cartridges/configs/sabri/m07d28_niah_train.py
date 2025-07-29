@@ -5,6 +5,7 @@ import socket
 import pydrantic
 from pydrantic.variables import FormatStringVariable
 
+from cartridges.data.ruler.evals import NIAHGenerateDataset
 from cartridges.initialization.random import KVFromRandomText, KVFromRandomVectors
 from cartridges.models.llama.modeling_llama import FlexLlamaForCausalLM
 from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
@@ -24,29 +25,41 @@ patient_ids = [f"patient_{idx:02d}" for idx in patient_idxs]
 
 NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "1024"))
 
-MODEL = os.environ.get("MODEL", "qwen")
+NUM_KEYS = 1
+
+MODEL = os.environ.get("MODEL", "llama")
 if MODEL == "llama":
-    data_sources = [
-        "/data/sabri/cartridges/2025-07-26-12-21-32-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_llama-3.2-3b_p10_n65536-0/artifact/dataset.pkl",
-        "/data/sabri/cartridges/2025-07-26-13-40-44-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_llama-3.2-3b_p10_n65536-0/artifact/dataset.pkl"
-    ]
+    DATA_SOURCES = {
+        2: [
+            "/data/sabri/cartridges/2025-07-28-10-41-03-m07d28_niah_synthesize/m07d28_niah_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl",
+
+            "/data/sabri/cartridges/2025-07-28-11-40-25-m07d28_niah_synthesize/m07d28_niah_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl",
+
+            "/data/sabri/cartridges/2025-07-28-11-46-58-m07d28_niah_synthesize/m07d28_niah_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl",
+
+            "/data/sabri/cartridges/2025-07-28-12-08-34-m07d28_niah_synthesize/m07d28_niah_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl",
+        ],
+        1: [
+            "/data/sabri/cartridges/2025-07-28-12-18-54-m07d28_niah_synthesize/m07d28_niah_synthesize_llama-3.2-3b_n65536_k1-0/artifact/dataset.pkl",
+            "/data/sabri/cartridges/2025-07-28-12-28-46-m07d28_niah_synthesize/m07d28_niah_synthesize_llama-3.2-3b_n65536_k1-0/artifact/dataset.pkl",
+        ]
+    }
     model = HFModelConfig(
         pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
         model_cls=FlexLlamaForCausalLM,
     )
-elif MODEL == "qwen":
-    data_sources = [
-        # "/data/sabri/cartridges/2025-07-26-12-02-19-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_qwen3-4b_p10_n65536-0/artifact/dataset.pkl"
-
-        "/data/sabri/cartridges/2025-07-27-14-11-52-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_qwen3-4b_p10_n65536-0/artifact/dataset.pkl",
-        "/data/sabri/cartridges/2025-07-27-15-00-07-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_qwen3-4b_p10_n65536-0/artifact/dataset.pkl"
-    ]
-    model=HFModelConfig(
-        pretrained_model_name_or_path="Qwen/Qwen3-4b",
-        model_cls=FlexQwen3ForCausalLM,
-    )
 else:
     raise ValueError(f"Invalid model: {MODEL}")
+
+
+NUM_KEYS_TO_PATH = {
+    1: "/home/sabri/code/cartridges/cartridges/data/ruler/_data/qwen3_4b-l100000-n1-k128-v1_1-essay-key_words-val_numbers-e83970e8.json",
+    2: "/home/sabri/code/cartridges/cartridges/data/ruler/_data/qwen3_4b-l100000-n1-k128-v1_2-essay-key_words-val_numbers--1660737731696865120.json",
+}
+
+data_sources = DATA_SOURCES[NUM_KEYS]
+niah_path = NUM_KEYS_TO_PATH[NUM_KEYS]
+
 config = TrainConfig(
     model=model,
     kv_cache_initializer=KVFromRandomText.Config(
@@ -72,14 +85,16 @@ config = TrainConfig(
     generate_every_n_steps=128,
     generate_evals=[
         GenerationEvalConfig(
-            dataset=LongHealthMultipleChoiceGenerateDataset.Config(
-                patient_ids=patient_ids,
+            dataset=NIAHGenerateDataset.Config(
+                niah_path=niah_path,
+                thinking=False,
             ),
-            name_for_wandb=f"longhealth_{patients_str}",
-            generate_max_new_tokens=2048,
-            batch_size=32,
-            temperature=0.3,
-        )
+            name_for_wandb=f"niah_mc",
+            num_samples=1,
+            temperature=0.0,
+            batch_size=16,
+        ),
+        
     ],
     eval_every_n_steps=512,
     eval_datasets=[],
@@ -91,7 +106,7 @@ config = TrainConfig(
         entity="hazy-research",
     ),
     output_dir=os.environ["CARTRIDGES_OUTPUT_DIR"],
-    name=FormatStringVariable(f"{file_name}_lr{{lr}}_toks{{kv_cache_initializer.max_tokens}}"),
+    name=FormatStringVariable(f"{file_name}_lr{{lr}}_toks{{kv_cache_initializer.max_tokens}}_k{NUM_KEYS}"),
 )
 
 

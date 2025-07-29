@@ -284,6 +284,7 @@ class ICLBaseline(BaselineGenerator):
             )
             chats.append(messages)
 
+
         response: ClientResponse = await self.client.chat(
             chats=chats,
             max_completion_tokens=self.config.max_completion_tokens,
