@@ -38,6 +38,8 @@ if MODEL == "qwen":
     )
 else:
     raise ValueError(f"Invalid model: {MODEL}")
+
+for lr in [9e-1, 1e-2, 2e-2, 4e-2]:
 config = TrainConfig(
     model=model,
     kv_cache_initializer=KVFromRandomText.Config(

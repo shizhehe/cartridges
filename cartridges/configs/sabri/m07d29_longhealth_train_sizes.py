@@ -35,15 +35,20 @@ model=HFModelConfig(
 
 if MODEL_SIZE == "0.6":
     data_sources = [
-        "/data/sabri/cartridges/2025-07-29-09-09-24-m07d29_longhealth_synthesize_sizes/m07d29_longhealth_synthesize_sizes_qwen3-0.6b_p10_n131072-0/artifact/dataset.pkl"
+        "/data/sabri/cartridges/2025-07-29-13-00-47-m07d29_longhealth_synthesize_sizes/m07d29_longhealth_synthesize_sizes_qwen3-0.6b_p10_n131072-0/artifact/dataset.pkl"
     ]
 elif MODEL_SIZE == "1.7":
     data_sources = [
-        "/data/sabri/cartridges/2025-07-29-09-09-24-m07d29_longhealth_synthesize_sizes/m07d29_longhealth_synthesize_sizes_qwen3-1.7b_p10_n131072-1/artifact/dataset.pkl"
+        "/data/sabri/cartridges/2025-07-29-13-00-47-m07d29_longhealth_synthesize_sizes/m07d29_longhealth_synthesize_sizes_qwen3-1.7b_p10_n131072-1/artifact/dataset.pkl"
+    ]
+elif MODEL_SIZE == "4":
+    data_sources = [
+        "/data/sabri/cartridges/2025-07-27-14-11-52-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_qwen3-4b_p10_n65536-0/artifact/dataset.pkl",
+        "/data/sabri/cartridges/2025-07-27-15-00-07-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_qwen3-4b_p10_n65536-0/artifact/dataset.pkl"
     ]
 elif MODEL_SIZE == "8":
     data_sources = [
-        "/data/sabri/cartridges/2025-07-29-09-09-24-m07d29_longhealth_synthesize_sizes/m07d29_longhealth_synthesize_sizes_qwen3-8b_p10_n131072-2/artifact/dataset.pkl"
+        "/data/sabri/cartridges/2025-07-29-13-00-47-m07d29_longhealth_synthesize_sizes/m07d29_longhealth_synthesize_sizes_qwen3-8b_p10_n131072-2/artifact/dataset.pkl"
     ]
 else:
     raise ValueError(f"Invalid model: {MODEL_SIZE}")

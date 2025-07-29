@@ -823,7 +823,7 @@ def evaluate_generations(
                     else config.override_max_tokens
                 ),
                 temperature=config.temperature,
-                show_progress=True
+                show_progress=is_rank_zero
             )
             
             pred = tokenizer.batch_decode(pred_ids, skip_special_tokens=True)

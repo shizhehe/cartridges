@@ -10,7 +10,10 @@ def add_thinking_prompt(content: str, random_cot: bool = True) -> str:
     return f"{content}\n\n{cot_instruction}"
 
 MODEL_TO_THINKING_OVERRIDES = {
+    "qwen/qwen3-0.6b": lambda enable_thinking: dict(enable_thinking=enable_thinking),
+    "qwen/qwen3-1.7b": lambda enable_thinking: dict(enable_thinking=enable_thinking),
     "qwen/qwen3-4b": lambda enable_thinking: dict(enable_thinking=enable_thinking),
+    "qwen/qwen3-8b": lambda enable_thinking: dict(enable_thinking=enable_thinking),
 }
 
 DEFAULT_COT = "Think before responding. Put your chain of thought between the <thinking> and </thinking> tags before providing your final response."

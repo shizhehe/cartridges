@@ -29,7 +29,7 @@ SYSTEM_PROMPT_TEMPLATE = f"""Please answer the question below about the followin
 BASE_PATH = "/home/sabri/code/cartridges/cartridges/data/ruler/_data"
 
 # Use the default variable tracking dataset path
-VT_PATH = f"{BASE_PATH}/qwen3_4b-l100000-n1-c128-h3-noise-6fe0da10.json"
+VT_PATH = f"{BASE_PATH}/qwen3_4b-l100000-n1-c64-h2-noise-9df65ada.json"
 
 configs = [
     EvaluateConfig(
@@ -38,7 +38,7 @@ configs = [
             client=client,
             system_prompt_template=SYSTEM_PROMPT_TEMPLATE,
             temperature=0.3,
-            max_completion_tokens=256,
+            max_completion_tokens=1024,
             context=VariableTrackingResource.Config(variable_tracking_path=VT_PATH),
         ),
         eval=GenerationEvalConfig(

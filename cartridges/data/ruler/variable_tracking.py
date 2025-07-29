@@ -405,8 +405,8 @@ if __name__ == "__main__":
         variable_tracking=VariableTrackingConfig(
             seed=42,
             context_template=CONTEXT_TEMPLATE,
-            num_chains=128,
-            num_hops=3,
+            num_chains=64,
+            num_hops=2,
             type_haystack='noise',
             tokens_to_generate=128,
             num_samples=1,

@@ -135,7 +135,12 @@ class VariableTrackingGenerateDataset(CartridgeGenerateDataset):
         if self.tokenizer.name_or_path in MODELS_WITH_THINKING:
             kwargs["enable_thinking"] = self.config.thinking
         elif self.config.thinking:
-            cot_prompt = "Think before responding. Put your chain of thought between the <thinking> and </thinking> tags before providing your answer.\n\n"
+            cot_prompt = (
+                "The variables are assigned in a chain of length 3."
+                "Think through the chain step by step between <thinking> and </thinking> tags before providing your answer. "
+                "For example, <thinking>VAR ABC = 12345, VAR DEF = VAR ABC, VAR GHI = VAR DEF</thinking>."
+                "\n\n"
+            )
         else:
             cot_prompt = ""
 

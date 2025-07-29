@@ -13,8 +13,8 @@ from cartridges.evaluate import GenerationEvalConfig
 from cartridges.utils import WandBConfig
 
 client = OpenAIClient.Config(
-    base_url="https://hazyresearch--vllm-qwen3-8b-1xh100-serve.modal.run/v1",
-    model_name="Qwen/Qwen3-8b",
+    base_url="https://hazyresearch--vllm-qwen3-1-7b-1xh100-serve.modal.run/v1",
+    model_name="Qwen/Qwen3-1.7b",
 )
 
 file_name = Path(__file__).stem
@@ -52,7 +52,7 @@ configs = [
                 cot=True,
             ),
             name_for_wandb=f"longhealth_mc",
-            num_samples=1,
+            num_samples=4,
             temperature=0.3,
         ),
         max_num_batches_in_parallel=32,

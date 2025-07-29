@@ -12,13 +12,6 @@ from cartridges.utils import WandBConfig
 from cartridges.configs.utils import short_model_name
 
 
-
-client = TokasaurusClient.Config(
-    url="https://hazyresearch--toka-qwen3-4b-1xh100-min0-serve.modal.run",
-    model_name="Qwen/Qwen3-4b",
-)
-
-
 NUM_PATIENTS = 10
 patient_idxs = list(range(1, NUM_PATIENTS + 1))
 patients_str = f"p{NUM_PATIENTS}"

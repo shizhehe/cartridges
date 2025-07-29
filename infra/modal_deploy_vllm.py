@@ -60,7 +60,7 @@ vllm_image = (
 # A single B200 GPUs has enough VRAM to store a 70,000,000,000 parameter model,
 # like Llama 3.3, in eight bit precision, along with a very large KV cache.
 
-MODEL_NAME = "Qwen/Qwen3-8b"
+MODEL_NAME = "Qwen/Qwen3-0.6b"
 USE_YARN = True
 GPU_COUNT = 1
 GPU_TYPE: Literal["H100", "H200", "B200", "A100-80GB"] = "H100"
