@@ -89,8 +89,10 @@ VLLM_PORT = 8000
     image=vllm_image,
     gpu=f"{GPU_TYPE}:{GPU_COUNT}",
     scaledown_window=60 * MINUTES,  # how long should we stay up with no requests?
-    timeout=10 * MINUTES,  # how long should we wait for container start?
-    allow_concurrent_inputs=32,    
+    timeout=5 * MINUTES,  # how long should we wait for container start?
+    allow_concurrent_inputs=64,   
+    min_containers=0,
+    max_containers=4,
     volumes={
         "/root/.cache/huggingface": hf_cache_vol,
         "/root/.cache/vllm": vllm_cache_vol,
