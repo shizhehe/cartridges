@@ -377,7 +377,14 @@ class CartridgeTrainDataset(Dataset):
             token_counts=token_counts,
         )
 
+class CartridgePerplexityDataset(Dataset):
+    class Config(ObjectConfig):
+        _pass_as_config = True
+        dataset: CartridgeTrainDataset.Config
 
+    def __init__(self, config: Config, tokenizer: PreTrainedTokenizerFast, seed: int):
+        self.config = config
+        self.tokenizer = tokenizer
 @dataclass
 class CartridgeGenerateDatasetElement:
     input_ids: torch.Tensor

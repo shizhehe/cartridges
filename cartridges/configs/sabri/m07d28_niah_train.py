@@ -95,10 +95,11 @@ config = TrainConfig(
         GenerationEvalConfig(
             dataset=NIAHGenerateDataset.Config(
                 niah_path=niah_path,
-                thinking=False,
+                thinking=True,
             ),
             name_for_wandb=f"niah_mc",
-            num_samples=1,
+            num_samples=8,
+            override_max_tokens=256,
             temperature=0.3,
             batch_size=16,
         ),
@@ -110,7 +111,7 @@ config = TrainConfig(
 
     wandb=WandBConfig(
         project="cartridges",
-        tags=["train", "longhealth"],
+        tags=["train", "niah", num_keys_str],
         entity="hazy-research",
     ),
     output_dir=os.environ["CARTRIDGES_OUTPUT_DIR"],

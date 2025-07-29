@@ -542,7 +542,7 @@ def train(config: TrainConfig):
         wandb.finish()
 
 
-def evaluate(
+def evaluate_perplexity(
     config: TrainConfig,
     model,  # Can be either CacheAndModel or a PEFT model
     cache: Optional[TrainableCache],

@@ -5,7 +5,8 @@ import random
 
 from datasets import load_dataset
 
-from cartridges.data.resources import Resource
+from cartridges.data.resources import Resource, sample_seed_prompts, SEED_TYPES
+
 
 TOPIC_TO_IDS = {
     "question": [
@@ -28,9 +29,19 @@ TOPIC_TO_IDS = {
     ]
 }
 
+SYSTEM_PROMPT_TEMPLATE = """\
+Below is (part of) a scientific paper. Please read it and be prepared to answer questions. 
+<paper>
+{paper}
+</paper>
+"""
+
 class QASPERResource(Resource):
     class Config(Resource.Config):
         topic: str = "question"
+        seed_prompts: List[SEED_TYPES] = ["generic"]
+
+
     
     def __init__(self, config: Config):
         self.config = config
@@ -63,35 +74,29 @@ class QASPERResource(Resource):
         self.papers = papers
     
     async def sample_prompt(self, batch_size: int) -> tuple[str, List[str]]:
-        patient = random.choice(self.patients)
-        note_id, text = random.choice(list(patient.texts.items()))
+        paper: Paper = random.choice(self.papers)
+        num_sections_per_paper = random.randint(1, len(paper.sections))
+        sections = random.sample(paper.sections, num_sections_per_paper)
+        sections_str = "\n".join([section.to_string for section in sections])
 
-        
-        ctx = SYSTEM_PROMPT_TEMPLATE.format(
-            name=patient.name,
-            patient_id=patient.patient_id,
-            birthday=patient.birthday,
-            diagnosis=patient.diagnosis,
-            num_notes=len(patient.texts),
-            note_id=note_id,
-            text=text,
+        section_divider = f"\n---Paper Title: {paper.title}---\n"
+        context = PAPER_TEMPLATE.format(
+            title=paper.title,
+            abstract=paper.abstract,
+            sections=section_divider.join([section.text for section in sections])
         )
+        ctx = SYSTEM_PROMPT_TEMPLATE.format(
+            paper=context
+        )
+
         seed_prompts = sample_seed_prompts(self.config.seed_prompts, batch_size)
         return ctx, seed_prompts
 
     def to_string(self) -> str:
-        out = f"Below is a panel of patient records."
-        for patient in self.patients:
-            notes = "\n".join([f"<{note_id}>\n{text}\n</{note_id}>" for note_id, text in patient.texts.items()])
+        out = f"Below is a panel of scientific papers."
+        for paper in self.papers:
             out += "\n\n"
-            out += FULL_STRING_TEMPLATE.format(
-                name=patient.name,
-                patient_id=patient.patient_id,
-                birthday=patient.birthday,
-                diagnosis=patient.diagnosis,
-                num_notes=len(patient.texts),
-                notes=notes,
-            )
+            out += f"<paper>\n{paper.to_string()}\n</paper>\n"
         return out
         
 
@@ -136,7 +141,7 @@ class Paper:
     sections: List[Section]
 
     @property
-    def text(self) -> str:
+    def to_string(self) -> str:
         section_divider = f"\n---Paper Title: {self.title}---\n"
         return PAPER_TEMPLATE.format(
             title=self.title,
