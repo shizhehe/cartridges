@@ -3,40 +3,26 @@ from pathlib import Path
 
 import pydrantic
 
-from cartridges.clients.openai import CartridgeConfig, OpenAIClient
+from cartridges.clients.openai import  OpenAIClient
 from cartridges.clients.tokasaurus import TokasaurusClient
 from cartridges.data.longhealth.resources import LongHealthResource
-from cartridges.evaluate import ICLBaseline, EvaluateConfig
+from cartridges.evaluate import CartridgeBaseline, EvaluateConfig, CartridgeConfig
 from cartridges.data.longhealth.evals import LongHealthMultipleChoiceGenerateDataset
 from cartridges.evaluate import GenerationEvalConfig
-
 from cartridges.utils import WandBConfig
 
-client = OpenAIClient.Config(
-    base_url="https://hazyresearch--vllm-qwen3-4b-1xh100-serve.modal.run/v1",
-    model_name="Qwen/Qwen3-4b",
+
+# client = OpenAIClient.Config(
+#     base_url="http://localhost:10210/v1/cartridge",
+#     model_name="Qwen/Qwen3-8b",
+# )
+client = TokasaurusClient.Config(
+    url="http://localhost:10210/",
+    model_name="Qwen/Qwen3-8b",
 )
 
-client = OpenAIClient.Config(
-    base_url="http://localhost:10210/v1/cartridge",
-    model_name="Qwen/Qwen3-8b",
-    cartridges=[CartridgeConfig(
-        id="1wqgicqv",
-        source="wandb",
-        force_redownload=False
-    )]
-)
 
 file_name = Path(__file__).stem
-
-SYSTEM_PROMPT_TEMPLATE = f"""Please reference the patient medical records included below to answer the user's questions.
-
-<patient-records>
-{{content}}
-</patient-records>
-
-Do not think for too long (only a few sentences, you only have 512 tokens to work with).
-"""
 
 
 NUM_PATIENTS = 10
@@ -47,9 +33,13 @@ patient_ids = [f"patient_{idx:02d}" for idx in patient_idxs]
 configs = [
     EvaluateConfig(
         name=f"{file_name}_{patients_str}",
-        generator=ICLBaseline.Config(
+        generator=CartridgeBaseline.Config(
             client=client,
-            system_prompt_template=SYSTEM_PROMPT_TEMPLATE,
+             cartridges=[CartridgeConfig(
+              id="1wqgicqv",
+              source="wandb",
+              force_redownload=False
+            )],
             temperature=0.3,
             max_completion_tokens=2048,
             context=LongHealthResource.Config(
@@ -65,7 +55,7 @@ configs = [
             num_samples=1,
             temperature=0.3,
         ),
-        max_num_batches_in_parallel=32,
+        max_num_batches_in_parallel=4,
         batch_size=32,
         wandb=WandBConfig(
             project="cartridges",

@@ -1,14 +1,15 @@
 import os
+import time
 from typing import Any, Dict, List, Optional, Type
 import openai
 from openai.types.chat.chat_completion import ChatCompletion
 import asyncio
 import tiktoken
 import numpy as np
+from pydrantic import BaseConfig
 from cartridges.clients.base import Client, ClientSample, ClientConfig, ClientResponse, TopLogprobs
 from cartridges.clients.usage import Usage, num_tokens_from_messages_flexible
 from cartridges.utils import get_logger
-
 
 class OpenAIClient(Client):
     """This client works with any inference server that supports the OpenAI API.
@@ -52,6 +53,8 @@ class OpenAIClient(Client):
     """
 
     client_class: Type[openai.AsyncOpenAI] = openai.AsyncOpenAI
+
+
 
     class Config(ClientConfig):
         """Configuration options for the OpenAIClient."""
@@ -127,6 +130,7 @@ class OpenAIClient(Client):
         max_completion_tokens: Optional[int] = None,
         conversation_id: Optional[str] = None,
         enable_thinking: Optional[bool] = None,
+        cartridges: Optional[List[Dict[str, Any]]] = None,
         **kwargs
     ) -> ClientResponse:
         assert len(chats) > 0
@@ -135,12 +139,14 @@ class OpenAIClient(Client):
         if isinstance(chats[0], Dict):
             chats = [chats]
 
+        extra_body = {}
         if enable_thinking is not None:
             extra_body = {
                 "chat_template_kwargs": {"enable_thinking": enable_thinking}
             }
-        else:
-            extra_body = {}
+        
+        if cartridges is not None:
+            extra_body["cartridges"] = cartridges
         
         # Create individual async tasks for each chat
         async def process_single_chat(messages: List[Dict[str, Any]]) -> tuple[ChatCompletion, List[Dict[str, Any]]]:
@@ -188,7 +194,7 @@ class OpenAIClient(Client):
         
         # Execute all chats in parallel using asyncio.gather
         chat_results = await asyncio.gather(*[process_single_chat(messages) for messages in chats])
-        
+
         # Process results
         responses = []
         usage = Usage(prompt_tokens=0, completion_tokens=0)
@@ -263,6 +269,5 @@ class OpenAIClient(Client):
                 token_ids=token_ids,
                 top_logprobs=top_logprobs,
             ))
-        
         return ClientResponse(samples=responses, usage=usage)
 

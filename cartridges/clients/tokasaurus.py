@@ -66,7 +66,7 @@ class TokasaurusClient(Client):
         
         
 
-    async def _send_requests(self, requests: list[dict], modal_upstream_id: Optional[str] = None) -> dict:
+    async def _send_requests(self, requests: list[dict], modal_upstream_id: Optional[str] = None, use_cartridge_endpoint: bool = False) -> dict:
         """Send a single request to the server with retries."""
         if modal_upstream_id is not None:
             headers = {
@@ -82,8 +82,9 @@ class TokasaurusClient(Client):
                 import pickle
                 t0 = time.time()
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+                    endpoint = "batch/chat/completions" if not use_cartridge_endpoint else "batch/cartridge/chat/completions"
                     async with session.post(
-                        f"{self.config.url}/batch/chat/completions",
+                        f"{self.config.url}{endpoint}",
                         json={"requests": requests},
                         headers=headers,
                     ) as resp:
@@ -167,6 +168,7 @@ class TokasaurusClient(Client):
         top_logprobs: Optional[int] = None,
         modal_upstream_id: Optional[str] = None,
         enable_thinking: bool = False,
+        cartridges: Optional[List[Dict[str, Any]]] = None,
         **kwargs,
     ) -> ClientResponse:
         """
@@ -216,11 +218,13 @@ class TokasaurusClient(Client):
                 "apply_chat_template_overrides": thinking_overrides,
                 "logprobs_in_fingerprint": True,
             }
+            if cartridges is not None:
+                request["cartridges"] = cartridges
             if top_logprobs is not None:
                 request["logprobs"] = True
                 request["top_logprobs"] = top_logprobs
             return request
-        response = await self._send_requests([_construct_request(chat) for chat in chats], modal_upstream_id)
+        response = await self._send_requests([_construct_request(chat) for chat in chats], modal_upstream_id, use_cartridge_endpoint=cartridges is not None)
         # SE (07/07): Running validation with ChatCompletion Pydantic model is very slow.
         # So we use model_construct to create the objects.
         responses: List[ChatCompletion] = [ChatCompletion.model_construct(**r) for r in response]

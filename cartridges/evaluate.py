@@ -520,76 +520,73 @@ class KVCacheCompressionBaseline(BaselineGenerator):
                 )
             return results
 
+class CartridgeConfig(pydrantic.BaseConfig):
+    id: str
+    source: str
+    force_redownload: bool = False
 
 class CartridgeBaseline(BaselineGenerator):
 
     class Config(BaselineGenerator.Config):
         client: ClientConfig
-        cartridges: List[Dict[str, str]]
         temperature: float = 0.0
         # used to count number of tokens in the prompt
         tokenizer: str = "meta-llama/Llama-3.2-3B-Instruct"
+        
+        cartridges: List[CartridgeConfig]
+
 
         # The user prompt template which should contain {content}
         user_prompt_template: str = "{content}"
 
+        context: Union[str, Resource.Config]
+
         # The system prompt template which should contain {title} and {content}
         # variables.
-        system_prompt_template: Optional[str] = "{title}\n\n{content}"
         max_completion_tokens: int = 384
         max_context_tokens: Optional[int] = None  # will truncate if longer
+        enable_thinking: Optional[bool] = None
 
         log_system_prompt: bool = False
 
-    def __init__(self, config: Config, context: Context):
+    def __init__(self, config: Config):
         self.config = config
         self.client = config.client.instantiate()
 
         self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer)
 
-        ctx_text = context.text
+
+        if isinstance(self.config.context, str):
+            ctx_text = self.config.context
+        else:
+            resource = self.config.context.instantiate()
+            # TODO (SE): Need to properly call the resource setup!
+            ctx_text = resource.to_string()
+
 
         if self.config.max_context_tokens is not None:
             ctx_text = self.tokenizer.decode(
                 self.tokenizer.encode(ctx_text)[: self.config.max_context_tokens],
                 add_special_tokens=False,
 
-                # useful for suppressing the truncation error 
+                # suppresses the truncation error 
                 max_length=999_999_999, 
                 truncation=True
                 
             )
 
-        if config.system_prompt_template is None or config.system_prompt_template == "":
-            self.system_prompt = None
-        else:
-            system_prompt = config.system_prompt_template.format(
-                content=ctx_text,
-            )
-
-            self.system_prompt = self.post_process_system_prompt(
-                system_prompt,
-            )
-
+       
         self.metadata = {}
 
-    def post_process_system_prompt(self, system_prompt: str) -> str:
-        return system_prompt
-
     async def generate(
-        self, elements: List[CapsuleGenerateDatasetElement]
+        self, elements: List[CartridgeGenerateDatasetElement]
     ) -> List[GenerateBaselineResponse]:
-        
+        print("generating with cartridges: ", self.config.cartridges)
+
         chats = []
         for element in elements:
             messages = []
-            if self.system_prompt is not None:
-                messages.append(
-                    {
-                        "role": "system",
-                        "content": self.system_prompt,
-                    },
-                )
+
             messages.append(
                 {
                     "role": "user",
@@ -600,15 +597,17 @@ class CartridgeBaseline(BaselineGenerator):
             )
             chats.append(messages)
 
-        # Use cartridge_chat instead of regular chat
-        response: ClientResponse = await self.client.cartridge_chat(
+
+        response: ClientResponse = await self.client.chat(
             chats=chats,
-            cartridges=self.config.cartridges,
             max_completion_tokens=self.config.max_completion_tokens,
             temperature=self.config.temperature,
+            enable_thinking=self.config.enable_thinking,
+            cartridges=[cartridge.model_dump() for cartridge in self.config.cartridges],
         )
         assert len(response.samples) == len(chats)
 
+        t0 = time.time()
         results = []
         for sample, messages, element in zip(response.samples, chats, elements):
             num_prompt_tokens = len(
@@ -631,4 +630,5 @@ class CartridgeBaseline(BaselineGenerator):
                     text=sample.text,
                 )
             )
+        print(f"Time taken: {time.time() - t0} seconds")
         return results
