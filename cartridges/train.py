@@ -100,7 +100,6 @@ class TrainConfig(RunConfig):
 
     kv_cache_initializer: Optional[KVCacheFactory.Config] = None
     pretrained_cache_path: Optional[str] = None
-    loss_type: Literal["tokens", "logits"] = "logits"
 
     # NOTE: steps here is the number of **optimizer steps**, which we keep track of
     # with the `optimizer_step` variable. This is different than the number of batches

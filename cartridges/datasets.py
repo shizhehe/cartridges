@@ -50,12 +50,51 @@ class TokenCounts:
             num_assistant_tokens=self.num_assistant_tokens + other.num_assistant_tokens,
         )
 
+def _base_convert_messages_to_element_retokenize(
+    messages: List[TrainingExample.Message],
+    tokenizer: PreTrainedTokenizerFast,
+    message_start_tokens: dict[str, list[int]],
+    message_end_tokens: dict[str, list[int]],
+    message_extra_end_tokens: dict[str, list[int]],
+) -> CartridgeDatasetElement:
+    input_ids, topk_token_ids, topk_logprobs, topk_token_idxs = [], [], [], []
+    token_counts = TokenCounts()
+
+    for i, message in enumerate(messages):
+        token_ids = tokenizer.encode(message.content, add_special_tokens=False)
+        token_ids += message_end_tokens[message.role] + message_extra_end_tokens[message.role]
+        msg_input_ids = message_start_tokens[message.role] + token_ids
+
+        if message.role == "assistant":
+            topk_token_ids.append(token_ids)
+            topk_logprobs.append(np.zeros(len(token_ids), dtype=np.float16))
+            topk_token_idxs.append(np.arange(len(token_ids), dtype=np.int32) + len(input_ids) + len(message_start_tokens[message.role]))
+
+        input_ids.extend(msg_input_ids)
+    
+        # FIXME: this is broken in the case that we truncate the input ids
+        token_counts += TokenCounts(
+            num_system_and_user_tokens=len(input_ids) if message.role == "user" else 0,
+            num_assistant_tokens=len(input_ids) if message.role == "assistant" else 0,
+        )
+
+    return CartridgeDatasetElement(
+        input_ids=torch.tensor(input_ids, dtype=torch.long),
+        topk_token_ids=torch.from_numpy(np.concatenate(topk_token_ids)),
+        topk_logprobs=torch.from_numpy(np.concatenate(topk_logprobs)),
+        topk_token_idxs=torch.from_numpy(np.concatenate(topk_token_idxs)),
+        metadata=[],
+        token_counts=token_counts,
+    )
+
+
 
 def _base_convert_messages_to_element(
     messages: List[TrainingExample.Message],
     message_start_tokens: dict[str, list[int]],
     message_end_tokens: dict[str, list[int]],
     message_extra_end_tokens: dict[str, list[int]],
+    tokenizer: PreTrainedTokenizerFast,
 ) -> CartridgeDatasetElement:
     input_ids, topk_token_ids, topk_logprobs, topk_token_idxs = [], [], [], []
     token_counts = TokenCounts()
@@ -89,11 +128,11 @@ def _base_convert_messages_to_element(
 
         input_ids.extend(msg_input_ids)
     
-    # FIXME: this is broken in the case that we truncate the input ids
-    token_counts += TokenCounts(
-        num_system_and_user_tokens=len(input_ids) if message.role == "user" else 0,
-        num_assistant_tokens=len(input_ids) if message.role == "assistant" else 0,
-    )
+        # FIXME: this is broken in the case that we truncate the input ids
+        token_counts += TokenCounts(
+            num_system_and_user_tokens=len(input_ids) if message.role == "user" else 0,
+            num_assistant_tokens=len(input_ids) if message.role == "assistant" else 0,
+        )
 
     return CartridgeDatasetElement(
         input_ids=torch.tensor(input_ids, dtype=torch.long),
@@ -106,10 +145,14 @@ def _base_convert_messages_to_element(
 
 def qwen_messages_to_element(
     messages: List[TrainingExample.Message],
+    retokenize: bool = False,
+    tokenizer: PreTrainedTokenizerFast | None = None,
 ) -> CartridgeDatasetElement:
+    fn = _base_convert_messages_to_element_retokenize if retokenize else _base_convert_messages_to_element
 
-    return _base_convert_messages_to_element(
+    return fn(
         messages,
+        tokenizer=tokenizer,
         message_start_tokens={
             "user": [151644, 872,198],
             "assistant": [151644, 77091,198],
@@ -124,11 +167,16 @@ def qwen_messages_to_element(
         },
     )
 
-def llama_messages_to_element(
+def llama3_messages_to_element(
     messages: List[TrainingExample.Message],
+    retokenize: bool = False,
+    tokenizer: PreTrainedTokenizerFast | None = None,
 ) -> CartridgeDatasetElement:
-    return _base_convert_messages_to_element(
+    fn = _base_convert_messages_to_element_retokenize if retokenize else _base_convert_messages_to_element
+
+    return fn(
         messages,
+        tokenizer=tokenizer,
         message_start_tokens={
             # "<|start_header_id|>", "user", "<|end_header_id|>", "\n\n"
             "user": [128006, 882, 128007, 271],
@@ -136,6 +184,34 @@ def llama_messages_to_element(
             "assistant": [128006, 78191, 128007, 271],
         },
         message_end_tokens={
+            # "<|eot_id|>"
+            "user": [128009],
+            "assistant": [128009],
+        },
+        message_extra_end_tokens={
+            "user": [],
+            "assistant": [],
+        },
+    )
+
+def llama2_messages_to_element(
+    messages: List[TrainingExample.Message],
+    retokenize: bool = False,
+    tokenizer: PreTrainedTokenizerFast | None = None,
+) -> CartridgeDatasetElement:
+    fn = _base_convert_messages_to_element_retokenize if retokenize else _base_convert_messages_to_element
+
+    return fn(
+        messages,
+        tokenizer=tokenizer,
+        message_start_tokens={
+            # "<|start_header_id|>", "user", "<|end_header_id|>", "\n\n"
+            "user": [128006, 882, 128007, 271],
+            # "<|start_header_id|>", "assistant", "<|end_header_id|>", "\n\n"
+            "assistant": [128006, 78191, 128007, 271],
+        },
+        message_end_tokens={
+            # "<|eot_id|>"
             "user": [128009],
             "assistant": [128009],
         },
@@ -152,7 +228,10 @@ MODEL_TO_MESSAGE_CONVERTER = {
     "Qwen/Qwen3-8b": qwen_messages_to_element,
     "Qwen/Qwen3-14b": qwen_messages_to_element,
     "Qwen/Qwen3-32b": qwen_messages_to_element,
-    "meta-llama/Llama-3.2-3B-Instruct": llama_messages_to_element,
+    "meta-llama/Llama-3.1-8B-Instruct": llama3_messages_to_element,
+    "meta-llama/Llama-3.2-3B-Instruct": llama3_messages_to_element,
+    "meta-llama/Llama-3.2-1B-Instruct": llama3_messages_to_element,
+    "meta-llama/Llama-2-7b-chat-hf": llama2_messages_to_element,
 }
 MODEL_TO_MESSAGE_CONVERTER = {k.lower(): v for k, v in MODEL_TO_MESSAGE_CONVERTER.items()}
 
@@ -223,6 +302,7 @@ class CartridgeTrainDataset(Dataset):
         data_sources: list[tuple[str, int | None],]  # path, limit
         is_wandb: bool = False
         top_k_logits: int = 20
+        targets: Literal["logits", "tokens"] = "logits"
 
         packing_mode: Literal["truncate", "pad"]="pad"
         packed_seq_length: int = 2048
@@ -319,7 +399,11 @@ class CartridgeTrainDataset(Dataset):
     
     def _get_element(self, elem_idx: int) -> CartridgeDatasetElement:
         row = self.elements[elem_idx]
-        return MODEL_TO_MESSAGE_CONVERTER[self.tokenizer.name_or_path.lower()](row.messages)
+        return MODEL_TO_MESSAGE_CONVERTER[self.tokenizer.name_or_path.lower()](
+            row.messages,
+            retokenize=self.config.targets == "tokens",
+            tokenizer=self.tokenizer,
+        )
     
     def _get_batch(self, batch_idx: int):
         elem_idxs = self.batches[batch_idx]
@@ -378,7 +462,7 @@ class CartridgeTrainDataset(Dataset):
         topk_token_idxs = torch.cat(topk_token_idxs, dim=0)
 
         if len(input_ids) > self.config.packed_seq_length:
-            # if the input ids are longer than the sequence length, we need to truncate 
+            # if the input ids are longer than the sequence length, 
             # we need to truncate them
             input_ids = input_ids[:self.config.packed_seq_length]
             element_ids = element_ids[:self.config.packed_seq_length]
