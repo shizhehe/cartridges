@@ -49,7 +49,8 @@ elif MODEL_SIZE == "4":
     ]
 elif MODEL_SIZE == "8":
     data_sources = [
-        "/data/sabri/cartridges/2025-07-29-13-00-47-m07d29_longhealth_synthesize_sizes/m07d29_longhealth_synthesize_sizes_qwen3-8b_p10_n131072-2/artifact/dataset.pkl"
+        # "/data/sabri/cartridges/2025-07-29-13-00-47-m07d29_longhealth_synthesize_sizes/m07d29_longhealth_synthesize_sizes_qwen3-8b_p10_n131072-2/artifact/dataset.pkl"
+        "/data/sabri/cartridges/2025-07-30-09-21-14-m07d29_longhealth_synthesize_sizes/m07d29_longhealth_synthesize_sizes_qwen3-8b_p10_n131072-0/artifact/dataset.pkl"
     ]
 else:
     raise ValueError(f"Invalid model: {MODEL_SIZE}")

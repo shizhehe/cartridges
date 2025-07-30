@@ -55,12 +55,32 @@ def _base_convert_messages_to_element(
     messages: List[TrainingExample.Message],
     message_start_tokens: dict[str, list[int]],
     message_end_tokens: dict[str, list[int]],
+    message_extra_end_tokens: dict[str, list[int]],
 ) -> CartridgeDatasetElement:
     input_ids, topk_token_ids, topk_logprobs, topk_token_idxs = [], [], [], []
     token_counts = TokenCounts()
 
-    for message in messages:
-        msg_input_ids = message_start_tokens[message.role] + message.token_ids + message_end_tokens[message.role]
+    for i, message in enumerate(messages):
+        msg_input_ids = message_start_tokens[message.role] + message.token_ids
+        
+        end_tokens = message_end_tokens[message.role]
+        # usually, messages will end with some tokenizer-specific "end" token(s) (e.g. <|endoftext|>)
+        ends_with_eot = len(msg_input_ids) >= len(end_tokens) and msg_input_ids[-len(end_tokens):] == end_tokens
+        if (not ends_with_eot and i < len(messages) - 1):
+            # (1) if it does not, this means that the generation hit the max token limit. In 
+            # this case, if we're not the last message in the conversation, we add the end 
+            # tokens in, so that the next message starts with the correct tokens.
+            # Otherwise, we can just leave it as is.
+            msg_input_ids += end_tokens + message_extra_end_tokens[message.role]
+        elif ends_with_eot and i < len(messages) - 1:
+            # (2) if it does end with the eot tokens, then we need to add the extra end 
+            # then we just need to add any extra end tokens that come after the 
+            # eot tokens and before the next message starts.
+            msg_input_ids += message_extra_end_tokens[message.role]
+        elif ends_with_eot and i == len(messages) - 1:
+            # (3) if we're the last message in the 
+            # conversation, then we don't need to add anything.
+            pass
 
         if message.top_logprobs is not None:
             topk_token_ids.append(message.top_logprobs.token_id)
@@ -95,10 +115,13 @@ def qwen_messages_to_element(
             "assistant": [151644, 77091,198],
         },
         message_end_tokens={
-            "user": [151645, 198],
-            "assistant": [151645, 198],
+            "user": [151645],
+            "assistant": [151645],
         },
-
+        message_extra_end_tokens={
+            "user": [198],
+            "assistant": [198],
+        },
     )
 
 def llama_messages_to_element(
@@ -107,12 +130,18 @@ def llama_messages_to_element(
     return _base_convert_messages_to_element(
         messages,
         message_start_tokens={
-            "user": [128006, 882,128007],
-            "assistant": [128006, 78191,128007],
+            # "<|start_header_id|>", "user", "<|end_header_id|>", "\n\n"
+            "user": [128006, 882, 128007, 271],
+            # "<|start_header_id|>", "assistant", "<|end_header_id|>", "\n\n"
+            "assistant": [128006, 78191, 128007, 271],
         },
         message_end_tokens={
             "user": [128009],
             "assistant": [128009],
+        },
+        message_extra_end_tokens={
+            "user": [],
+            "assistant": [],
         },
     )
 

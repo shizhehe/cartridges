@@ -40,7 +40,7 @@ else:
     raise ValueError(f"Invalid model: {MODEL}")
 
 configs = []
-for lr in [8e-3, 9e-3, 1e-2, 2e-2, 3e-2]:
+for lr in [2e-2]:
     config = TrainConfig(
         model=model,
         kv_cache_initializer=KVFromRandomText.Config(
