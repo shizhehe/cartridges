@@ -29,7 +29,8 @@ SYSTEM_PROMPT_TEMPLATE = f"""Please answer the question below about the followin
 BASE_PATH = "/home/sabri/code/cartridges/cartridges/data/ruler/_data"
 
 # Use the default variable tracking dataset path
-VT_PATH = f"{BASE_PATH}/qwen3_4b-l100000-n1-c64-h2-noise-9df65ada.json"
+# VT_PATH = f"{BASE_PATH}/qwen3_4b-l100000-n1-c64-h2-noise-9df65ada.json"
+VT_PATH = f"{BASE_PATH}/qwen3_4b-l100000-n1-c64-h2-essay-979310a3.json"
 
 configs = [
     EvaluateConfig(

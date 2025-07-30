@@ -44,7 +44,7 @@ def create_block_mask_w_cache(
 
     def mask_func(_, _h, q_idx, kv_idx):
         return (kv_seq_ids[kv_idx] == -1) | ((seq_ids[q_idx] == kv_seq_ids[kv_idx]) & (q_idx + cache_len >= kv_idx))
-
+    
     block_mask = create_block_mask(
         mask_func, B=1, H=1, Q_LEN=len(seq_ids), KV_LEN=len(seq_ids) + cache_len, 
         device=device,

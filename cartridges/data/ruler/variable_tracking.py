@@ -128,9 +128,9 @@ class GenerateVariableTrackingConfig(RunConfig):
 
         # Debug print
         print("Sample context:")
-        print(samples[0].context[:500] + "...")
+        print(samples[0].context[:5000] + "...")
         print(f"\nNumber of queries: {len(samples[0].queries)}")
-        for i, query in enumerate(samples[0].queries):
+        for i, query in enumerate(samples[0].queries[:10]):
             print(f"Query {i+1}: {query.query}")
             print(f"Answers: {query.answers}")
             print()
@@ -188,7 +188,7 @@ words = sorted(list(set(words)))
 
 
 # Positions
-DEPTHS = list(np.round(np.linspace(0, 100000, num=40, endpoint=True)).astype(int))
+DEPTHS = list(np.round(np.linspace(0, 100, num=512, endpoint=True)).astype(int))
 
 def generate_chains(num_chains, num_hops, is_icl=False):
     vars_all = []
@@ -206,7 +206,7 @@ def generate_chains(num_chains, num_hops, is_icl=False):
         this_vars = vars_all[i:i+num_hops+1]
         vars_ret.append(this_vars)
         if is_icl:
-            this_chain = [f"VAR {this_vars[0]} = 12345"]
+            this_chain = [f"\"{this_vars[0]}\" is equal to \"12345\"\n"]
         else:
             # Generate unique initial value
             while True:
@@ -214,9 +214,9 @@ def generate_chains(num_chains, num_hops, is_icl=False):
                 if value not in used_values:
                     used_values.add(value)
                     break
-            this_chain = [f"VAR {this_vars[0]} = {value}"]
+            this_chain = [f"\"{this_vars[0]}\" is equal to \"{value}\"\n"]
         for j in range(num_hops):
-            this_chain.append(f"VAR {this_vars[j+1]} = VAR {this_vars[j]}")
+            this_chain.append(f"\"{this_vars[j+1]}\" is equal to \"{this_vars[j]}\"\n")
         chains_ret.append(this_chain)
     return vars_ret, chains_ret
 
@@ -299,14 +299,14 @@ def generate_input_output(num_noises, config: VariableTrackingConfig, is_icl=Fal
     queries = []
     for i, (vars_chain, chain) in enumerate(zip(vars_chains, chains)):
         # Get the initial value from the first assignment in this chain
-        initial_value = chain[0].split("=")[-1].strip()
+        initial_value = chain[0].split("is equal to")[-1].strip()
         
         # All variables in this chain should resolve to the initial value
         answers = vars_chain  # All variables in the chain
         
-        query_text = f"Find all variables that are assigned the value {initial_value} in the text above."
+        query_text = f"Find all variables equal to {initial_value} in the text above."
         
-        answer_prompt = f"According to the chain(s) of variable assignment in the text above, {len(answers)} variables are assigned the value {initial_value}. List only the variable names (without the VAR keyword) inside <answer></answer> tags, one per line:"
+        answer_prompt = f"According to the chain(s) of variable assignment in the text above, {len(answers)} variables are assigned the value {initial_value}. List only the variable names inside <answer></answer> tags, one per line:"
         
         queries.append(VariableTrackingQuery(
             query=query_text,
@@ -407,7 +407,7 @@ if __name__ == "__main__":
             context_template=CONTEXT_TEMPLATE,
             num_chains=64,
             num_hops=2,
-            type_haystack='noise',
+            type_haystack='essay',
             tokens_to_generate=128,
             num_samples=1,
             tokenizer="Qwen/Qwen3-4B",

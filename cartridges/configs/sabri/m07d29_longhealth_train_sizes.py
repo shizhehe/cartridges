@@ -23,7 +23,7 @@ patients_str = f"p{NUM_PATIENTS}"
 patient_ids = [f"patient_{idx:02d}" for idx in patient_idxs]
 
 NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "1024"))
-MODEL_SIZE = os.environ.get("MODEL_SIZE", "0.6")
+MODEL_SIZE = os.environ.get("MODEL_SIZE", "8")
 size_str = MODEL_SIZE.replace(".", "_")
 
 MODEL = "qwen"
@@ -66,17 +66,14 @@ config = TrainConfig(
     global_batch_size=32,
 
     dataset=CartridgeTrainDataset.Config(
-        data_sources=[
-            (source, None)
-            for source in data_sources
-        ],
+        data_sources=[(source, None) for source in data_sources],
         top_k_logits=20,
         packed_seq_length=2048,
         packing_mode="truncate",
     ),
 
     save_every_n_steps=512,
-    generate_every_n_steps=128,
+    generate_every_n_steps=512,
     generate_evals=[
         GenerationEvalConfig(
             dataset=LongHealthMultipleChoiceGenerateDataset.Config(

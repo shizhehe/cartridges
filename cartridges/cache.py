@@ -117,7 +117,13 @@ class TrainableCache(nn.Module):
                     for values_vec in init_values
                 ]
             )
-            
+            print(f"num_trainable_tokens: {self._num_trainable_tokens}")
+            print(f"num_frozen_tokens: {self._num_frozen_tokens}")
+            print(f"{self.trainable_values[0].shape}")
+            print(f"{self.trainable_keys[0].shape}")
+            print(f"{self.frozen_values[0].shape}")
+            print(f"{self.frozen_keys[0].shape}")
+                
     def update(
         self, 
         new_keys: torch.Tensor,

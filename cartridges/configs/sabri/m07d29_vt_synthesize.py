@@ -18,14 +18,13 @@ client = TokasaurusClient.Config(
 
 # Use the default variable tracking dataset path
 BASE_PATH = "/home/sabri/code/cartridges/cartridges/data/ruler/_data"
-vt_path = f"{BASE_PATH}/qwen3_4b-l100000-n1-c128-h3-noise-6fe0da10.json"
-
+VT_PATH = f"{BASE_PATH}/qwen3_4b-l100000-n1-c64-h2-essay-979310a3.json"
 config = SynthesizeConfig(
     
     synthesizer=SelfStudySynthesizer.Config(
         client=client,
         max_rounds=1,
-        prob_thinking=0.2,
+        prob_thinking=0.5,
         use_tools_a=False, 
         use_tools_b=False,
         tools=[],
@@ -38,7 +37,7 @@ config = SynthesizeConfig(
                     "use_case",
                     "creative",
                 ],
-                variable_tracking_path=vt_path,
+                variable_tracking_path=VT_PATH,
                 sentences_per_chunk=(1, 1),
                 chunks_per_prompt=(64, 256),
             )

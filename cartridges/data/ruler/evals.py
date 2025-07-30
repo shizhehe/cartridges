@@ -138,14 +138,14 @@ class VariableTrackingGenerateDataset(CartridgeGenerateDataset):
             cot_prompt = (
                 "The variables are assigned in a chain of length 3."
                 "Think through the chain step by step between <thinking> and </thinking> tags before providing your answer. "
-                "For example, <thinking>VAR ABC = 12345, VAR DEF = VAR ABC, VAR GHI = VAR DEF</thinking>."
+                "For example, <thinking>12345 is equal to ABC, DEF is equal to ABC, GHI is equal to DEF</thinking>."
                 "\n\n"
             )
         else:
             cot_prompt = ""
 
         # Combine context and query for variable tracking
-        full_prompt = f"{self.sample.context}\n\nQuestion: {query.query}\n\n{cot_prompt}{query.answer_prompt}"
+        full_prompt = f"{query.query}\n\n{cot_prompt}{query.answer_prompt}"
 
         input_ids = self.tokenizer.apply_chat_template(
             [{"role": "user", "content": full_prompt}],

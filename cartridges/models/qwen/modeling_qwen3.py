@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+import time
 from typing import Callable, Literal, Optional, Union
 from dataclasses import dataclass
 
@@ -163,6 +165,7 @@ class Qwen3Attention(nn.Module):
         input_shape = hidden_states.shape[:-1]
         hidden_shape = (*input_shape, -1, self.head_dim)
 
+
         query_states = self.q_norm(self.q_proj(hidden_states).view(hidden_shape)).transpose(1, 2)
         key_states = self.k_norm(self.k_proj(hidden_states).view(hidden_shape)).transpose(1, 2)
         value_states = self.v_proj(hidden_states).view(hidden_shape).transpose(1, 2)
@@ -170,13 +173,16 @@ class Qwen3Attention(nn.Module):
         cos, sin = batch.position_embeddings
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
 
+
         past_key_value = batch.past_key_values
         if past_key_value is not None:
             key_states, value_states = past_key_value.update(
                 key_states, value_states, batch.seq_ids, self.layer_idx,
                 skip_append=batch.mode == "train"
             )
-  
+        
+
+
         attn_output = flex_attention_forward(
             self,
             query_states,
@@ -186,6 +192,7 @@ class Qwen3Attention(nn.Module):
             scaling=self.scaling,
             mode=batch.mode,
         )
+
         attn_output = attn_output.reshape(*input_shape, -1).contiguous()
         attn_output = self.o_proj(attn_output)
         
@@ -196,6 +203,7 @@ class Qwen3DecoderLayer(GradientCheckpointingLayer):
     def __init__(self, config: Qwen3Config, layer_idx: int):
         super().__init__()
         self.hidden_size = config.hidden_size
+        self.layer_idx = layer_idx
 
         self.self_attn = Qwen3Attention(config=config, layer_idx=layer_idx)
 
@@ -210,13 +218,22 @@ class Qwen3DecoderLayer(GradientCheckpointingLayer):
         batch = batch.update(hidden_states=hidden_states)
 
         # Self Attention
+        t0 = time.time()
         batch = self.self_attn(batch)
+        if self.layer_idx == 0 and os.environ.get("QASPER_TIME", "False") == "True":
+            torch.cuda.synchronize()
+            print(f"self_attn time: {time.time() - t0}")
+
         hidden_states = residual + batch.hidden_states
 
         # Fully Connected
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
+        t0 = time.time()    
         hidden_states = self.mlp(hidden_states)
+        if self.layer_idx == 0 and os.environ.get("QASPER_TIME", False):
+            torch.cuda.synchronize()
+            print(f"self_attn time: {time.time() - t0}")
         hidden_states = residual + hidden_states
 
         return batch.update(hidden_states=hidden_states)
