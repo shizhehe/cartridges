@@ -18,7 +18,9 @@ client = TokasaurusClient.Config(
 
 # Use the default variable tracking dataset path
 BASE_PATH = "/home/sabri/code/cartridges/cartridges/data/ruler/_data"
-VT_PATH = f"{BASE_PATH}/qwen3_4b-l100000-n1-c64-h2-essay-979310a3.json"
+# VT_PATH = f"{BASE_PATH}/qwen3_4b-l100000-n1-c64-h2-essay-979310a3.json"
+# VT_PATH = f"{BASE_PATH}/llama_3.2_3b_instruct-l100000-n1-c64-h2-essay-7ba69bcb.json"
+VT_PATH = f"{BASE_PATH}/llama_3.2_3b_instruct-l10000-n1-c16-h2-essay-words-1d31e1f5.json"
 config = SynthesizeConfig(
     
     synthesizer=SelfStudySynthesizer.Config(
@@ -32,20 +34,20 @@ config = SynthesizeConfig(
             VariableTrackingResource.Config(
                 seed_prompts=[
                     "structuring",
-                    "summarization",
+                    # "summarization",
                     "question",
                     "use_case",
-                    "creative",
+                    # "creative",
                 ],
                 variable_tracking_path=VT_PATH,
                 sentences_per_chunk=(1, 1),
-                chunks_per_prompt=(64, 256),
+                chunks_per_prompt=(1, 8),
             )
         ],
     ),
     output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),
     num_samples=65536, 
-    batch_size=32,
+    batch_size=8,
     
     max_num_batches_in_parallel=256,
 

@@ -24,7 +24,7 @@ patient_ids = [f"patient_{idx:02d}" for idx in patient_idxs]
 
 NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "1024"))
 
-MODEL = os.environ.get("MODEL", "llama")
+MODEL = os.environ.get("MODEL", "llama2")
 if MODEL == "llama":
     data_sources = [
         "/data/sabri/cartridges/2025-07-26-12-21-32-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_llama-3.2-3b_p10_n65536-0/artifact/dataset.pkl",
@@ -68,7 +68,7 @@ config = TrainConfig(
 
     dataset=CartridgeTrainDataset.Config(
         data_sources=[
-            (source, None)
+            (source, 1024)
             for source in data_sources
         ],
         top_k_logits=20,

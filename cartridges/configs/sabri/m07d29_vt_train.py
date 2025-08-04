@@ -25,7 +25,10 @@ if MODEL == "llama":
     DATA_SOURCES = [
         # "/data/sabri/cartridges/2025-07-29-14-51-14-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl"
         # "/data/sabri/cartridges/2025-07-29-18-47-55-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl"
-        "/data/sabri/cartridges/2025-07-29-19-22-07-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl"
+        # "/data/sabri/cartridges/2025-07-29-19-22-07-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl"
+        # "/data/sabri/cartridges/2025-08-04-10-38-54-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl"
+        # "/data/sabri/cartridges/2025-08-04-12-44-24-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl"
+        "/data/sabri/cartridges/2025-08-04-14-36-31-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl"
     ]
     model = HFModelConfig(
         pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
@@ -37,6 +40,7 @@ else:
 # Use the variable tracking dataset path
 BASE_PATH = "/home/sabri/code/cartridges/cartridges/data/ruler/_data"
 vt_path = f"{BASE_PATH}/qwen3_4b-l100000-n1-c64-h2-noise-9df65ada.json"
+vt_path = f"{BASE_PATH}/llama_3.2_3b_instruct-l100000-n1-c64-h2-essay-7ba69bcb.json"
 
 config = TrainConfig(
     model=model,
@@ -45,7 +49,6 @@ config = TrainConfig(
     ),
     
     lr=2e-2,
-    loss_type="logits",
     epochs=2,
     global_batch_size=32,
 
@@ -65,13 +68,13 @@ config = TrainConfig(
         GenerationEvalConfig(
             dataset=VariableTrackingGenerateDataset.Config(
                 variable_tracking_path=vt_path,
-                thinking=True,
+                thinking=False,
             ),
             name_for_wandb=f"variable_tracking",
-            num_samples=8,
+            num_samples=1,
             override_max_tokens=1024,
-            temperature=0.3,
-            batch_size=16,
+            temperature=0.0,
+            batch_size=32,
         ),
     ],
     eval_every_n_steps=512,

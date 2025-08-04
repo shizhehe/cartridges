@@ -30,7 +30,9 @@ BASE_PATH = "/home/sabri/code/cartridges/cartridges/data/ruler/_data"
 
 # Use the default variable tracking dataset path
 # VT_PATH = f"{BASE_PATH}/qwen3_4b-l100000-n1-c64-h2-noise-9df65ada.json"
-VT_PATH = f"{BASE_PATH}/qwen3_4b-l100000-n1-c64-h2-essay-979310a3.json"
+# VT_PATH = f"{BASE_PATH}/qwen3_4b-l100000-n1-c64-h2-essay-979310a3.json"
+# VT_PATH = f"{BASE_PATH}/llama_3.2_3b_instruct-l100000-n1-c64-h2-essay-7ba69bcb.json"
+VT_PATH = f"{BASE_PATH}/llama_3.2_3b_instruct-l10000-n1-c16-h2-essay-words-1d31e1f5.json"
 
 configs = [
     EvaluateConfig(
@@ -38,18 +40,18 @@ configs = [
         generator=ICLBaseline.Config(
             client=client,
             system_prompt_template=SYSTEM_PROMPT_TEMPLATE,
-            temperature=0.3,
+            temperature=0.0,
             max_completion_tokens=1024,
             context=VariableTrackingResource.Config(variable_tracking_path=VT_PATH),
         ),
         eval=GenerationEvalConfig(
             dataset=VariableTrackingGenerateDataset.Config(
                 variable_tracking_path=VT_PATH,
-                thinking=True,
+                thinking=False,
             ),
             name_for_wandb=f"variable_tracking",
             num_samples=1,
-            temperature=0.3,
+            temperature=0.0,
         ),
         max_num_batches_in_parallel=4,
         batch_size=32,

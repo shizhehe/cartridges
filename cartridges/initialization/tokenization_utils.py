@@ -2,7 +2,7 @@ from typing import Optional
 import torch
 
 
-def llama_tokenize_data_into_system_prompt(
+def llama3_tokenize_data_into_system_prompt(
     tokenizer,
     content: str,
     max_tokens: Optional[int],
@@ -24,6 +24,16 @@ def llama_tokenize_data_into_system_prompt(
 
     return torch.tensor(input_ids)[None, :]
 
+def llama2_tokenize_data_into_system_prompt(
+    tokenizer,
+    content: str,
+    max_tokens: Optional[int],
+) -> torch.Tensor:
+    out = tokenizer.encode(content, add_special_tokens=True, return_tensors="pt")[None, :]
+    breakpoint()
+    return out
+
+
 
 def qwen_tokenize_data_into_system_prompt(
     tokenizer,
@@ -41,9 +51,10 @@ def qwen_tokenize_data_into_system_prompt(
 
 
 MODEL_TO_SYSTEM_PROMPT_TOKENIZER = {
-    "meta-llama/Llama-3.2-1B-Instruct": llama_tokenize_data_into_system_prompt,
-    "meta-llama/Llama-3.2-3B-Instruct": llama_tokenize_data_into_system_prompt,
-    "meta-llama/Llama-3.1-8B-Instruct": llama_tokenize_data_into_system_prompt,
+    "meta-llama/Llama-2-7b-chat-hf": llama3_tokenize_data_into_system_prompt,
+    "meta-llama/Llama-3.2-1B-Instruct": llama3_tokenize_data_into_system_prompt,
+    "meta-llama/Llama-3.2-3B-Instruct": llama3_tokenize_data_into_system_prompt,
+    "meta-llama/Llama-3.1-8B-Instruct": llama3_tokenize_data_into_system_prompt,
     "Qwen/Qwen3-0.6b": qwen_tokenize_data_into_system_prompt,
     "Qwen/Qwen3-1.7b": qwen_tokenize_data_into_system_prompt,
     "Qwen/Qwen3-4b": qwen_tokenize_data_into_system_prompt,

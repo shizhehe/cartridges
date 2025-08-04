@@ -75,6 +75,9 @@ class VariableTrackingConfig(BaseConfig):
     num_hops: int = 4
 
     type_haystack: Literal['essay', 'noise'] = 'noise'
+    type_value: Literal['numbers', 'words', 'uuids'] = 'numbers'
+    type_vars: Literal['numbers', 'words', 'uuids'] = 'words'
+    assignment_format: Literal['python', 'javascript', 'words', 'ruler'] = 'ruler'
     remove_newline_tab: bool = False
     
     model_template_token: int = 0
@@ -97,7 +100,7 @@ class GenerateVariableTrackingConfig(RunConfig):
         # get a hash of the config
         tokenizer_str = self.variable_tracking.tokenizer.split("/")[-1].replace("-", "_").lower()
         config_hash = hashlib.sha256(str(self.variable_tracking.model_dump()).encode()).hexdigest()[:8]
-        config_str = f"{tokenizer_str}-l{self.variable_tracking.max_seq_length}-n{self.variable_tracking.num_samples}-c{self.variable_tracking.num_chains}-h{self.variable_tracking.num_hops}-{self.variable_tracking.type_haystack}-{config_hash}"
+        config_str = f"{tokenizer_str}-l{self.variable_tracking.max_seq_length}-n{self.variable_tracking.num_samples}-c{self.variable_tracking.num_chains}-h{self.variable_tracking.num_hops}-{self.variable_tracking.type_haystack}-{self.variable_tracking.assignment_format}-{config_hash}"
         save_file = Path(self.save_dir) / f'{config_str}.json'
         save_file.parent.mkdir(parents=True, exist_ok=True)
         samples = generate_samples(
@@ -124,7 +127,6 @@ class GenerateVariableTrackingConfig(RunConfig):
             json.dump(samples_json, f, indent=4)
         
         # write_manifest(save_file, write_jsons)
-        print(f"Saved {len(samples_json['samples'])} samples to {save_file}")
 
         # Debug print
         print("Sample context:")
@@ -134,6 +136,10 @@ class GenerateVariableTrackingConfig(RunConfig):
             print(f"Query {i+1}: {query.query}")
             print(f"Answers: {query.answers}")
             print()
+        print("--------------------------------")
+
+        print(f"Saved {len(samples_json['samples'])} samples to {save_file}")
+
 
 
 
@@ -187,38 +193,126 @@ words = [f"{adj}-{noun}" for adj in adjs for noun in nouns]
 words = sorted(list(set(words)))
 
 
+def generate_random_number(num_digits=7):
+    lower_bound = 10**(num_digits - 1)
+    upper_bound = 10**num_digits - 1
+    return str(random.randint(lower_bound, upper_bound))
+
+def generate_random_word():
+    word = random.choice(words)
+    return word
+
+def generate_random_uuid():
+    return str(uuid.UUID(int=random.getrandbits(128), version=4))
+
+def generate_random(type_needle: str):
+    if type_needle == 'numbers':
+        return generate_random_number()
+    elif type_needle == 'words':
+        return generate_random_word()
+    elif type_needle == 'uuids':
+        return generate_random_uuid()
+    else:
+        raise NotImplementedError(f'{type_needle} is not implemented.')
+
+def create_assignment_str(
+    var: str, 
+    value: str,
+    is_value_literal: bool,
+    assignment_format: Literal['python', 'javascript', 'words', 'ruler']
+) -> str:
+
+    if assignment_format == 'python':
+        if is_value_literal:
+            value = f"'{value}'"
+        return f"The following is one line of Python code to be executed in a Python interpreter:  `{var} = {value}`"
+    elif assignment_format == 'javascript':
+        if is_value_literal:
+            value = f"'{value}'"
+        return f"Here is one line of JavaScript code to be executed in a JavaScript interpreter:  `var {var} = {value}`"
+    elif assignment_format == 'words':
+        return f"The special magic variable '{var}' is equivalent to '{value}'."
+    elif assignment_format == 'ruler':
+        if is_value_literal:
+            value = f"'{value}'"
+        else:
+            value = f"VAR {value}"
+        return f"VAR {var} = {value}"
+    else:
+        raise NotImplementedError(f'{assignment_format} is not implemented.')
+
+
+
+
+
 # Positions
 DEPTHS = list(np.round(np.linspace(0, 100, num=512, endpoint=True)).astype(int))
 
-def generate_chains(num_chains, num_hops, is_icl=False):
-    vars_all = []
+@dataclass
+class Chain:
+    vars: List[str]
+    initial_value: str
+    assignment_strs: List[str]
+
+def generate_chains(
+    num_chains: int, 
+    num_hops: int, 
+    is_icl: bool=False, 
+    type_vars: Literal['numbers', 'words', 'uuids'] = 'words',
+    type_value: Literal['numbers', 'words', 'uuids'] = 'numbers',
+    assignment_format: Literal['python', 'javascript', 'words', 'ruler'] = 'ruler'
+) -> List[Chain]:
+    vars_all = set()
     k = 5 if not is_icl else 3
     num_hops = num_hops if not is_icl else min(10, num_hops)
-    vars_all = [''.join(random.choices(string.ascii_uppercase, k=k)).upper() for _ in range((num_hops+1) * num_chains)]
-    while len(set(vars_all)) < num_chains * (num_hops+1):
-        vars_all.append(''.join(random.choices(string.ascii_uppercase, k=k)).upper())
+    while len(vars_all) < num_chains * (num_hops+1):
+        if type_vars == 'numbers':
+            new_var = generate_random_number()
+        elif type_vars == 'words':
+            new_var = generate_random_word()
+        elif type_vars == 'uuids':
+            new_var = generate_random_uuid()
+        else:
+            raise NotImplementedError(f'{type_vars} is not implemented.')
+        vars_all.add(new_var)
+    vars_all = list(vars_all)
 
-    vars_ret = []
-    chains_ret = []
+
+    chains: List[Chain] = []
     used_values = set()
+
+    if type_value == 'numbers':
+        value_generator = generate_random_number
+    elif type_value == 'words':
+        value_generator = generate_random_word
+    elif type_value == 'uuids':
+        value_generator = generate_random_uuid
+    else:
+        raise NotImplementedError(f'{type_value} is not implemented.')
     
     for i in range(0, len(vars_all), num_hops+1):
         this_vars = vars_all[i:i+num_hops+1]
-        vars_ret.append(this_vars)
         if is_icl:
-            this_chain = [f"\"{this_vars[0]}\" is equal to \"12345\"\n"]
+            # this_chain = [f"\"{this_vars[0]}\" is equal to \"12345\"\n"]
+            this_chain = [create_assignment_str(this_vars[0], "12345", is_value_literal=True, assignment_format=assignment_format)]
         else:
             # Generate unique initial value
             while True:
-                value = str(np.random.randint(10000, 99999))
+                value = value_generator()
                 if value not in used_values:
                     used_values.add(value)
                     break
-            this_chain = [f"\"{this_vars[0]}\" is equal to \"{value}\"\n"]
+            this_chain = [create_assignment_str(this_vars[0], value, is_value_literal=True, assignment_format=assignment_format)]
         for j in range(num_hops):
-            this_chain.append(f"\"{this_vars[j+1]}\" is equal to \"{this_vars[j]}\"\n")
-        chains_ret.append(this_chain)
-    return vars_ret, chains_ret
+            this_chain.append(create_assignment_str(this_vars[j+1], this_vars[j], is_value_literal=False, assignment_format=assignment_format))
+        chains.append(
+            Chain(
+                vars=this_vars,
+                initial_value=value,
+                assignment_strs=this_chain
+            )
+        )
+    return chains
 
 def shuffle_sublists_heap(lst):
     heap = []
@@ -260,8 +354,15 @@ def generate_random(type_needle: str):
 
 
 def generate_input_output(num_noises, config: VariableTrackingConfig, is_icl=False):
-    vars_chains, chains = generate_chains(config.num_chains, config.num_hops, is_icl=is_icl)
-    
+    chains = generate_chains(
+        config.num_chains, 
+        config.num_hops, 
+        is_icl=is_icl, 
+        type_vars=config.type_vars,
+        type_value=config.type_value, 
+        assignment_format=config.assignment_format,
+    )
+
     haystack = get_haystack(config.type_haystack)
 
     if config.type_haystack == 'essay':
@@ -272,7 +373,7 @@ def generate_input_output(num_noises, config: VariableTrackingConfig, is_icl=Fal
             repeats = (num_noises + len(haystack) - 1) // len(haystack)  # Ceiling division
             text = " ".join((haystack * repeats)[:num_noises])
         document_sents = sent_tokenize(text.strip())
-        chains_flat = shuffle_sublists_heap(chains)
+        chains_flat = shuffle_sublists_heap([chain.assignment_strs for chain in chains])
         insertion_positions = [0] + \
                               sorted([int(len(document_sents) * (depth / 100)) for depth in random.sample(DEPTHS, len(chains_flat))]) + \
                               [len(document_sents)]
@@ -287,24 +388,27 @@ def generate_input_output(num_noises, config: VariableTrackingConfig, is_icl=Fal
 
     elif config.type_haystack == 'noise':
         sentences = [haystack] * num_noises
-        for chain in chains:
+        for chain in chains.assignment_strs:
             positions = list(sorted(random.sample(range(len(sentences)), len(chain))))
             for insert_pi, j in zip(positions, range(len(chain))):
-                sentences.insert(insert_pi+j, chain[j])
+                sentences.insert(insert_pi+j, chain.assignment_strs[j])
         context = "\n".join(sentences)
 
     context = context.replace(". \n", ".\n")
 
     # Create queries - one for each chain
     queries = []
-    for i, (vars_chain, chain) in enumerate(zip(vars_chains, chains)):
+    for i, chain in enumerate(chains):
         # Get the initial value from the first assignment in this chain
-        initial_value = chain[0].split("is equal to")[-1].strip()
+        initial_value = chain.initial_value
         
         # All variables in this chain should resolve to the initial value
-        answers = vars_chain  # All variables in the chain
-        
-        query_text = f"Find all variables equal to {initial_value} in the text above."
+        answers = chain.vars  # All variables in the chain
+
+        if config.assignment_format == "words":
+            query_text = f"What are all of the special magic variables equivalent to {initial_value}?"
+        else:
+            query_text = f"Find all variables equal to {initial_value} in the text above."
         
         answer_prompt = f"According to the chain(s) of variable assignment in the text above, {len(answers)} variables are assigned the value {initial_value}. List only the variable names inside <answer></answer> tags, one per line:"
         
@@ -405,13 +509,16 @@ if __name__ == "__main__":
         variable_tracking=VariableTrackingConfig(
             seed=42,
             context_template=CONTEXT_TEMPLATE,
-            num_chains=64,
+            num_chains=16,
             num_hops=2,
             type_haystack='essay',
+            type_value='words',
+            type_vars='words',
+            assignment_format='words',
             tokens_to_generate=128,
             num_samples=1,
-            tokenizer="Qwen/Qwen3-4B",
-            max_seq_length=100_000,  # Much smaller for testing
+            tokenizer="meta-llama/Llama-3.2-3B-Instruct",
+            max_seq_length=10_000,  # Much smaller for testing
         ),
     )
     pydrantic.main([config])
