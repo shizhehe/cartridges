@@ -83,6 +83,7 @@ class TrainConfig(RunConfig):
     # with the `optimizer_step` variable. This is different than the number of batches
     # processed, which is given by `iter_idx`.
     generate_every_n_steps: Optional[int] = None
+    generate_before_training: bool = True
     generate_evals: list[GenerationEvalConfig] = field(default_factory=list)
 
     # the `global_batch_size` is the total batch size across all devices and gradient
@@ -97,6 +98,7 @@ class TrainConfig(RunConfig):
     optimizer: Literal["adam"] = "adam"
     lr: float = 1e-4
     lr_scheduler: Optional[Scheduler.Config] = None
+    weight_decay: float = 0.0
 
     kv_cache_initializer: Optional[KVCacheFactory.Config] = None
     pretrained_cache_path: Optional[str] = None
@@ -277,7 +279,8 @@ def train(config: TrainConfig):
 
     optimizer = optim.Adam(
         wrapped_model.parameters() if use_peft else cache.parameters(), 
-        lr=config.lr
+        lr=config.lr,
+        weight_decay=config.weight_decay,
     )
 
     # Initialize counter variables
@@ -377,10 +380,12 @@ def train(config: TrainConfig):
             ):
                 do_evaluation()
 
+            
             if (
                 config.generate_every_n_steps is not None
                 and optimizer_step % config.generate_every_n_steps == 0
                 and iter_idx % accumulate_grad_steps == 0
+                and (config.generate_before_training or iter_idx > 0)
             ):
                 do_evaluate_generations(step=iter_idx)
 
@@ -791,6 +796,7 @@ def evaluate_generations(
         disable=not is_rank_zero,
     ):
         for sample_idx in range(num_samples):
+            logger.info(f"Generating sample {sample_idx} of {num_samples}")
 
             elements = [
                 (i, dataset[indexes[i]])
@@ -832,8 +838,6 @@ def evaluate_generations(
             for  (seq_id, curr_pred_ids) in pred_ids.items():
                 element = elements[seq_id]
                 pred = tokenizer.decode(curr_pred_ids, skip_special_tokens=True)
-
-                
                 
                 if has_score:
                     metrics, extras = dataset.score(
@@ -864,6 +868,7 @@ def evaluate_generations(
                         **extras,
                     }
                 )
+    logger.info(f"Generated {len(results)} samples")
 
     batch_score = None
     if has_batch_score:

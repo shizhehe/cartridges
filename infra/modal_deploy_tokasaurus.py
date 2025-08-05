@@ -14,7 +14,7 @@ root = Path(__file__).parent.parent.parent
 
 # --- BEGIN ARGS ---
 PORT = 8080
-BRANCH = os.environ.get("BRANCH", "geoff/cartridges") #"sabri/batch")
+BRANCH = os.environ.get("BRANCH", "sabri/batch")
 MODEL_NAME = os.environ.get("MODEL_NAME", "meta-llama/llama-3.2-3B-Instruct") 
 DP_SIZE = int(os.environ.get("DP_SIZE", 1))
 PP_SIZE = int(os.environ.get("PP_SIZE", 1))

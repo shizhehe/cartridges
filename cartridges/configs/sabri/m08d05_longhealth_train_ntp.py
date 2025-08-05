@@ -22,26 +22,20 @@ patient_idxs = list(range(1, NUM_PATIENTS + 1))
 patients_str = f"p{NUM_PATIENTS}"
 patient_ids = [f"patient_{idx:02d}" for idx in patient_idxs]
 
-NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "2048"))
+NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "1024"))
 
 MODEL = os.environ.get("MODEL", "llama")
 if MODEL == "llama":
     data_sources = [
-        "/data/sabri/cartridges/2025-07-26-12-21-32-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_llama-3.2-3b_p10_n65536-0/artifact/dataset.pkl",
-        "/data/sabri/cartridges/2025-07-26-13-40-44-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_llama-3.2-3b_p10_n65536-0/artifact/dataset.pkl",
-        "/data/sabri/cartridges/2025-08-05-09-43-20-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_llama-3.2-3b_p10_n65536-0/artifact/dataset.pkl"
+        "/data/sabri/cartridges/2025-08-05-10-00-14-m08d05_longhealth_synthesize_ntp/m08d05_longhealth_synthesize_ntp_llama-3.2-3b_p10_n65536-0/artifact/dataset.pkl"
     ]
     model = HFModelConfig(
         pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
         model_cls=FlexLlamaForCausalLM,
     )
 elif MODEL == "qwen":
-    data_sources = [
-        # "/data/sabri/cartridges/2025-07-26-12-02-19-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_qwen3-4b_p10_n65536-0/artifact/dataset.pkl"
-
-        "/data/sabri/cartridges/2025-07-27-14-11-52-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_qwen3-4b_p10_n65536-0/artifact/dataset.pkl",
-        "/data/sabri/cartridges/2025-07-27-15-00-07-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_qwen3-4b_p10_n65536-0/artifact/dataset.pkl"
-    ]
+    data_sources = []
+   
     model=HFModelConfig(
         pretrained_model_name_or_path="Qwen/Qwen3-4b",
         model_cls=FlexQwen3ForCausalLM,
@@ -55,7 +49,7 @@ config = TrainConfig(
     ),
     
     lr=2e-2,
-    epochs=2,
+    epochs=4,
     global_batch_size=32,
 
     dataset=CartridgeTrainDataset.Config(
@@ -70,6 +64,7 @@ config = TrainConfig(
 
     save_every_n_steps=512,
     generate_every_n_steps=128,
+    generate_before_training=True,
     generate_evals=[
         GenerationEvalConfig(
             dataset=LongHealthMultipleChoiceGenerateDataset.Config(
@@ -81,7 +76,7 @@ config = TrainConfig(
             temperature=0.3,
         )
     ],
-    eval_every_n_steps=512,
+    eval_every_n_steps=128,
     eval_datasets=[],
     distributed_backend="gloo",
 

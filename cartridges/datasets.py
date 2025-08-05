@@ -100,7 +100,11 @@ def _base_convert_messages_to_element(
     token_counts = TokenCounts()
 
     for i, message in enumerate(messages):
-        msg_input_ids = message_start_tokens[message.role] + message.token_ids
+        if message.token_ids is None:
+            msg_token_ids = tokenizer.encode(message.content, add_special_tokens=False)
+        else:
+            msg_token_ids = message.token_ids
+        msg_input_ids = message_start_tokens[message.role] + msg_token_ids
         
         end_tokens = message_end_tokens[message.role]
         # usually, messages will end with some tokenizer-specific "end" token(s) (e.g. <|endoftext|>)

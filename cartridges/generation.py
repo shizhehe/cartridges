@@ -5,7 +5,9 @@ import torch
 from tqdm import tqdm
 
 from cartridges.cache import AttnConfig, TrainableCache
+from cartridges.utils import get_logger
 
+logger = get_logger(__name__)
 
 
 def flex_generate(
@@ -36,6 +38,7 @@ def flex_generate(
     
     This implementation relies on the PackedCache above.
     """
+    
     device = input_ids.device
     model.eval()
     if stop_token_ids is None:
