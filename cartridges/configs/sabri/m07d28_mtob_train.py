@@ -23,9 +23,9 @@ patient_idxs = list(range(1, NUM_PATIENTS + 1))
 patients_str = f"p{NUM_PATIENTS}"
 patient_ids = [f"patient_{idx:02d}" for idx in patient_idxs]
 
-NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "1024"))
+NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "8192"))
 
-MODEL = os.environ.get("MODEL", "qwen")
+MODEL = os.environ.get("MODEL", "llama")
 if MODEL == "qwen":
     data_sources = [
         "/data/sabri/cartridges/2025-07-28-18-33-28-m07d28_mtob_synthesize/m07d28_mtob_synthesize_qwen3-4b_n65536-0/artifact/dataset.pkl",
@@ -36,11 +36,21 @@ if MODEL == "qwen":
         pretrained_model_name_or_path="Qwen/Qwen3-4b",
         model_cls=FlexQwen3ForCausalLM,
     )
+elif MODEL == "llama":
+    data_sources = [
+        "/data/sabri/cartridges/2025-07-30-19-03-42-m07d28_mtob_synthesize/m07d28_mtob_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl",
+        "/data/sabri/cartridges/2025-07-30-19-18-45-m07d28_mtob_synthesize/m07d28_mtob_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl"
+
+    ]
+    model = HFModelConfig(
+        pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
+        model_cls=FlexLlamaForCausalLM,
+    )
 else:
     raise ValueError(f"Invalid model: {MODEL}")
 
 configs = []
-for lr in [8e-3, 9e-3, 1e-2, 2e-2, 3e-2]:
+for lr in [2e-2]:
     config = TrainConfig(
         model=model,
         kv_cache_initializer=KVFromRandomText.Config(
@@ -48,8 +58,7 @@ for lr in [8e-3, 9e-3, 1e-2, 2e-2, 3e-2]:
         ),
         
         lr=lr,
-        loss_type="logits",
-        epochs=2,
+        epochs=1,
         global_batch_size=32,
 
         dataset=CartridgeTrainDataset.Config(
@@ -79,7 +88,7 @@ for lr in [8e-3, 9e-3, 1e-2, 2e-2, 3e-2]:
         distributed_backend="gloo",
 
         wandb=WandBConfig(
-            project="cartridges",
+            project="capsules",
             tags=["train", "mtob"],
             entity="hazy-research",
         ),

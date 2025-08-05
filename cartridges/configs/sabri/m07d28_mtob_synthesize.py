@@ -14,15 +14,15 @@ from cartridges.configs.utils import short_model_name
 
 
 
-client = TokasaurusClient.Config(
-    url="https://hazyresearch--toka-qwen3-4b-1xh100-min0-serve.modal.run",
-    model_name="Qwen/Qwen3-4b",
-)
-
 # client = TokasaurusClient.Config(
-#     url="https://hazyresearch--toka-llama-3-2-3b-instruct-1xh100-min0-serve.modal.run",
-#     model_name="meta-llama/Llama-3.2-3B-Instruct",
+#     url="https://hazyresearch--toka-qwen3-4b-1xh100-min0-serve.modal.run",
+#     model_name="Qwen/Qwen3-4b",
 # )
+
+client = TokasaurusClient.Config(
+    url="https://hazyresearch--toka-llama-3-2-3b-instruct-1xh100-min0-serve.modal.run",
+    model_name="meta-llama/Llama-3.2-3B-Instruct",
+)
 
 
 # client = TokasaurusClient.Config(

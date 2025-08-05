@@ -202,6 +202,18 @@ if __name__ == "__main__":
 
     print("Starting generation...")
     print(f"Input shapes: input_ids={input_ids.shape}, seq_ids={seq_ids.shape}, position_ids={position_ids.shape}")
+
+    if cache is None:
+        from cartridges.cache_fast import FastTrainableCache
+        cache = FastTrainableCache(
+            max_seq_len=1024,
+            config=AttnConfig(
+                n_layers=model.config.num_hidden_layers,
+                n_heads=model.config.num_key_value_heads,
+                head_dim=model.config.head_dim,
+            ),
+            device=str(input_ids.device),
+        )
     
     output = flex_generate(
         model=model,
@@ -216,7 +228,8 @@ if __name__ == "__main__":
     print("Generated tokens:", output)
     
     # Decode the output
-    for seq_idx, tokens in enumerate(output):
+    for seq_idx, tokens in output.items():
         if tokens:
             decoded = tokenizer.decode(tokens)
+            print(decoded)
             print(f"Sequence {seq_idx}: {decoded}")

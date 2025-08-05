@@ -24,7 +24,7 @@ patient_ids = [f"patient_{idx:02d}" for idx in patient_idxs]
 
 NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "1024"))
 
-MODEL = os.environ.get("MODEL", "qwen")
+MODEL = os.environ.get("MODEL", "llama2")
 if MODEL == "llama":
     data_sources = [
         "/data/sabri/cartridges/2025-07-26-12-21-32-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_llama-3.2-3b_p10_n65536-0/artifact/dataset.pkl",
@@ -32,6 +32,15 @@ if MODEL == "llama":
     ]
     model = HFModelConfig(
         pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
+        model_cls=FlexLlamaForCausalLM,
+    )
+elif MODEL == "llama2":
+    data_sources = [
+        "/data/sabri/cartridges/2025-07-26-12-21-32-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_llama-3.2-3b_p10_n65536-0/artifact/dataset.pkl",
+        "/data/sabri/cartridges/2025-07-26-13-40-44-m07d11_longhealth_synthesize/m07d11_longhealth_synthesize_llama-3.2-3b_p10_n65536-0/artifact/dataset.pkl"
+    ]
+    model = HFModelConfig(
+        pretrained_model_name_or_path="meta-llama/Llama-2-7b-chat-hf",
         model_cls=FlexLlamaForCausalLM,
     )
 elif MODEL == "qwen":
@@ -59,12 +68,13 @@ config = TrainConfig(
 
     dataset=CartridgeTrainDataset.Config(
         data_sources=[
-            (source, None)
+            (source, 1024)
             for source in data_sources
         ],
         top_k_logits=20,
         packed_seq_length=2048,
         packing_mode="truncate",
+        targets="tokens",
     ),
 
     save_every_n_steps=512,

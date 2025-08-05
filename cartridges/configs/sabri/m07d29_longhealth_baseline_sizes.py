@@ -13,8 +13,8 @@ from cartridges.evaluate import GenerationEvalConfig
 from cartridges.utils import WandBConfig
 
 client = OpenAIClient.Config(
-    base_url="https://hazyresearch--vllm-qwen3-1-7b-1xh100-serve.modal.run/v1",
-    model_name="Qwen/Qwen3-1.7b",
+    base_url="https://hazyresearch--vllm-qwen3-8b-1xh100-serve.modal.run/v1",
+    model_name="Qwen/Qwen3-8b",
 )
 
 file_name = Path(__file__).stem

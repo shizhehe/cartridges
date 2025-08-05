@@ -18,7 +18,7 @@ patients_str = f"p{NUM_PATIENTS}"
 patient_ids = [f"patient_{idx:02d}" for idx in patient_idxs]
 
 configs = []
-for size in ["0.6", "1.7", "8"]:
+for size in ["8"]:
     size_modal = size.replace(".", "-")
     client = TokasaurusClient.Config(
         url=f"https://hazyresearch--toka-qwen3-{size_modal}b-1xh100-min0-serve.modal.run",
@@ -45,6 +45,9 @@ for size in ["0.6", "1.7", "8"]:
                         "creative",
                     ],
                     patient_ids=patient_ids,
+                    min_notes_per_prompt=2,
+                    max_notes_per_prompt=2,
+                    max_chars_per_note=2048,
                 )
             ],
         ),
