@@ -18,7 +18,7 @@ import evaluate
 def prompt_direct(input_sentence, source_language, target_language):
     return f"""You are tasked with translating the following sentence from {source_language} to {target_language}: "{input_sentence}".
 I understand that you may not be familiar enough with {source_language} or {target_language} to make a confident translation, but please give your best guess.
-Respond with only the translation and no other text."""
+Make sure you respond with only the translation and absolutely no other text. Do not repeat the input sentence."""
 
 
 def prompt_cot(input_sentence, source_language, target_language):
@@ -98,14 +98,18 @@ class MTOBGenerateDataset(CartridgeGenerateDataset):
         assert len(decoded) == len(self.data)
 
         assert not self.config.use_cot
-        # predictions = [
-        #     extract_answer_from_cot(d) if self.config.use_cot else d for d in decoded
-        # ]
+
 
         predictions = []
         for d in decoded:
             if d.endswith("<|eot_id|>"):
                 d = d[: -len("<|eot_id|>")]
+            print("Before: ", d)
+            if "</thinking>" in d:
+                print("found thinking")
+                d = d.split("</thinking>")[1]
+                d = extract_answer_from_cot(d) 
+                print("After: ", d)
 
             predictions.append(d)
 
@@ -125,6 +129,14 @@ class MTOBGenerateDataset(CartridgeGenerateDataset):
         for d in decoded:
             if d.endswith("<|eot_id|>"):
                 d = d[: -len("<|eot_id|>")]
+            
+            print("Before: ", d)
+            if "</think>" in d:
+                print("found think")
+                d = d.split("</think>")[1]
+                print("After: ", d)
+            d = extract_answer_from_cot(d) 
+
 
             predictions.append(d)
 

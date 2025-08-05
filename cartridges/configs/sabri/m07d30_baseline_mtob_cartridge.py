@@ -6,6 +6,7 @@ import pydrantic
 from cartridges.clients.openai import  OpenAIClient
 from cartridges.clients.tokasaurus import TokasaurusClient
 from cartridges.data.longhealth.resources import LongHealthResource
+from cartridges.data.mtob.evals import MTOBKalamangToEnglishGenerateDataset
 from cartridges.evaluate import CartridgeBaseline, EvaluateConfig, CartridgeConfig
 from cartridges.data.longhealth.evals import LongHealthMultipleChoiceGenerateDataset
 from cartridges.evaluate import GenerationEvalConfig
@@ -18,9 +19,8 @@ from cartridges.utils import WandBConfig
 # )
 client = TokasaurusClient.Config(
     url="http://localhost:10210/",
-    # model_name="Qwen/Qwen3-4b",
-    model_name="meta-llama/Llama-3.2-3B-Instruct",
-    base_timeout=500,
+    model_name="Qwen/Qwen3-4b",
+    base_timeout=160,
 )
 
 
@@ -37,35 +37,32 @@ configs = [
         name=f"{file_name}_{patients_str}",
         generator=CartridgeBaseline.Config(
             client=client,
-             cartridges=[
-                # CartridgeConfig(
-                #     id="1w9e5agx",
-                #     source="wandb",
-                #     force_redownload=False
-                # ),
-                # CartridgeConfig(
-                #     id="18xjajjv",
-                #     source="wandb",
-                #     force_redownload=False
-                # ),
-                
-                CartridgeConfig(
-                    id="q1sebt5s",  # qasper 8192
-                    source="wandb",
-                    force_redownload=False
-                ),
-                CartridgeConfig(
-                    id="xd1b7oi7",  # longhealth 8192
-                    source="wandb",
-                    force_redownload=False
-                ),
-                CartridgeConfig(
-                    id="2o672jhw",  # mtob 8192
-                    source="wandb",
-                    force_redownload=False
-                ),
+            # cartridges=[
+            #     # CartridgeConfig(
+            #     #     id="1w9e5agx",
+            #     #     source="wandb",
+            #     #     force_redownload=False
+            #     # ),
+            #     # CartridgeConfig(
+            #     #     id="18xjajjv",
+            #     #     source="wandb",
+            #     #     force_redownload=False
+            #     # ),
 
-            ],
+            #     # Longhealth 2048: hazy-research/cartridges/e01tf9rv
+            #     # CartridgeConfig(
+            #     #     id="e01tf9rv",
+            #     #     source="wandb",
+            #     #     force_redownload=False
+            #     # ),
+            #     # MTOB 2048: hazy-research/cartridges/qzwkmr28
+            #     # CartridgeConfig(
+            #     #     id="qzwkmr28",
+            #     #     source="wandb",
+            #     #     force_redownload=False
+            #     # ),
+            # ],
+            enable_thinking=False,
             temperature=0.0,
             max_completion_tokens=2048,
             context=LongHealthResource.Config(
@@ -73,11 +70,10 @@ configs = [
             ),
         ),
         eval=GenerationEvalConfig(
-            dataset=LongHealthMultipleChoiceGenerateDataset.Config(
-                patient_ids=patient_ids, 
-                cot=True,
-            ),
-            name_for_wandb=f"longhealth_mc",
+            name_for_wandb=f"mmtob-ke-test",
+            dataset=MTOBKalamangToEnglishGenerateDataset.Config(use_cot=False),
+            batch_size=16,
+            generate_max_new_tokens=128,
             num_samples=1,
             temperature=0.0,
         ),

@@ -25,11 +25,7 @@ client = OpenAIClient.Config(
 # )
 file_name = Path(__file__).stem
 
-SYSTEM_PROMPT_TEMPLATE = f"""Please reference the material below to help the user translate from Kalamang to English.
-
-{{content}}"""
-
-
+SYSTEM_PROMPT_TEMPLATE = f"""You are a helpful and reliable assistant."""
 
 configs = [
     EvaluateConfig(
@@ -40,16 +36,7 @@ configs = [
             temperature=0.0,
             max_completion_tokens=128,
             enable_thinking=False,
-            context=MTOBResource.Config(
-                seed_prompts=[
-                    "structuring",
-                    "summarization",
-                    "question",
-                    "use_case",
-                    "creative",
-                ],
-                setup="medium_and_sentences",
-            )
+            context="",
         ),
         eval=GenerationEvalConfig(
             name_for_wandb=f"mmtob-ke-test",

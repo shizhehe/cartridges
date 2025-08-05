@@ -69,6 +69,8 @@ async def evaluate_generation(config: EvaluateConfig):
 
     # TODO: the generate dataset actually determines the temperature for training
     # so to ensure fair comparison we assert that the temperature is the same
+    print("config.eval.temperature: ", config.eval.temperature)
+    print("config.generator.temperature: ", config.generator.temperature)
     assert config.eval.temperature == config.generator.temperature
 
     # Use asyncio for concurrent execution
@@ -533,7 +535,7 @@ class CartridgeBaseline(BaselineGenerator):
         # used to count number of tokens in the prompt
         tokenizer: str = "meta-llama/Llama-3.2-3B-Instruct"
         
-        cartridges: List[CartridgeConfig]
+        cartridges: Optional[List[CartridgeConfig]] = None
 
 
         # The user prompt template which should contain {content}
@@ -597,13 +599,18 @@ class CartridgeBaseline(BaselineGenerator):
             )
             chats.append(messages)
 
+        kwargs = {}
+        if self.config.cartridges is not None:
+            kwargs["cartridges"] = [cartridge.model_dump() for cartridge in self.config.cartridges]
+        print("kwargs: ", kwargs)
+
 
         response: ClientResponse = await self.client.chat(
             chats=chats,
             max_completion_tokens=self.config.max_completion_tokens,
             temperature=self.config.temperature,
             enable_thinking=self.config.enable_thinking,
-            cartridges=[cartridge.model_dump() for cartridge in self.config.cartridges],
+            **kwargs,
         )
         assert len(response.samples) == len(chats)
 
