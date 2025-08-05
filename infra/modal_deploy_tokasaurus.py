@@ -14,15 +14,15 @@ root = Path(__file__).parent.parent.parent
 
 # --- BEGIN ARGS ---
 PORT = 8080
-BRANCH = os.environ.get("BRANCH", "sabri/batch")
-MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen3-14B") 
+BRANCH = os.environ.get("BRANCH", "geoff/cartridges") #"sabri/batch")
+MODEL_NAME = os.environ.get("MODEL_NAME", "meta-llama/llama-3.2-3B-Instruct") 
 DP_SIZE = int(os.environ.get("DP_SIZE", 1))
 PP_SIZE = int(os.environ.get("PP_SIZE", 1))
 MAX_TOPK_LOGPROBS = int(os.environ.get("MAX_TOPK_LOGPROBS", 20))
 GPU_TYPE: Literal["H100", "H200", "B200", "A100-80GB"] = os.environ.get("GPU_TYPE", "H100")
 MIN_CONTAINERS = int(os.environ.get("MIN_CONTAINERS", 0))
-MAX_CONTAINERS = int(os.environ.get("MAX_CONTAINERS", 24))
-ALLOW_CONCURRENT_INPUTS = int(os.environ.get("ALLOW_CONCURRENT_INPUTS", 6))
+MAX_CONTAINERS = int(os.environ.get("MAX_CONTAINERS", 32))
+ALLOW_CONCURRENT_INPUTS = int(os.environ.get("ALLOW_CONCURRENT_INPUTS", 4))
 SECRETS = os.environ.get("SECRETS", "sabri-api-keys")
 # --- END ARGS ---
 
@@ -37,6 +37,7 @@ image = (
     )
     .run_commands("cd /root/tokasaurus && pip install -e .")
     .run_commands("pip install --upgrade transformers")
+    .pip_install("wandb")
 )
 if BRANCH != "main":
     image = image.run_commands(f"cd /root/tokasaurus && git fetch --all && git checkout --track origin/{BRANCH}")
@@ -52,8 +53,14 @@ flashinfer_cache_vol = modal.Volume.from_name(
 )
 
 gpu_count = DP_SIZE * PP_SIZE
-model_short = MODEL_NAME.lower().split("/")[-1]
-app = modal.App(f"toka-{model_short}-{gpu_count}x{GPU_TYPE}-min{MIN_CONTAINERS}")
+model_short = MODEL_NAME.lower().split("/")[-1].replace("-instruct", "")
+branch_short = BRANCH.split("/")[-1]
+name = f"toka-{model_short}-{gpu_count}x{GPU_TYPE}"
+if MIN_CONTAINERS > 0:
+    name += f"-min{MIN_CONTAINERS}"
+if BRANCH != "main":
+    name += f"-{branch_short}"
+app = modal.App(name)
 
 
 def wait_for_port(port, host="localhost", timeout=60.0):

@@ -3,10 +3,15 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Literal, Optional, Union
 
 import numpy as np
-from pydrantic import ObjectConfig
+from pydrantic import BaseConfig, ObjectConfig
 from pydantic import BaseModel
 from cartridges.clients.usage import Usage
 from dataclasses import dataclass, asdict
+
+class CartridgeConfig(BaseConfig):
+    id: str
+    source: Literal["huggingface", "wandb"]
+    force_redownload: bool = False
 
 class ClientConfig(ObjectConfig):
     _pass_as_config: bool = True

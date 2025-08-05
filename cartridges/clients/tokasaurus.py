@@ -16,6 +16,7 @@ from cartridges.clients.base import (
     ClientConfig,
     ClientResponse,
     TopLogprobs,
+    CartridgeConfig
 )
 from cartridges.clients.usage import Usage
 from cartridges.utils import get_logger
@@ -45,6 +46,8 @@ class TokasaurusClient(Client):
 
         on_failure: Literal["raise", "continue"] = "raise"
 
+        cartridges: Optional[List[CartridgeConfig]] = None
+
     def __init__(self, config: Config):
         """Initialize the Tokasaurus client with the provided config."""
         self.config = config
@@ -63,8 +66,11 @@ class TokasaurusClient(Client):
             except Exception as e:
                 self.logger.error(f"Failed to get model id: {e}")
                 raise e
-        
-        
+
+        if self.config.cartridges is not None:
+            self.cartridges = [c.model_dump() for c in self.config.cartridges]
+        else:
+            self.cartridges = None
 
     async def _send_requests(self, requests: list[dict], modal_upstream_id: Optional[str] = None, use_cartridge_endpoint: bool = False) -> dict:
         """Send a single request to the server with retries."""
@@ -218,8 +224,13 @@ class TokasaurusClient(Client):
                 "apply_chat_template_overrides": thinking_overrides,
                 "logprobs_in_fingerprint": True,
             }
+            all_cartridges = []
+            if self.cartridges is not None:
+                all_cartridges.extend(self.cartridges)
             if cartridges is not None:
-                request["cartridges"] = cartridges
+                all_cartridges.extend(cartridges)
+            if len(all_cartridges) > 0:
+                request["cartridges"] = all_cartridges
             if top_logprobs is not None:
                 request["logprobs"] = True
                 request["top_logprobs"] = top_logprobs
