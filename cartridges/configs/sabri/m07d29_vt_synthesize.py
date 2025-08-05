@@ -6,14 +6,24 @@ from pydrantic.variables import FormatStringVariable
 
 from cartridges.clients.tokasaurus import TokasaurusClient
 from cartridges.data.ruler.resources import VariableTrackingResource
+from cartridges.clients.base import CartridgeConfig
 from cartridges.synthesize import SynthesizeConfig
 from cartridges.synthesizers.self_study import SelfStudySynthesizer
 from cartridges.utils import WandBConfig
 from cartridges.configs.utils import short_model_name
 
+
 client = TokasaurusClient.Config(
-    url="https://hazyresearch--toka-llama-3-2-3b-instruct-1xh100-min0-serve.modal.run",
+    # url="https://hazyresearch--toka-llama-3-2-3b-instruct-1xh100-min0-serve.modal.run",
+    url="https://hazyresearch--toka-llama-3-2-3b-1xh100-cartridges-serve.modal.run",
     model_name="meta-llama/Llama-3.2-3B-Instruct",
+    cartridges=[
+        CartridgeConfig(
+            id="wv3q9fae",
+            source="wandb",
+            force_redownload=False
+        ),
+    ]
 )
 # client = TokasaurusClient.Config(
 #     url="https://hazyresearch--toka-qwen3-4b-1xh100-min0-serve.modal.run",
