@@ -15,6 +15,10 @@ client = TokasaurusClient.Config(
     url="https://hazyresearch--toka-llama-3-2-3b-instruct-1xh100-min0-serve.modal.run",
     model_name="meta-llama/Llama-3.2-3B-Instruct",
 )
+# client = TokasaurusClient.Config(
+#     url="https://hazyresearch--toka-qwen3-4b-1xh100-min0-serve.modal.run",
+#     model_name="Qwen/Qwen3-4B",
+# )
 
 # Use the default variable tracking dataset path
 BASE_PATH = "/home/sabri/code/cartridges/cartridges/data/ruler/_data"

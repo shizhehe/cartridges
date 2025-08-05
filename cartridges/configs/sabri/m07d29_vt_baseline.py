@@ -47,7 +47,7 @@ configs = [
         eval=GenerationEvalConfig(
             dataset=VariableTrackingGenerateDataset.Config(
                 variable_tracking_path=VT_PATH,
-                thinking=False,
+                thinking=True,
             ),
             name_for_wandb=f"variable_tracking",
             num_samples=1,

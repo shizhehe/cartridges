@@ -84,8 +84,8 @@ class KVCacheFromPretrained(KVCacheFactory):
                     run_path=self.config.wandb_run_id, 
                     root=cache_dir,
                 )
-            if is_ddp:
-                dist.barrier()
+        if is_ddp:
+            dist.barrier()
 
         logger.info(f"Loading cache from {cache_dir / filename}")
         cache = TrainableCache.from_pretrained(
