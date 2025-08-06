@@ -21,8 +21,8 @@ from cartridges.configs.utils import short_model_name
 # )
 
 client = TokasaurusClient.Config(
-    url="https://hazyresearch--toka-llama-3-2-3b-1xh100-batch-serve.modal.run",
-    model_name="meta-llama/Llama-3.2-3B-Instruct",
+    url="https://hazyresearch--toka-llama-3-1-8b-1xh100-batch-serve.modal.run",
+    model_name="meta-llama/Llama-3.1-8B-Instruct",
 )
 
 

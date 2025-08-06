@@ -13,7 +13,7 @@ from cartridges.evaluate import GenerationEvalConfig
 from cartridges.utils import WandBConfig
 
 client = TokasaurusClient.Config(
-    url="https://hazyresearch--toka-llama-3-2-3b-instruct-1xh100-min0-serve.modal.run",
+    url="https://hazyresearch--toka-llama-3-2-3b-1xh100-batch-serve.modal.run",
     model_name="meta-llama/Llama-3.2-3B-Instruct",
 )
 
@@ -32,7 +32,12 @@ BASE_PATH = "/home/sabri/code/cartridges/cartridges/data/ruler/_data"
 # VT_PATH = f"{BASE_PATH}/qwen3_4b-l100000-n1-c64-h2-noise-9df65ada.json"
 # VT_PATH = f"{BASE_PATH}/qwen3_4b-l100000-n1-c64-h2-essay-979310a3.json"
 # VT_PATH = f"{BASE_PATH}/llama_3.2_3b_instruct-l100000-n1-c64-h2-essay-7ba69bcb.json"
-VT_PATH = f"{BASE_PATH}/llama_3.2_3b_instruct-l10000-n1-c16-h2-essay-words-1d31e1f5.json"
+
+# Natural language
+# VT_PATH = f"{BASE_PATH}/llama_3.2_3b_instruct-l10000-n1-c16-h2-essay-words-1d31e1f5.json"
+VT_PATH = f"{BASE_PATH}/llama_3.2_3b_instruct-l100000-n1-c64-h2-essay-words-3e9c7e72.json"
+
+THINKING = False
 
 configs = [
     EvaluateConfig(
@@ -43,11 +48,12 @@ configs = [
             temperature=0.0,
             max_completion_tokens=1024,
             context=VariableTrackingResource.Config(variable_tracking_path=VT_PATH),
+            enable_thinking=THINKING,
         ),
         eval=GenerationEvalConfig(
             dataset=VariableTrackingGenerateDataset.Config(
                 variable_tracking_path=VT_PATH,
-                thinking=True,
+                thinking=THINKING,
             ),
             name_for_wandb=f"variable_tracking",
             num_samples=1,

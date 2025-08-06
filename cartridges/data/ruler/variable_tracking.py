@@ -75,8 +75,8 @@ class VariableTrackingConfig(BaseConfig):
     num_hops: int = 4
 
     type_haystack: Literal['essay', 'noise'] = 'noise'
-    type_value: Literal['numbers', 'words', 'uuids'] = 'numbers'
-    type_vars: Literal['numbers', 'words', 'uuids'] = 'words'
+    type_value: Literal['numbers', 'words', 'uuids', 'strings'] = 'numbers'
+    type_vars: Literal['numbers', 'words', 'uuids', 'strings'] = 'words'
     assignment_format: Literal['python', 'javascript', 'words', 'ruler'] = 'ruler'
     remove_newline_tab: bool = False
     
@@ -205,6 +205,9 @@ def generate_random_word():
 def generate_random_uuid():
     return str(uuid.UUID(int=random.getrandbits(128), version=4))
 
+def generate_random_string(length: int):
+    return ''.join(random.choices(string.ascii_uppercase, k=length))
+
 def generate_random(type_needle: str):
     if type_needle == 'numbers':
         return generate_random_number()
@@ -212,6 +215,8 @@ def generate_random(type_needle: str):
         return generate_random_word()
     elif type_needle == 'uuids':
         return generate_random_uuid()
+    elif type_needle == 'strings':
+        return generate_random_string(length=5)
     else:
         raise NotImplementedError(f'{type_needle} is not implemented.')
 
@@ -258,8 +263,8 @@ def generate_chains(
     num_chains: int, 
     num_hops: int, 
     is_icl: bool=False, 
-    type_vars: Literal['numbers', 'words', 'uuids'] = 'words',
-    type_value: Literal['numbers', 'words', 'uuids'] = 'numbers',
+    type_vars: Literal['numbers', 'words', 'uuids', 'strings'] = 'words',
+    type_value: Literal['numbers', 'words', 'uuids', 'strings'] = 'numbers',
     assignment_format: Literal['python', 'javascript', 'words', 'ruler'] = 'ruler'
 ) -> List[Chain]:
     vars_all = set()
@@ -272,6 +277,8 @@ def generate_chains(
             new_var = generate_random_word()
         elif type_vars == 'uuids':
             new_var = generate_random_uuid()
+        elif type_vars == 'strings':
+            new_var = generate_random_string(length=10)
         else:
             raise NotImplementedError(f'{type_vars} is not implemented.')
         vars_all.add(new_var)
@@ -505,20 +512,40 @@ def generate_samples(config: VariableTrackingConfig, tokenizer: HFTokenizer, inc
     return samples
 
 if __name__ == "__main__":
-    config = GenerateVariableTrackingConfig(
-        variable_tracking=VariableTrackingConfig(
-            seed=42,
-            context_template=CONTEXT_TEMPLATE,
-            num_chains=16,
-            num_hops=2,
-            type_haystack='essay',
-            type_value='words',
-            type_vars='words',
-            assignment_format='words',
-            tokens_to_generate=128,
-            num_samples=1,
-            tokenizer="meta-llama/Llama-3.2-3B-Instruct",
-            max_seq_length=10_000,  # Much smaller for testing
-        ),
-    )
+    TYPE = "original"
+
+    if TYPE == "original":
+        config = GenerateVariableTrackingConfig(
+            variable_tracking=VariableTrackingConfig(
+                seed=42,
+                context_template=CONTEXT_TEMPLATE,
+                num_chains=64,
+                num_hops=2,
+                type_haystack='essay',
+                type_value='numbers',
+                type_vars='strings',
+                assignment_format='ruler',
+                tokens_to_generate=128,
+                num_samples=1,
+                tokenizer="meta-llama/Llama-3.2-3B-Instruct",
+                max_seq_length=100_000,  # Much smaller for testing
+            ),
+        )
+    else:
+        config = GenerateVariableTrackingConfig(
+            variable_tracking=VariableTrackingConfig(
+                seed=42,
+                context_template=CONTEXT_TEMPLATE,
+                num_chains=64,
+                num_hops=2,
+                type_haystack='essay',
+                type_value='words',
+                type_vars='words',
+                assignment_format='words',
+                tokens_to_generate=128,
+                num_samples=1,
+                tokenizer="meta-llama/Llama-3.2-3B-Instruct",
+                max_seq_length=100_000,  # Much smaller for testing
+            ),
+        )
     pydrantic.main([config])

@@ -22,7 +22,7 @@ patient_idxs = list(range(1, NUM_PATIENTS + 1))
 patients_str = f"p{NUM_PATIENTS}"
 patient_ids = [f"patient_{idx:02d}" for idx in patient_idxs]
 
-NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "1024"))
+NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "2048"))
 
 MODEL = os.environ.get("MODEL", "llama")
 if MODEL == "llama":
@@ -46,8 +46,8 @@ else:
 
 configs = []
 for weight_decay in [
-    # 0.01, 0.05, 0.1
-    0.005, 0.5, 0.001
+    0.01, 0.05, 0.1
+    # 0.005, 0.5, 0.001
 ]:
     config = TrainConfig(
         model=model,

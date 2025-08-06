@@ -15,14 +15,14 @@ root = Path(__file__).parent.parent.parent
 # --- BEGIN ARGS ---
 PORT = 8080
 BRANCH = os.environ.get("BRANCH", "sabri/batch")
-MODEL_NAME = os.environ.get("MODEL_NAME", "meta-llama/llama-3.2-3B-Instruct") 
+MODEL_NAME = os.environ.get("MODEL_NAME", "meta-llama/llama-3.1-8B-Instruct") 
 DP_SIZE = int(os.environ.get("DP_SIZE", 1))
 PP_SIZE = int(os.environ.get("PP_SIZE", 1))
 MAX_TOPK_LOGPROBS = int(os.environ.get("MAX_TOPK_LOGPROBS", 20))
 GPU_TYPE: Literal["H100", "H200", "B200", "A100-80GB"] = os.environ.get("GPU_TYPE", "H100")
 MIN_CONTAINERS = int(os.environ.get("MIN_CONTAINERS", 0))
 MAX_CONTAINERS = int(os.environ.get("MAX_CONTAINERS", 32))
-ALLOW_CONCURRENT_INPUTS = int(os.environ.get("ALLOW_CONCURRENT_INPUTS", 4))
+ALLOW_CONCURRENT_INPUTS = int(os.environ.get("ALLOW_CONCURRENT_INPUTS", 32))
 SECRETS = os.environ.get("SECRETS", "sabri-api-keys")
 # --- END ARGS ---
 

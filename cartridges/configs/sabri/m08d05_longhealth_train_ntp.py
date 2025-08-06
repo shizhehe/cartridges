@@ -22,12 +22,13 @@ patient_idxs = list(range(1, NUM_PATIENTS + 1))
 patients_str = f"p{NUM_PATIENTS}"
 patient_ids = [f"patient_{idx:02d}" for idx in patient_idxs]
 
-NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "1024"))
+NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "2048"))
 
 MODEL = os.environ.get("MODEL", "llama")
 if MODEL == "llama":
     data_sources = [
-        "/data/sabri/cartridges/2025-08-05-10-00-14-m08d05_longhealth_synthesize_ntp/m08d05_longhealth_synthesize_ntp_llama-3.2-3b_p10_n65536-0/artifact/dataset.pkl"
+        "/data/sabri/cartridges/2025-08-05-10-00-14-m08d05_longhealth_synthesize_ntp/m08d05_longhealth_synthesize_ntp_llama-3.2-3b_p10_n65536-0/artifact/dataset.pkl",
+        "/data/sabri/cartridges/2025-08-05-11-36-02-m08d05_longhealth_synthesize_ntp/m08d05_longhealth_synthesize_ntp_llama-3.2-3b_p10_n65536-0/artifact/dataset.pkl"
     ]
     model = HFModelConfig(
         pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
@@ -49,7 +50,7 @@ config = TrainConfig(
     ),
     
     lr=2e-2,
-    epochs=4,
+    epochs=2,
     global_batch_size=32,
 
     dataset=CartridgeTrainDataset.Config(

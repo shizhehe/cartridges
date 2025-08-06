@@ -264,7 +264,6 @@ class LlamaAttention(nn.Module):
 
     def __init__(self, config: LlamaConfig, layer_idx: int):
         super().__init__()
-        print(f"attention dropout: {config.attention_dropout}")
         self.config = config
         self.layer_idx = layer_idx
         self.head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
@@ -306,7 +305,6 @@ class LlamaAttention(nn.Module):
             )
 
             if self.config.attention_dropout > 0:
-                print(f"Dropping out {self.config.attention_dropout} of key and value states")
                 key_states = F.dropout(key_states, p=self.config.attention_dropout, training=self.training)
                 value_states = F.dropout(value_states, p=self.config.attention_dropout, training=self.training)
 

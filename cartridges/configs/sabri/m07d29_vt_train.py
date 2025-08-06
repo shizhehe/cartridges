@@ -19,20 +19,26 @@ from cartridges.utils import WandBConfig
 file_name = Path(__file__).stem
 bs = 4
 
-NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "1024"))
+NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "2048"))
 
 MODEL = os.environ.get("MODEL", "llama")
 if MODEL == "llama":
-    # Placeholder data sources - will need to be updated with actual VT synthesis datasets
     DATA_SOURCES = [
         # "/data/sabri/cartridges/2025-07-29-14-51-14-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl"
         # "/data/sabri/cartridges/2025-07-29-18-47-55-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl"
         # "/data/sabri/cartridges/2025-07-29-19-22-07-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl"
         # "/data/sabri/cartridges/2025-08-04-10-38-54-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl"
         # "/data/sabri/cartridges/2025-08-04-12-44-24-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl"
-        "/data/sabri/cartridges/2025-08-04-14-36-31-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl",
-        "/data/sabri/cartridges/2025-08-04-15-00-22-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl",
-        "/data/sabri/cartridges/2025-08-04-15-53-44-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl"
+
+        # 10k tokens
+        # "/data/sabri/cartridges/2025-08-04-14-36-31-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl",
+        # "/data/sabri/cartridges/2025-08-04-15-00-22-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl",
+        # "/data/sabri/cartridges/2025-08-04-15-53-44-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl"
+
+        # 100k tokens
+        "/data/sabri/cartridges/2025-08-05-20-11-14-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl",
+        "/data/sabri/cartridges/2025-08-05-17-11-07-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl",
+        "/data/sabri/cartridges/2025-08-06-12-13-16-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl"
     ]
     model = HFModelConfig(
         pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",

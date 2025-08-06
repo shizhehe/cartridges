@@ -34,7 +34,14 @@ client = TokasaurusClient.Config(
 BASE_PATH = "/home/sabri/code/cartridges/cartridges/data/ruler/_data"
 # VT_PATH = f"{BASE_PATH}/qwen3_4b-l100000-n1-c64-h2-essay-979310a3.json"
 # VT_PATH = f"{BASE_PATH}/llama_3.2_3b_instruct-l100000-n1-c64-h2-essay-7ba69bcb.json"
-VT_PATH = f"{BASE_PATH}/llama_3.2_3b_instruct-l10000-n1-c16-h2-essay-words-1d31e1f5.json"
+
+# Natural language
+# VT_PATH = f"{BASE_PATH}/llama_3.2_3b_instruct-l10000-n1-c16-h2-essay-words-1d31e1f5.json"
+VT_PATH = f"{BASE_PATH}/llama_3.2_3b_instruct-l100000-n1-c64-h2-essay-words-3e9c7e72.json"
+
+# Ruler 
+# VT_PATH = f"{BASE_PATH}/llama_3.2_3b_instruct-l100000-n1-c64-h2-essay-ruler-3e4df256.json"
+
 config = SynthesizeConfig(
     
     synthesizer=SelfStudySynthesizer.Config(
@@ -63,7 +70,7 @@ config = SynthesizeConfig(
     num_samples=65536, 
     batch_size=8,
     
-    max_num_batches_in_parallel=256,
+    max_num_batches_in_parallel=512,
 
     name=FormatStringVariable(f"{Path(__file__).stem}_{short_model_name(client.model_name)}_n{{num_samples}}"),
     run_id=FormatStringVariable("{name}"),
