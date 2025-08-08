@@ -38,7 +38,8 @@ if MODEL == "llama":
         # 100k tokens
         "/data/sabri/cartridges/2025-08-05-20-11-14-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl",
         "/data/sabri/cartridges/2025-08-05-17-11-07-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl",
-        "/data/sabri/cartridges/2025-08-06-12-13-16-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl"
+        "/data/sabri/cartridges/2025-08-06-12-13-16-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl",
+        "/data/sabri/cartridges/2025-08-06-12-49-15-m07d29_vt_synthesize/m07d29_vt_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl"
     ]
     model = HFModelConfig(
         pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
@@ -60,7 +61,8 @@ else:
 BASE_PATH = "/home/sabri/code/cartridges/cartridges/data/ruler/_data"
 # vt_path = f"{BASE_PATH}/qwen3_4b-l100000-n1-c64-h2-noise-9df65ada.json"
 # vt_path = f"{BASE_PATH}/llama_3.2_3b_instruct-l100000-n1-c64-h2-essay-7ba69bcb.json"
-vt_path = f"{BASE_PATH}/llama_3.2_3b_instruct-l10000-n1-c16-h2-essay-words-1d31e1f5.json"
+# vt_path = f"{BASE_PATH}/llama_3.2_3b_instruct-l10000-n1-c16-h2-essay-words-1d31e1f5.json"
+vt_path = f"{BASE_PATH}/llama_3.2_3b_instruct-l100000-n1-c64-h2-essay-words-3e9c7e72.json"
 
 PRETRAINED_WANDB_RUN_ID: Optional[str] = os.environ.get("PRETRAINED_WANDB_RUN_ID", None)
 
