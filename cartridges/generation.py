@@ -207,8 +207,7 @@ if __name__ == "__main__":
     print(f"Input shapes: input_ids={input_ids.shape}, seq_ids={seq_ids.shape}, position_ids={position_ids.shape}")
 
     if cache is None:
-        from cartridges.cache_fast import FastTrainableCache
-        cache = FastTrainableCache(
+        cache = TrainableCache(
             max_seq_len=1024,
             config=AttnConfig(
                 n_layers=model.config.num_hidden_layers,
