@@ -77,9 +77,10 @@ Below we walk through the process of generating synthetic training data for a co
 ### Step 1: Synthesize training data
 *Note: See `examples/arxiv/arxiv_synthesize.py` for the full example developed in this section.*
 
-Below is the outline of a script which will run synthesis. It simply instantiates a [`SynthesizeConfig`](./cartridges/synthesize.py#L10) object and runs it with `pydrantic.main([config])`. Note: Using pydrantic allow us to override the config on the command line.
+Below is the outline of a script for running the synthesis. It simply instantiates a [`SynthesizeConfig`](./cartridges/synthesize.py#L10) object and runs it with `pydrantic.main([config])`. *Note: Using `pydrantic.main` allow us to override the config on the command line like `python your_synthesis_script.py num_samples=1024`.*
 
-The config has a couple of key fields missing: the resource, which controls what data is used , and a client of an inference server (*e.g.* SGLang or Tokasaurus). We'll cover those below.
+The config has a couple of key fields missing: the resource, which controls what data is used , and a client of an inference server (*e.g.* SGLang or Tokasaurus). We'll cover those two below. 
+There are many other configuration options we're not covering here, so refer to the [`SynthesizeConfig`](./cartridges/synthesize.py#L10) and [`SelfStudySynthesizer`](./cartridges/synthesizers/self_study.py#L10) for the full list.
 
 ```python
 import pydrantic
@@ -103,7 +104,6 @@ if __name__ == "__main__":
     pydrantic.main([config])
 ```
 
-There are many other configuration options we're not covering here, so refer to the [`SynthesizeConfig`](./cartridges/synthesize.py#L10) and [`SelfStudySynthesizer`](./cartridges/synthesizers/self_study.py#L10) for the full list.
 
 #### Step 1.1: Configure Resources
 A "resource" is an object that feeds context and seed prompts to a synthesizer.  For our example, we'll use the `LaTeXResource` type for a research paper.
@@ -112,20 +112,20 @@ A "resource" is an object that feeds context and seed prompts to a synthesizer. 
 from cartridges.resources.latex import LatexResource
 
 resource_config = LaTeXResource.Config(
-        arxiv_id="2506.06266",
-        seed_prompts=[
-            "structuring",
-            "summarization",
-            "question",
-            "use_case",
-            "creative",
-        ],
-        chunker=TokenChunker.Config(
-            tokenizer=client.model_name,
-            min_tokens_per_chunk=512,
-            max_tokens_per_chunk=1024,
-        ),
-    )
+    arxiv_id="2506.06266",
+    seed_prompts=[
+        "structuring",
+        "summarization",
+        "question",
+        "use_case",
+        "creative",
+    ],
+    chunker=TokenChunker.Config(
+        tokenizer=client.model_name,
+        min_tokens_per_chunk=512,
+        max_tokens_per_chunk=1024,
+    ),
+)
 ```
 
 We provide several other basic resource types like `TextResource`, `FileTextResource`, `JSONResource`.
@@ -135,7 +135,7 @@ We're also adding some more specialized resource types like `SlackResource` and 
 
 #### Step 1.2: Prepare an Inference Server
 
-Self-study requires an inference server to generate the synthetic conversations. We support two options:
+Self-study requires an inference server to generate the synthetic conversations. We need to configure a [`Client`](./cartridges/clients/base.py#L10) object that points to the inference server. We support two options:
 - [Tokasaurus](https://github.com/ScalingIntelligence/tokasaurus) (recommended) - We ran all of our experiments with Tokasaurus, which provides higher throughput generation and is easier to modify. 
 - [SGLang](https://github.com/sgl-project/sglang) - We're also providing support for SGLang, but we have not tested it extensively.
 
@@ -240,15 +240,49 @@ client_config = SGLangClient.Config(
 
 Once you've created the script, run it with: 
 ```bash
-python your_synthesis_script.py
+python examples/arxiv/arxiv_synthesize.py
 ```
+
+You can update the config on the command line like `python examples/arxiv/arxiv_synthesize.py num_samples=1024`.
 
 Once the run is complete, it will save the results to a pickle file and print the path:
 ```bash
-Final output saved to /path/to/output/dir/artifact/dataset.pkl
+>>> Final output saved to /path/to/output/dir/artifact/dataset.pkl
 ```
+Copy this path to your clipboard.
 
 See [`TrainingExample`](./cartridges/structs.py#L10) for the schema of the output.
+
+
+<details>
+<summary>
+<i>Exploring in synthesized dataset in the visualization UI</i>
+</summary>
+
+```python
+import pickle
+import pandas as pd
+
+# Load the dataset
+with open("/path/to/output/dir/artifact/dataset.pkl", "rb") as f:
+    data = pickle.load(f)
+
+rows = data["rows"]
+resources = data["resources"]
+
+# Convert to DataFrame for exploration
+df = pd.DataFrame([
+    {
+        "num_messages": len(row.messages),
+        "num_output_tokens": row.num_output_tokens,
+        "seed_prompt": row.metadata.get("seed_prompt", ""),
+        "conversation": "\n".join([f"{msg.role}: {msg.content}" for msg in row.messages])
+    }
+    for row in rows[:10]  # First 10 examples
+])
+```
+
+</details>
 
 
 
@@ -281,56 +315,6 @@ df = pd.DataFrame([
 ```
 
 </details>
-
-<!-- 
-You can explore the generated data in a notebook:
-```python
-import pickle
-import pandas as pd
-
-# Load the dataset
-with open("/path/to/output/dir/artifact/dataset.pkl", "rb") as f:
-    data = pickle.load(f)
-
-rows = data["rows"]
-resources = data["resources"]
-
-# Convert to DataFrame for exploration
-df = pd.DataFrame([
-    {
-        "num_messages": len(row.messages),
-        "num_output_tokens": row.num_output_tokens,
-        "seed_prompt": row.metadata.get("seed_prompt", ""),
-        "conversation": "\n".join([f"{msg.role}: {msg.content}" for msg in row.messages])
-    }
-    for row in rows[:10]  # First 10 examples
-])
-``` -->
-
-
-<!-- #### Custom Prompt Samplers
-
-You can create custom prompt samplers for specialized conversation types:
-
-```python
-from cartridges.synthesizers.self_study import PromptSampler
-
-class CustomPromptSampler(PromptSampler):
-    class Config(PromptSampler.Config):
-        domain_specific_prompts: List[str]
-    
-    def __call__(self, batch_idx: int, num_convos: int) -> tuple[str, List[str]]:
-        # Sample context chunk
-        context_chunk = self._sample_context_chunk()
-        
-        # Generate domain-specific seed prompts
-        seed_prompts = [
-            random.choice(self.config.domain_specific_prompts)
-            for _ in range(num_convos)
-        ]
-        
-        return context_chunk, seed_prompts
-``` -->
 
 
 ### Step 2: Run context-distillation (i.e. training) on the synthesized data
