@@ -11,7 +11,7 @@ import aiohttp
 from cartridges.data.chunkers import Chunker, TokenChunker
 from cartridges.data.resources import Resource, SEED_TYPES, sample_seed_prompts
 
-class TexResource(Resource):
+class LaTeXResource(Resource):
     
     class Config(Resource.Config):
         # The root of the tex project

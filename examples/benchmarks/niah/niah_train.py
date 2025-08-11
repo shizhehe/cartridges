@@ -90,7 +90,7 @@ config = TrainConfig(
     ),
 
     save_every_n_steps=512,
-    generate_every_n_steps=128,
+    generate_eval_every_n_steps=128,
     generate_evals=[
         GenerationEvalConfig(
             dataset=NIAHGenerateDataset.Config(
@@ -105,8 +105,8 @@ config = TrainConfig(
         ),
         
     ],
-    eval_every_n_steps=512,
-    eval_datasets=[],
+    ppl_eval_every_n_steps=512,
+    ppl_evals=[],
     distributed_backend="gloo",
 
     wandb=WandBConfig(

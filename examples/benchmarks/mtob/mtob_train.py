@@ -72,7 +72,7 @@ for lr in [2e-2]:
         ),
 
         save_every_n_steps=512,
-        generate_every_n_steps=128,
+        generate_eval_every_n_steps=128,
         generate_evals=[
             GenerationEvalConfig(
                 name_for_wandb=f"mtob-ke-test",
@@ -83,8 +83,8 @@ for lr in [2e-2]:
                 temperature=0,
             ),
         ],
-        eval_every_n_steps=512,
-        eval_datasets=[],
+        ppl_eval_every_n_steps=512,
+        ppl_evals=[],
         distributed_backend="gloo",
 
         wandb=WandBConfig(

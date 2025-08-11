@@ -42,7 +42,7 @@ class ChatSession:
         """Clear the entire conversation history."""
         self.conversation_history = []
     
-    def generate_response(self, user_input: str) -> str:
+    def generate_response(self, user_input: str, enable_thinking: bool = False) -> str:
         """Generate a response to the user input."""
         # Add to input history for readline
         if user_input.strip() and user_input not in self.input_history:
@@ -58,6 +58,7 @@ class ChatSession:
             tokenize=True,
             add_generation_prompt=True,
             return_tensors="pt",
+            enable_thinking=enable_thinking,
         ).to("cuda")
         
         # Flatten and create seq_ids and position_ids for single conversation
@@ -90,6 +91,7 @@ class ChatSession:
 def main():
     parser = argparse.ArgumentParser(description="Chat with a trained cache model")
     parser.add_argument("wandb_run_id", help="WandB run ID (e.g., hazy-research/cartridges/ehij7vlt)")
+    parser.add_argument("--enable_thinking", action="store_true", help="Enable thinking")
     args = parser.parse_args()
     
     print(f"Loading model and cache from {args.wandb_run_id}...")
@@ -102,6 +104,7 @@ def main():
         
         model = cache_and_model.model.to("cuda").to(torch.bfloat16)
         cache = cache_and_model.cache.to("cuda").to(torch.bfloat16)
+        breakpoint()
         tokenizer = AutoTokenizer.from_pretrained(cache_and_model.model.name_or_path)
         
         print("Model and cache loaded successfully!\n")
@@ -157,7 +160,7 @@ def main():
             
             # Generate and display response
             print("Assistant: ", end="", flush=True)
-            response = chat.generate_response(user_input)
+            response = chat.generate_response(user_input, enable_thinking=args.enable_thinking)
             print(response)
             
         except KeyboardInterrupt:

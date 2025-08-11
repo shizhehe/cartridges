@@ -73,16 +73,14 @@ class TrainConfig(RunConfig):
     # NOTE: steps here is the number of **optimizer steps**, which we keep track of
     # with the `optimizer_step` variable. This is different than the number of batches
     # processed, which is given by `iter_idx`.
-    eval_every_n_steps: Optional[int] = None
-    eval_datasets: list[PerplexityEvalConfig] = field(default_factory=list)
-    eval_log_table: bool = True
-    eval_max_samples: Optional[int] = None
+    ppl_eval_every_n_steps: Optional[int] = None
+    ppl_evals: list[PerplexityEvalConfig] = field(default_factory=list)
 
     # dataset for actually producing generations
     # NOTE: steps here is the number of **optimizer steps**, which we keep track of
     # with the `optimizer_step` variable. This is different than the number of batches
     # processed, which is given by `iter_idx`.
-    generate_every_n_steps: Optional[int] = None
+    generate_eval_every_n_steps: Optional[int] = None
     generate_before_training: bool = True
     generate_evals: list[GenerationEvalConfig] = field(default_factory=list)
 
@@ -136,7 +134,7 @@ def download_wandb_artifacts(config: TrainConfig):
     artifact_names = get_dataset_names(config.dataset)
 
     for eval_or_gen_ds in itertools.chain(
-        config.eval_datasets, config.generate_evals
+        config.ppl_evals, config.generate_evals
     ):
         if isinstance(eval_or_gen_ds.dataset, (CartridgeTrainDataset.Config)):
             artifact_names += get_dataset_names(eval_or_gen_ds.dataset)
@@ -186,9 +184,9 @@ def train(config: TrainConfig):
         f"Fininshed loading training dataset from disk, took {(time.time() - t0):.3}s"
     )
 
-    eval_datasets: list[tuple[PerplexityEvalConfig, CartridgeTrainDataset]] = [    
+    ppl_evals: list[tuple[PerplexityEvalConfig, CartridgeTrainDataset]] = [    
         (ds_config, ds_config.dataset.instantiate(tokenizer=tokenizer, seed=config.seed))
-        for ds_config in config.eval_datasets
+        for ds_config in config.ppl_evals
     ]
     generate_evals: list[tuple[GenerationEvalConfig, CartridgeGenerateDataset]] = [
         (eval_config, eval_config.dataset.instantiate(tokenizer=tokenizer, seed=config.seed))
@@ -324,7 +322,7 @@ def train(config: TrainConfig):
         logger.info(f"Setup wandb with model stats: {wandb_log_dict}")
 
     def do_evaluation():
-        for ds_config, dataset in eval_datasets:
+        for ds_config, dataset in ppl_evals:
             evaluate(
                 config=config,
                 model=wrapped_model,
@@ -373,8 +371,8 @@ def train(config: TrainConfig):
             do_step = (iter_idx + 1) % accumulate_grad_steps == 0
 
             if (
-                config.eval_every_n_steps is not None
-                and optimizer_step % config.eval_every_n_steps == 0
+                config.ppl_eval_every_n_steps is not None
+                and optimizer_step % config.ppl_eval_every_n_steps == 0
                 and iter_idx % accumulate_grad_steps
                 == 0  # only on the first batch of each optimizer step
             ):
@@ -382,8 +380,8 @@ def train(config: TrainConfig):
 
             
             if (
-                config.generate_every_n_steps is not None
-                and optimizer_step % config.generate_every_n_steps == 0
+                config.generate_eval_every_n_steps is not None
+                and optimizer_step % config.generate_eval_every_n_steps == 0
                 and iter_idx % accumulate_grad_steps == 0
                 and (config.generate_before_training or iter_idx > 0)
             ):

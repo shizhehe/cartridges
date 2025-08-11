@@ -70,6 +70,8 @@ class KVFromRandomText(KVCacheFactory):
                 mode="generate",
             )
 
+            print(self.config.num_frozen_tokens)
+
             return TrainableCache(
                 config=attn_config,
                 init_keys=init_cache._keys,

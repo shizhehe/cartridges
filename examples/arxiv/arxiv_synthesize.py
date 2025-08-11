@@ -4,37 +4,28 @@ from pathlib import Path
 import pydrantic
 from pydrantic.variables import FormatStringVariable
 
-from cartridges.clients.tokasaurus import TokasaurusClient
+from cartridges.data.chunkers import TokenChunker
 from cartridges.synthesize import SynthesizeConfig
 from cartridges.synthesizers.self_study import SelfStudySynthesizer
-from cartridges.data.longhealth.resources import LongHealthResource
 from cartridges.utils import WandBConfig
-from cartridges.configs.utils import short_model_name
-
+from cartridges.data.tex.resources import LaTeXResource
+from cartridges.clients.tokasaurus import TokasaurusClient
 
 client = TokasaurusClient.Config(
-    url="https://hazyresearch--toka-llama-3-2-3b-1xh100-batch-serve.modal.run",
-    model_name="meta-llama/Llama-3.2-3B-Instruct",
+    url="https://hazyresearch--toka-qwen3-4b-1xh100-min0-serve.modal.run",
+    model_name="Qwen/Qwen3-4b",
 )
 
-NUM_PATIENTS = 10
-patient_idxs = list(range(1, NUM_PATIENTS + 1))
-patients_str = f"p{NUM_PATIENTS}"
-patient_ids = [f"patient_{idx:02d}" for idx in patient_idxs]
-
-
-
 config = SynthesizeConfig(
-    
+
     synthesizer=SelfStudySynthesizer.Config(
         client=client,
         max_rounds=1,
-        prob_thinking=0.75,
-        use_tools_a=False, 
-        use_tools_b=False,
+        prob_thinking=0.2,
         tools=[],
         resources=[
-            LongHealthResource.Config(
+            LaTeXResource.Config(
+                arxiv_id="2506.06266",
                 seed_prompts=[
                     "structuring",
                     "summarization",
@@ -42,23 +33,26 @@ config = SynthesizeConfig(
                     "use_case",
                     "creative",
                 ],
-                patient_ids=patient_ids,
+                chunker=TokenChunker.Config(
+                    tokenizer=client.model_name,
+                    min_tokens_per_chunk=512,
+                    max_tokens_per_chunk=1024,
+                ),
             )
         ],
     ),
 
-    output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),
     num_samples=8192, 
-    batch_size=32,    # Smaller batches 
-    
+    batch_size=32,  
     max_num_batches_in_parallel=256,
 
-    name=FormatStringVariable(f"{Path(__file__).stem}_{short_model_name(client.model_name)}_{patients_str}_n{{num_samples}}"),
+    name=FormatStringVariable(f"{Path(__file__).stem}_{{synthesizer.client.model_name}}_n{{num_samples}}"),
     run_id=FormatStringVariable("{name}"),
+    output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),
     wandb=WandBConfig(
         project="cartridges",
         entity="hazy-research",
-        tags=[f"longhealth_synthesis"],
+        tags=[f"arxiv_synthesis"],
     ),
     save_wandb_artifact=False,
     save_wandb_preview=False,
