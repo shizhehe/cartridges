@@ -267,8 +267,6 @@ To run it, follow the instruction in [`viz/README.md`](./viz/README.md).
 See `cartridges.train.TrainConfig` for the schema of the main config we use for training. Below we provide an example of a config file prefaced with notes describing each part of the config:
 
 ```python
-import os
-from pathlib import Path
 import pydrantic
 
 from cartridges.initialization.random import KVFromRandomText
@@ -277,9 +275,7 @@ from cartridges.train import TrainConfig
 from cartridges.models.config import HFModelConfig
 from cartridges.datasets import CartridgeTrainDataset
 
-
 DATA_SOURCE = "/path/to/output/dir/artifact/dataset.pkl"
-
 
 config = TrainConfig(
     model=HFModelConfig(
