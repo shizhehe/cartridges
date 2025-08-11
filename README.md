@@ -264,16 +264,14 @@ To run it, follow the instruction in [`viz/README.md`](./viz/README.md).
 *Note: See `examples/arxiv/arxiv_train.py` for the full script developed in this section.*
 
 
-See `cartridges.train.TrainConfig` for the schema of the main config we use for training. Below we provide an example of a config file prefaced with notes describing each part of the config:
+See [`TrainConfig`](./cartridges/train.py#L66) for the full schema of the main config we use for training. Below we provide a simple example of a config file.
+
+**Make sure to set the `DATA_SOURCE` variable to the path to the synthesized dataset from above.**
 
 ```python
-import pydrantic
-
+from cartridges.models import HFModelConfig, FlexQwen3ForCausalLM
+from cartridges.train import TrainConfig, CartridgeTrainDataset
 from cartridges.initialization.random import KVFromRandomText
-from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
-from cartridges.train import TrainConfig
-from cartridges.models.config import HFModelConfig
-from cartridges.datasets import CartridgeTrainDataset
 
 DATA_SOURCE = "/path/to/output/dir/artifact/dataset.pkl"
 
@@ -299,8 +297,8 @@ config = TrainConfig(
     name="cartridges-tutorial-train",
 )
 
-
 if __name__ == "__main__":
+    import pydrantic
     pydrantic.main(config)
 ```
 
@@ -312,31 +310,12 @@ torchrun --standalone --nproc_per_node=2 path/to/file.py
 ```
 
 
-<!-- 
-### Implementing a new data generation method
-To implement a new data generation method:
-
-1. Create a new file in the `cartridges/synthesizers/` directory (e.g., `my_synthesizer.py`)
-2. Subclass `ConvoSynthesizer` from `cartridges.synthesizers.base` 
-3. Implement the `sample_convos` method that returns a list of `TrainingExample` objects
-4. Create a config that uses your new synthesizer class and run it in the same way as above. -->
-
-<!-- 
-### Finding the generated dataset in WandB
-The data will also be saved to WandB as a pickle file artifact. To find it, go to the WandB project in the UI and click on the "Artifacts" tab. 
-You should see an entry on the left with the same name as you provided in the config. Click on it and select the version. (If you run the script multiple times, you'll see multiple versions.) 
-
-To grab the path to the artifact, copy the value in the "Full Name" field shown below.
-
-![image](static/dataset-artifact.png)
-
-For example, here the full path is `hazy-research/cartridges/m03d17_generate_longhealth_p01:v0`. You'll need this path to train a Cartridge on the generated data.
- -->
-
-
 ## Serving Cartridges
 
 We describe two ways to serve and chat with a trained Cartridge: a simple, but slow way that just uses a pure PyTorch generation loop, and a faster one that uses a Tokasaurus server.
+
+### Chatting with a Cartridge locally
+
 
 ### Serving with Tokasuaurus [Fastest and recommended]
 We've implemented (h/t @geoffreyangus) an integration with [Tokasaurus](https://github.com/ScalingIntelligence/tokasaurus), a simple LLM inference server optimized for high throughput. 
