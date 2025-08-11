@@ -7,6 +7,8 @@ from typing import Any, List, Optional, Literal, Callable
 from pydantic import BaseModel
 from pydrantic import ObjectConfig
 
+from cartridges.data.chunkers import Chunker
+
 
 class Resource(abc.ABC):
 
@@ -31,18 +33,45 @@ SEED_TYPES = Literal[
     "structuring", "summarization", "aggregation", "question", "use_case", "creative", 'generic'
 ]
 
-class FileResource(Resource):
 
+class TextResource(Resource):
+    
     class Config(Resource.Config):
-        path: str
+        text: str
+        chunker: Chunker.Config
+        
         seed_prompts: List[SEED_TYPES]
 
     def __init__(self, config: Config):
         self.config = config
-        self.text = open(config.path).read()
-
+        self.text = self.config.text
+        self.chunker = None
+    
+    async def setup(self):
+        self.chunker = self.config.chunker.instantiate(text=self.text)
+    
     async def sample_prompt(self, batch_size: int) -> tuple[str, List[str]]:
-        return self.text, sample_seed_prompts(self.config.seed_prompts, batch_size)
+        if self.chunker is None:
+            raise ValueError("Chunker not initialized. Call setup() first.")
+        
+        chunk = self.chunker.sample_chunk()
+        seed_prompts = sample_seed_prompts(self.config.seed_prompts, batch_size)
+        return chunk, seed_prompts
+
+class FileTextResource(TextResource):
+
+    class Config(Resource.Config):
+        path: str
+        seed_prompts: List[SEED_TYPES]
+        chunker: Chunker.Config
+
+    def __init__(self, config: Config):
+        self.config = config
+        super().__init__(config)
+    
+    async def setup(self):
+        self.text = open(self.config.path).read()
+        await super().setup()
 
 
 class BaseStructuredResource(Resource, ABC):

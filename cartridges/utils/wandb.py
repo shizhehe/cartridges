@@ -30,6 +30,19 @@ class WandBConfig(BaseConfig):
     group: Optional[str] = None
 
 
+def get_default_wandb_config() -> Optional["WandBConfig"]:
+    """Get default WandB config from environment variables if they are set."""
+    project = os.environ.get("CARTRIDGES_WANDB_PROJECT")
+    entity = os.environ.get("CARTRIDGES_WANDB_ENTITY")
+    
+    if project or entity:
+        return WandBConfig(
+            project=project or "cartridges",
+            entity=entity
+        )
+    return None
+
+
 def prepare_wandb(
     config: WandBConfig,
     config_dict: Dict[str, Any],

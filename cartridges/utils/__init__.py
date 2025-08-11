@@ -3,7 +3,7 @@ import requests
 import yaml
 import logging
 
-from .wandb import WandBConfig, prepare_wandb
+from .wandb import WandBConfig, prepare_wandb, get_default_wandb_config
 
 
 

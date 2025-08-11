@@ -12,12 +12,13 @@ from typing import Literal, Optional, Union
 
 import concurrent.futures
 from pydrantic import RunConfig
+from pydantic import Field
 import pandas as pd
 import tqdm
 import wandb
 
 from cartridges.synthesizers.base import AsyncConvoSynthesizer
-from cartridges.utils import WandBConfig, prepare_wandb, get_logger
+from cartridges.utils import WandBConfig, prepare_wandb, get_logger, get_default_wandb_config
 from cartridges.structs import TrainingExample
 
 
@@ -37,13 +38,15 @@ class SynthesizeConfig(RunConfig):
     max_num_batches_in_parallel: int
     worker_timeout: int = 6 * 60  # only allow six minutes between completed batches
 
-    wandb: Optional[WandBConfig] = None
+    wandb: Optional[WandBConfig] = Field(default_factory=get_default_wandb_config)
     save_wandb_preview: bool = True
     save_wandb_artifact: bool = True
     save_metadata: bool = True  # metadata is previewed in wandb always, but can exclude from dataset
 
-    # TODO: overriding run_dir and not output_dir doesn't work
-    previous_run_dir: Optional[Path] = None
+    # this is the root directory for all outputs
+    # a subdirectory will be created for the run
+    output_dir: Optional[str] = Field(default=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."))
+
 
     def run(self):
         assert self.name is not None

@@ -12,7 +12,7 @@
 </div>
 
 
-**What is this?** This repository provides code for training a cartridge, a small KV cache representing a large dump of text, using a test-time training recipe called self-study.
+**What is this?** This repository provides code for training a cartridge, a small KV cache representing amount of textual information. It uses a test-time training recipe called self-study.
 The code is based on our paper *[Cartridges: Lightweight and general-purpose long context representations via self-study](https://arxiv.org/abs/2506.06266)*.
 
 **tl;dr** When we put lots of text (*e.g.* a whole code repo) into a language model's context, generation cost soars because of the KV cache's size. *What if we trained a smaller KV cache for our documents offline?* Using a test-time training recipe called self-study, we show that this simple idea can improve throughput by 
@@ -48,40 +48,92 @@ export CARTRIDGES_DIR=/path/to/cartridges
 
 # path to a directory where you want to store outputs like models checkpoints and such
 export CARTRIDGES_OUTPUT_DIR=/path/to/cartridges/outputs
+
+# the code in this repository is tightly integrated with wandb
+# set your wandb project and entity here
+export CARTRIDGES_WANDB_PROJECT=cartridges
+export CARTRIDGES_WANDB_ENTITY=
 ```
 
 
-## Synthesizing Training Data with Self-Study
+## Running Self-Study
 
-**What is self-study?** Self-study is a test-time training approach where we generate synthetic conversations about a corpus of text. The process simulates two AI agents: one asks questions or makes requests about the content, and another responds using the provided context. This creates training data that teaches the model to efficiently compress and retrieve information from long contexts.
+**What is self-study?** Self-study is an approach for training a model to understand a corpus of text. It works by generating synthetic conversations about a corpus of text and then training the model on those conversations with a context-distillation objective. The process consists of two AI agents in conversation with one another: one asks questions or makes requests about the content, and another responds using the provided context. 
 
-**Quickstart**: Take a look at the script at `scripts/longhealth_synthesize.py` for an example of how to generate training data with self-study. To actually run the script, you will need to spin up an inference server (either [Tokasaurus](https://github.com/ScalingIntelligence/tokasaurus) or [SGLang](https://github.com/ScalingIntelligence/tokasaurus)) and set the `client` variable to point to it.
+**Quickstart**: Take a look at the scripts at `examples/arxiv/arxiv_synthesize.py` and `examples/arxiv/arxiv_train.py` for a basic example of how to synthesize training data and run context-distillation on the synthesized data. To run the synthesis script, you will need to spin up an inference server (either [Tokasaurus](https://github.com/ScalingIntelligence/tokasaurus) or [SGLang](https://github.com/sgl-project/sglang)) and set the `client` variable to point to it. [See below for more details on how to do this.](#step-3-prepare-an-inference-server)
 
-Below we walk through the process of generating synthetic training data for a corpus of text in more detail. As a running example, we'll be training a cartridge on our [paper on Cartridges](https://arxiv.org/abs/2506.06266). How meta!
-Here are the steps:
+Below we walk through the process of generating synthetic training data for a corpus of text. As a running example, we'll be training a cartridge on our [paper on Cartridges](https://arxiv.org/abs/2506.06266). How meta!
+<!-- Here are the steps:
+1. Synth
 1. Configure resources that contain the data you want to store in the cartridge
 2. Ensure you have an inference server running (either [Tokasaurus](https://github.com/ScalingIntelligence/tokasaurus) or [SGLang](https://github.com/ScalingIntelligence/tokasaurus)) and configure your client to point to it
 3. Instantiate a `SynthesizeConfig` object that contains the parameters for the self-study process
 4. Put it all together in one script and run it!
+5. Run context-distillation (i.e. training) on the synthesized data -->
 
-> **Note:** For configuration, we use [Pydantic](https://docs.pydantic.dev/latest/) models. Pydantic models are useful for defining the schema of the config and quickly ensuring that the config is valid at the beginning of the script. We also rely on [`pydrantic`](https://github.com/seyuboglu/pydrantic), which provides a few utilities for working with configs.
+> **Note:** For configuration, we use [Pydantic](https://docs.pydantic.dev/latest/) models. Pydantic models are useful for defining the schema of the config and quickly ensuring that the config is valid at the beginning of a run. We also rely on [`pydrantic`](https://github.com/seyuboglu/pydrantic), which provides a few utilities for working with configs.
 
-### Step 1: Configure Resources
 
-Resources provide the data sources and generate the initial prompts that seed synthetic conversations during self-study. We provide several built-in resource types. For our example, we'll use the `StaticTextResource` type for a research paper.
+### Step 1: Synthesize training data
+*Note: See `examples/arxiv/arxiv_synthesize.py` for the full example developed in this section.*
 
-```python 
-from cartridges.resources.text import StaticTextResource
-resource_config = StaticTextResource.Config(
-    root_dir="path/to/paper/directory",
-    description="Research paper on Cartridges"
+Below is the outline of a script which will run synthesis. It simply instantiates a [`SynthesizeConfig`](./cartridges/synthesize.py#L10) object and runs it with `pydrantic.main([config])`. Note: Using pydrantic allow us to override the config on the command line.
+
+The config has a couple of key fields missing: the resource, which controls what data is used , and a client of an inference server (*e.g.* SGLang or Tokasaurus). We'll cover those below.
+
+```python
+import pydrantic
+
+from cartridges.synthesize import SynthesizeConfig
+from cartridges.synthesizers.self_study import SelfStudySynthesizer
+
+resource_config = ...  # see 'Step 2: Configure Resources'
+client_config = ...  # see 'Step 3: Prepare an Inference Server'
+
+config = SynthesizeConfig(
+    synthesizer=SelfStudySynthesizer.Config(
+        client=client_config,
+        resources=[resource_config],
+    ),
+    num_samples=512,
+    name="cartridges-tutorial",
 )
+
+if __name__ == "__main__": 
+    pydrantic.main([config])
 ```
 
-We provide several other resource types including `ChatLogResource`, `CodeResource`, `ThunderkittensResource`, `SlackResource`, and `VideoResource`.
-You can also configure multiple resources to provide diverse training data. 
+There are many other configuration options we're not covering here, so refer to the [`SynthesizeConfig`](./cartridges/synthesize.py#L10) and [`SelfStudySynthesizer`](./cartridges/synthesizers/self_study.py#L10) for the full list.
 
-### Step 2: Prepare an Inference Server
+#### Step 1.1: Configure Resources
+A "resource" is an object that feeds context and seed prompts to a synthesizer.  For our example, we'll use the `LaTeXResource` type for a research paper.
+
+```python 
+from cartridges.resources.latex import LatexResource
+
+resource_config = LaTeXResource.Config(
+        arxiv_id="2506.06266",
+        seed_prompts=[
+            "structuring",
+            "summarization",
+            "question",
+            "use_case",
+            "creative",
+        ],
+        chunker=TokenChunker.Config(
+            tokenizer=client.model_name,
+            min_tokens_per_chunk=512,
+            max_tokens_per_chunk=1024,
+        ),
+    )
+```
+
+We provide several other basic resource types like `TextResource`, `FileTextResource`, `JSONResource`.
+
+We're also adding some more specialized resource types like `SlackResource` and `GMailResource`.
+
+
+#### Step 1.2: Prepare an Inference Server
 
 Self-study requires an inference server to generate the synthetic conversations. We support two options:
 - [Tokasaurus](https://github.com/ScalingIntelligence/tokasaurus) (recommended) - We ran all of our experiments with Tokasaurus, which provides higher throughput generation and is easier to modify. 
@@ -183,67 +235,10 @@ client_config = SGLangClient.Config(
 ```
 </details>
 
-### Step 3: Configuring the Synthesizer and Putting it all together
 
-We are now going to put all of the pieces together in a `SynthesizeConfig` object that configures the entire self-study process.
+#### Step 1.3: Run the Synthesis
 
-**Core Settings**:
-- `num_samples`: Total number of training examples to generate
-- `batch_size`: Number of training examples to generate per call to the inference server
-- `max_num_batches_in_parallel`: Number of batches to process concurrently. When using Modal, high values enable better parallelization
-
-Here's a complete example script:
-
-```python
-import os
-
-import pydrantic
-from pydrantic.variables import FormatStringVariable
-
-from cartridges.clients.tokasaurus import TokasaurusClient
-from cartridges.synthesize import SynthesizeConfig
-from cartridges.synthesizers.self_study import SelfStudySynthesizer
-from cartridges.utils import WandBConfig
-from cartridges.resources.text import StaticTextResource
-
-
-client = TokasaurusClient.Config(
-    url="https://hazyresearch--toka-qwen3-4b-1xh100-min0-serve.modal.run/v1",
-    model_name="Qwen/Qwen3-4b",
-)
-
-config = SynthesizeConfig(
-    synthesizer=SelfStudySynthesizer.Config(
-        client=client,
-        max_rounds=1,
-        prob_cot_a=0.3,
-        use_tools_a=False,
-        use_tools_b=False,
-        tools=[],
-        resources=[
-            StaticTextResource.Config(
-                root_dir="path/to/paper/directory",
-                description="Research paper on test-time training for long contexts"
-            )
-        ],
-    ),
-    output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),
-    num_samples=512,
-    batch_size=16,
-    max_num_batches_in_parallel=4,
-    name="cartridges-tutorial",
-    wandb=WandBConfig(project="cartridges", entity="hazy-research"),
-    save_wandb_artifact=True,
-)
-
-
-if __name__ == "__main__": 
-    pydrantic.main([config])
-```
-
-### Step 4: Running the Synthesis
-
-Once you've created the file, run it with: 
+Once you've created the script, run it with: 
 ```bash
 python your_synthesis_script.py
 ```
@@ -253,21 +248,7 @@ Once the run is complete, it will save the results to a pickle file and print th
 Final output saved to /path/to/output/dir/artifact/dataset.pkl
 ```
 
-<details>
-<summary>
-Output format
-
-</summary>
-
-```python 
-class TrainingExample(BaseModel):
-    messages: List[Message]  # The conversation between agents (system, user, assistant format)
-    token_ids: List[int]  # The token IDs for the response
-    top_logprob_ids: List[List[int]]  # The top-k token predictions at each position
-    top_logprob_logprobs: List[List[float]]  # The corresponding log probabilities
-    metadata: Dict[str, Any]  # Information about tool usage, prompts, and generation process
-```
-</details>
+See [`TrainingExample`](./cartridges/structs.py#L10) for the schema of the output.
 
 
 
@@ -351,76 +332,64 @@ class CustomPromptSampler(PromptSampler):
         return context_chunk, seed_prompts
 ``` -->
 
-#### Tool Integration
 
-You can enhance the self-study process with tools that allow agents to dynamically retrieve additional context:
+### Step 2: Run context-distillation (i.e. training) on the synthesized data
 
-```python
-from cartridges.tools.retrieval.tools import RetrievalTool
-from cartridges.tools.amdtk_code.tools import AMDTKCodeTool
-from cartridges.tools.slack.tools import SlackToolSet
-from cartridges.tools.gmail.tools import GmailToolSet
+*Note: See `examples/arxiv/arxiv_train.py` for the full script developed in this section.*
 
-# Define tools for information retrieval and interaction
-tools = [
-    RetrievalTool.Config(
-        description="Search AMD and ThunderKittens documentation",
-        retriever=BM25Retriever.Config(k1=1.5, b=0.75)
-    ),
-    AMDTKCodeTool.Config(
-        description="Test and benchmark GEMM kernels"
-    ),
-    SlackToolSet.Config(
-        description="Access Slack channels and messages"
-    ),
-    GmailToolSet.Config(
-        description="Access Gmail emails and threads",
-        email="user@example.com"
-    )
-]
 
-synthesizer_config = SelfStudySynthesizer.Config(
-    # ... other config ...
-    use_tools=True,
-    tools=tools
-)
-```
-
-#### Resource Integration
-
-You can configure multiple resource types to provide diverse training data:
+See `cartridges.train.TrainConfig` for the schema of the main config we use for training. Below we provide an example of a config file prefaced with notes describing each part of the config:
 
 ```python
-from cartridges.resources.chatlog import ChatLogResource
-from cartridges.resources.code import CodeResource
-from cartridges.resources.text import StaticTextResource
-from cartridges.resources.thunderkittens import ThunderkittensResource
+import os
+from pathlib import Path
+import pydrantic
 
-# Configure multiple resource types
-resources = [
-    ChatLogResource.Config(
-        path="database/chatlogs",
-        description="AMD GPU development conversations"
-    ),
-    CodeResource.Config(
-        root_dir="database/code",
-        description="ThunderKittens GEMM kernel code sessions"
-    ),
-    StaticTextResource.Config(
-        root_dir="database/static_text",
-        description="AMD documentation and technical references"
-    ),
-    ThunderkittensResource.Config(
-        path="database/thunderkittens",
-        description="ThunderKittens framework documentation"
-    )
-]
+from cartridges.initialization.random import KVFromRandomText
+from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
+from cartridges.train import TrainConfig
+from cartridges.models.config import HFModelConfig
+from cartridges.datasets import CartridgeTrainDataset
 
-synthesizer_config = SelfStudySynthesizer.Config(
-    # ... other config ...
-    resources=resources
+
+DATA_SOURCE = "/data/sabri/cartridges/2025-08-08-17-26-20-arxiv_synthesize/arxiv_synthesize_Qwen/Qwen3-4b_n8192-0/artifact/dataset.pkl"
+
+
+config = TrainConfig(
+    model=HFModelConfig(
+        pretrained_model_name_or_path="Qwen/Qwen3-4b",
+        model_cls=FlexQwen3ForCausalLM,
+    ),
+    kv_cache_initializer=KVFromRandomText.Config(max_tokens=2048),
+    
+    lr=2e-2,
+    epochs=1,
+    global_batch_size=32,
+
+    dataset=CartridgeTrainDataset.Config(
+        data_sources=[(DATA_SOURCE, None)],
+        top_k_logits=20,
+        packed_seq_length=2048,
+        packing_mode="truncate",
+    ),
+
+    save_every_n_steps=512,
+    name="cartridges-tutorial-train",
 )
+
+
+if __name__ == "__main__":
+    pydrantic.main(config)
 ```
+
+### Data parallel training
+To launch a data parallel training run, you can run:
+
+```bash
+torchrun --standalone --nproc_per_node=2 path/to/file.py
+```
+
+
 <!-- 
 ### Implementing a new data generation method
 To implement a new data generation method:
@@ -442,99 +411,6 @@ To grab the path to the artifact, copy the value in the "Full Name" field shown 
 For example, here the full path is `hazy-research/cartridges/m03d17_generate_longhealth_p01:v0`. You'll need this path to train a Cartridge on the generated data.
  -->
 
-
-## Training a Cartridge 
-
-**Quickstart**: Take a look at the script at `scripts/longhealth_train.py` for an example of how to generate training data with self-study. 
-
-See `cartridges.train.TrainConfig` for the schema of the main config we use for training. 
-
-Below we provide an example of a config file prefaced with notes describing each part of the config:
-
-- *`dataset`*  Th
-- *`
-
-```python 
-import os
-from pathlib import Path
-
-import pydrantic
-
-from cartridges.initialization.strategies.first_n_tokens import KVCacheInitFromFirstNTokensOfContext
-from cartridges.train import EvalDatasetConfig, GenerateDatasetConfig, TrainConfig
-from cartridges.config import HFModelConfig
-from cartridges.datasets import CartridgeDataset
-from cartridges.tasks.longhealth import LongHealthMultipleChoiceGenerateDataset
-from cartridges.utils import WandBConfig
-
-file_name = Path(__file__).stem
-config = TrainConfig(
-    model=HFModelConfig(
-        pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
-        model_cls=LlamaForCausalLM,
-        attn_implementation="einsum",
-    ),
-    kv_cache_initializer=KVCacheInitFromFirstNTokensOfContext.Config(max_tokens=2048),
-    
-    lr=2e-2,
-    loss_type="logits",
-    epochs=2,
-    global_batch_size=bs,
-    local_batch_size=4,
-    use_batch_sampler=True,
-
-    dataset=CartridgeTrainDataset.Config(
-        # path should point to the output of the synthesis script we ran above
-        data_sources=[("/path/to/output/dir/artifact/dataset.pkl", None)]
-        max_sequence_length=1024,
-        is_wandb=True,
-        label_type="logits",
-        top_k_logits=20,
-    ),
-
-    # Note: This example uses a legacy LongHealth context config
-    # For new projects, use the resource system instead
-    context=LongHealthStructuredContextConfig(patient_ids=patient_ids),
-    
-    save_every_n_steps=512,
-    generate_every_n_steps=512,
-    generate_max_new_tokens=512,
-    generate_datasets=[
-        GenerateDatasetConfig(
-            dataset=LongHealthMultipleChoiceGenerateDataset.Config(
-                patient_ids=patient_ids, 
-                cot=True,
-            ),
-            name_for_wandb=f"longhealth_mc",
-            num_samples=8,
-            num_samples_final=8,
-            batch_size=16,
-            temperature=0.3
-        )
-    ],
-    eval_every_n_steps=256,
-    eval_datasets=[],
-    distributed_backend="gloo",
-
-    wandb=WandBConfig(
-        project="cartridges",
-        tags=["train", "longhealth", f"patients{patients_str}"],
-        entity="hazy-research",
-    ),
-    output_dir=os.environ["CARTRIDGES_OUTPUT_DIR"],
-    name="train-cartridges"
-)
-
-if __name__ == "__main__":
-    pydrantic.main([config])
-```
-
-### Distributed data parallel training
-To launch a data parallel training run, you can run:
-
-```bash
-torchrun --standalone --nproc_per_node=2 path/to/file.py
-```
 
 ## Serving Cartridges
 
