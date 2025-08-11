@@ -106,20 +106,16 @@ if __name__ == "__main__":
 
 
 #### Step 1.1: Configure Resources
-A "resource" is an object that feeds context and seed prompts to a synthesizer.  For our example, we'll use the `LaTeXResource` type for a research paper.
+A "resource" is an object that feeds chunks of the context and a "seed prompt" to a synthesizer.  See Section 4 of [our paper](https://arxiv.org/pdf/2506.06266) for more details.
+
+Since we want to train Cartridge for a research paper, we'll use the [`LaTeXResource`](./cartridges/resources/latex.py) type.
 
 ```python 
 from cartridges.resources.latex import LatexResource
 
 resource_config = LaTeXResource.Config(
     arxiv_id="2506.06266",
-    seed_prompts=[
-        "structuring",
-        "summarization",
-        "question",
-        "use_case",
-        "creative",
-    ],
+    seed_prompts=["structuring", "summarization", "question"],
     chunker=TokenChunker.Config(
         tokenizer=client.model_name,
         min_tokens_per_chunk=512,
@@ -128,9 +124,9 @@ resource_config = LaTeXResource.Config(
 )
 ```
 
-We provide several other basic resource types like `TextResource`, `FileTextResource`, `JSONResource`.
+We provide several other basic resource types like `TextResource`, `FileTextResource`, `JSONResource`. We're also adding some more specialized resource types like `SlackResource` and `GMailResource`.
 
-We're also adding some more specialized resource types like `SlackResource` and `GMailResource`.
+For each, you can find all the configuration options in the class definition.
 
 
 #### Step 1.2: Prepare an Inference Server
@@ -249,73 +245,19 @@ Once the run is complete, it will save the results to a pickle file and print th
 ```bash
 >>> Final output saved to /path/to/output/dir/artifact/dataset.pkl
 ```
-Copy this path to your clipboard.
-
-See [`TrainingExample`](./cartridges/structs.py#L10) for the schema of the output.
-
+Copy this path to your clipboard. See [`TrainingExample`](./cartridges/structs.py#L10) for the schema of the output.
 
 <details>
 <summary>
-<i>Exploring in synthesized dataset in the visualization UI</i>
+<i> 💻 Explore synthesized dataset in the visualization UI!</i>
 </summary>
 
-```python
-import pickle
-import pandas as pd
+We (read: Claude Code) implemented a nice visualization tool for exploring the synthesized dataset.
+To run it, follow the instruction in [`viz/README.md`](./viz/README.md).
 
-# Load the dataset
-with open("/path/to/output/dir/artifact/dataset.pkl", "rb") as f:
-    data = pickle.load(f)
-
-rows = data["rows"]
-resources = data["resources"]
-
-# Convert to DataFrame for exploration
-df = pd.DataFrame([
-    {
-        "num_messages": len(row.messages),
-        "num_output_tokens": row.num_output_tokens,
-        "seed_prompt": row.metadata.get("seed_prompt", ""),
-        "conversation": "\n".join([f"{msg.role}: {msg.content}" for msg in row.messages])
-    }
-    for row in rows[:10]  # First 10 examples
-])
-```
+<img src="assets/viz.png" alt="Visualization" width="400"/>
 
 </details>
-
-
-
-<details>
-<summary>
-Exploring synthesized dataset in a DataFrame
-</summary>
-
-```python
-import pickle
-import pandas as pd
-
-# Load the dataset
-with open("/path/to/output/dir/artifact/dataset.pkl", "rb") as f:
-    data = pickle.load(f)
-
-rows = data["rows"]
-resources = data["resources"]
-
-# Convert to DataFrame for exploration
-df = pd.DataFrame([
-    {
-        "num_messages": len(row.messages),
-        "num_output_tokens": row.num_output_tokens,
-        "seed_prompt": row.metadata.get("seed_prompt", ""),
-        "conversation": "\n".join([f"{msg.role}: {msg.content}" for msg in row.messages])
-    }
-    for row in rows[:10]  # First 10 examples
-])
-```
-
-</details>
-
 
 ### Step 2: Run context-distillation (i.e. training) on the synthesized data
 
@@ -336,7 +278,7 @@ from cartridges.models.config import HFModelConfig
 from cartridges.datasets import CartridgeTrainDataset
 
 
-DATA_SOURCE = "/data/sabri/cartridges/2025-08-08-17-26-20-arxiv_synthesize/arxiv_synthesize_Qwen/Qwen3-4b_n8192-0/artifact/dataset.pkl"
+DATA_SOURCE = "/path/to/output/dir/artifact/dataset.pkl"
 
 
 config = TrainConfig(
