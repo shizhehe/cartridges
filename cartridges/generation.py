@@ -1,4 +1,5 @@
 from collections import defaultdict
+import os
 from typing import Any, Dict, List, Optional
 from transformers import DynamicCache, AutoTokenizer
 import torch
@@ -38,7 +39,7 @@ def flex_generate(
     
     This implementation relies on the PackedCache above.
     """
-    
+            
     device = input_ids.device
     model.eval()
     if stop_token_ids is None:
@@ -61,7 +62,7 @@ def flex_generate(
     current_seq_ids = seq_ids
     current_position_ids = position_ids
     
-    progress_range = tqdm(range(max_new_tokens), desc="Generating", disable=not show_progress)
+    progress_range = tqdm(range(max_new_tokens), desc="Generating", disable=not show_progress, leave=False)
     for step in progress_range:
         # Forward pass - update cache with current seq_ids before the forward pass
         with torch.no_grad():

@@ -50,11 +50,6 @@ config = SynthesizeConfig(
     name=FormatStringVariable(f"{Path(__file__).stem}_{{synthesizer.client.model_name}}_n{{num_samples}}"),
     run_id=FormatStringVariable("{name}"),
     output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),
-    wandb=WandBConfig(
-        project="cartridges",
-        entity="hazy-research",
-        tags=[f"arxiv_synthesis"],
-    ),
     
     upload_to_wandb=False,
     save_wandb_preview=False,

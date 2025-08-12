@@ -104,7 +104,6 @@ def main():
         
         model = cache_and_model.model.to("cuda").to(torch.bfloat16)
         cache = cache_and_model.cache.to("cuda").to(torch.bfloat16)
-        breakpoint()
         tokenizer = AutoTokenizer.from_pretrained(cache_and_model.model.name_or_path)
         
         print("Model and cache loaded successfully!\n")

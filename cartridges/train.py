@@ -12,6 +12,7 @@ import time
 from typing import Dict, List, Literal, Optional
 
 import pandas as pd
+from pydantic import Field
 from pydrantic import BaseConfig, ObjectConfig, RunConfig
 import torch
 import torch.amp
@@ -36,7 +37,7 @@ from cartridges.datasets import (
 )
 from cartridges.models.config import ModelConfig
 from cartridges.utils import get_logger, seed_everything
-from cartridges.utils.wandb import download_artifacts, WandBConfig, prepare_wandb
+from cartridges.utils.wandb import download_artifacts, WandBConfig, get_default_wandb_config, prepare_wandb
 
 
 logger = get_logger(__name__)
@@ -63,7 +64,7 @@ class TrainConfig(RunConfig):
     name: str = "default"  # A name for the run for wandb
     output_dir: str = os.environ["CARTRIDGES_OUTPUT_DIR"]
     model: ModelConfig
-    wandb: Optional[WandBConfig] = None
+    wandb: Optional[WandBConfig] = Field(default_factory=get_default_wandb_config)
     dataset: TrainDataset.Config
 
     # datasets for evaluating perplexity on other generations
@@ -290,6 +291,7 @@ def train(config: TrainConfig):
         )
 
         logger.info(f"Setup wandb with model stats: {wandb_log_dict}")
+
 
     def do_evaluation():
         for ds_config, dataset in ppl_evals:

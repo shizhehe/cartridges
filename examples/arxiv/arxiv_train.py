@@ -57,7 +57,8 @@ config = TrainConfig(
                     type="hf",
                 ),
             ),
-            name_for_wandb="arxiv_synthesize",
+            name_for_wandb="arxiv-train",
+            batch_size=16
         )
     ],
 
