@@ -28,10 +28,10 @@ import wandb
 
 from cartridges.cache import AttnConfig, KVCacheFactory, TrainableCache
 from cartridges.datasets import (
-    CartridgeDatasetBatch,
-    CartridgeGenerateDataset,
-    CartridgeGenerateDatasetElement,
-    CartridgeTrainDataset,
+    DatasetBatch,
+    GenerateEvalDataset,
+    LossEvalDataset,
+    TrainDataset,
 )
 from cartridges.models.config import ModelConfig
 from cartridges.utils import WandBConfig, get_logger, prepare_wandb, seed_everything
@@ -41,17 +41,12 @@ from cartridges.utils.wandb import download_artifacts, figure_to_wandb
 logger = get_logger(__name__)
 
 
-class PerplexityEvalConfig(BaseConfig):
-
-    seq_length: Optional[int] = 2048
-    dataset: ObjectConfig
+class LossEvalConfig(BaseConfig):
+    dataset: LossEvalDataset.Config | TrainDataset.Config
     name_for_wandb: str
-    only_eval_rank_0: bool = False
-    dataloader_num_workers: int = 0
-
 
 class GenerationEvalConfig(BaseConfig):
-    dataset: ObjectConfig
+    dataset: GenerateEvalDataset.Config
 
     name_for_wandb: str
     generate_max_new_tokens: int = 128
@@ -65,16 +60,17 @@ class GenerationEvalConfig(BaseConfig):
 
 class TrainConfig(RunConfig):
     name: str = "default"  # A name for the run for wandb
+    output_dir: str = os.environ["CARTRIDGES_OUTPUT_DIR"]
     model: ModelConfig
     wandb: Optional[WandBConfig] = None
-    dataset: CartridgeTrainDataset.Config
+    dataset: TrainDataset.Config
 
     # dataset for evaluating perplexity on other generations
     # NOTE: steps here is the number of **optimizer steps**, which we keep track of
     # with the `optimizer_step` variable. This is different than the number of batches
     # processed, which is given by `iter_idx`.
-    ppl_eval_every_n_steps: Optional[int] = None
-    ppl_evals: list[PerplexityEvalConfig] = field(default_factory=list)
+    loss_eval_every_n_steps: Optional[int] = None
+    loss_evals: list[LossEvalConfig] = field(default_factory=list)
 
     # dataset for actually producing generations
     # NOTE: steps here is the number of **optimizer steps**, which we keep track of
@@ -121,7 +117,7 @@ class TrainConfig(RunConfig):
 
 
 def get_dataset_names(
-    config: CartridgeTrainDataset.Config | CartridgeGenerateDataset.Config,
+    config: TrainDataset.Config | GenerateEvalDataset.Config,
 ) -> list[str]:
     return (
         [artifact_name for (artifact_name, _) in config.data_sources]
@@ -134,9 +130,9 @@ def download_wandb_artifacts(config: TrainConfig):
     artifact_names = get_dataset_names(config.dataset)
 
     for eval_or_gen_ds in itertools.chain(
-        config.ppl_evals, config.generate_evals
+        config.loss_evals, config.generate_evals
     ):
-        if isinstance(eval_or_gen_ds.dataset, (CartridgeTrainDataset.Config)):
+        if isinstance(eval_or_gen_ds.dataset, (TrainDataset.Config)):
             artifact_names += get_dataset_names(eval_or_gen_ds.dataset)
 
     download_artifacts(artifact_names)
@@ -147,7 +143,6 @@ def train(config: TrainConfig):
     is_ddp = "LOCAL_RANK" in os.environ
     if is_ddp:
         local_rank = int(os.environ["LOCAL_RANK"])
-        print(f"Setting device to {local_rank}")
         torch.cuda.set_device(local_rank)
 
         # SE (03/21): Sometimes, we want to run train multiple times within
@@ -170,8 +165,8 @@ def train(config: TrainConfig):
     accumulate_grad_steps = (
         config.global_batch_size // num_devices
     )
-    print(f"Global batch size: {config.global_batch_size}")
-    print(f"Num devices: {num_devices}")
+    logger.info(f"Global batch size: {config.global_batch_size}")
+    logger.info(f"Num devices: {num_devices}")
 
     logger.info(f"Train outputs will be saved to {config.run_dir}")
     # logger.info("Initializing tokenizer and dataset")
@@ -184,11 +179,11 @@ def train(config: TrainConfig):
         f"Fininshed loading training dataset from disk, took {(time.time() - t0):.3}s"
     )
 
-    ppl_evals: list[tuple[PerplexityEvalConfig, CartridgeTrainDataset]] = [    
+    ppl_evals: list[tuple[LossEvalConfig, TrainDataset]] = [    
         (ds_config, ds_config.dataset.instantiate(tokenizer=tokenizer, seed=config.seed))
-        for ds_config in config.ppl_evals
+        for ds_config in config.loss_evals
     ]
-    generate_evals: list[tuple[GenerationEvalConfig, CartridgeGenerateDataset]] = [
+    generate_evals: list[tuple[GenerationEvalConfig, GenerateEvalDataset]] = [
         (eval_config, eval_config.dataset.instantiate(tokenizer=tokenizer, seed=config.seed))
         for eval_config in config.generate_evals
     ]
@@ -207,7 +202,6 @@ def train(config: TrainConfig):
         ),
     )
     
-
     assert config.model.tuning_method in ("custom_prefix", "peft")
     use_peft = config.model.tuning_method == "peft"
     
@@ -323,7 +317,7 @@ def train(config: TrainConfig):
 
     def do_evaluation():
         for ds_config, dataset in ppl_evals:
-            evaluate(
+            evaluate_perplexity(
                 config=config,
                 model=wrapped_model,
                 cache=cache,
@@ -367,12 +361,12 @@ def train(config: TrainConfig):
         )
         logger.info(f"Dataloader length: {len(dataloader)}")
         for batch in train_pbar:
-            batch: CartridgeDatasetBatch
+            batch: DatasetBatch
             do_step = (iter_idx + 1) % accumulate_grad_steps == 0
 
             if (
-                config.ppl_eval_every_n_steps is not None
-                and optimizer_step % config.ppl_eval_every_n_steps == 0
+                config.loss_eval_every_n_steps is not None
+                and optimizer_step % config.loss_eval_every_n_steps == 0
                 and iter_idx % accumulate_grad_steps
                 == 0  # only on the first batch of each optimizer step
             ):
@@ -545,13 +539,12 @@ def evaluate_perplexity(
     config: TrainConfig,
     model,  # Can be either CacheAndModel or a PEFT model
     cache: Optional[TrainableCache],
-    eval_dataset: CartridgeTrainDataset,
-    ds_config: PerplexityEvalConfig,
+    eval_dataset: LossEvalDataset,
+    ds_config: LossEvalConfig,
     optimizer_step: int,
     epoch: int,
     local_rank: int,
     cache_tuning: bool,
-    dont_use_lm_head_optimization: bool = False,
 ):
     assert cache_tuning == (cache is not None)
     is_ddp = "LOCAL_RANK" in os.environ
@@ -561,19 +554,18 @@ def evaluate_perplexity(
     logger.info(
         f"Evaluating `{ds_config.name_for_wandb}` (n={len(eval_dataset)}, {len(eval_dataset) // world_size} per device, world size={world_size})"
     )
-    tokenizer = eval_dataset.tokenizer
 
-    sampler = (
-        DistributedSampler(eval_dataset)
-        if is_ddp and not ds_config.only_eval_rank_0
-        else None
-    )
+    sampler = DistributedSampler(eval_dataset)if is_ddp else None
     dataloader = DataLoader(
         eval_dataset,
-        batch_size=ds_config.batch_size,
-        collate_fn=eval_dataset.collate,
         sampler=sampler,
-        num_workers=ds_config.dataloader_num_workers,
+
+        # our dataset already handles batching, so we force the batch size to 1
+        # and extract it in the collate. We still use the dataloader to leverage
+        # a single worker to avoid blocking the main process
+        batch_size=1, 
+        collate_fn=lambda x: x[0], 
+        num_workers=1, 
     )
 
     dataloader_pbar = tqdm(
@@ -588,102 +580,34 @@ def evaluate_perplexity(
 
     results = []
     with torch.no_grad():
-        epoch_loss, epoch_denom = 0.0, 0
+        epoch_loss, epoch_denom = 0.0, torch.tensor(0, device="cuda")
         epoch_num_system_and_user_tokens = torch.tensor(0, device="cuda")
         epoch_num_assistant_tokens = torch.tensor(0, device="cuda")
         epoch_num_elements = torch.tensor(0, device="cuda")
 
         for batch in dataloader_pbar:
-            batch: CartridgeDatasetBatch
-            labels = batch.labels.to(local_rank)[:, 1:]
-
-            epoch_num_system_and_user_tokens += sum(
-                [counts.num_system_and_user_tokens for counts in batch.token_counts]
-            )
-            epoch_num_assistant_tokens += sum(
-                [counts.num_assistant_tokens for counts in batch.token_counts]
-            )
-            epoch_num_elements += len(batch.token_counts)
-
-            # LM head uses a ton of memory for long sequences
-            if dont_use_lm_head_optimization:
-                assert not cache_tuning
-                assert not is_ddp
-
-                assert labels.shape[0] == 1
-                mask = labels != -100
-                gathered_labels = labels[mask]
-
+            batch: DatasetBatch
+            with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
                 outputs = model(
-                    input_ids=batch.input_ids.to(local_rank)[:, :-1],
-                    logits_to_keep=mask[0],
+                    input_ids=batch.input_ids.to(local_rank),
+                    seq_ids=batch.element_ids.to(local_rank),
+                    position_ids=batch.position_ids.to(local_rank),
                 )
 
-                gathered_logits = outputs.logits[mask]
+                topk_pred_logprobs = F.log_softmax(outputs.logits, dim=-1)[
+                    0, 
+                    batch.topk_token_idxs.to(local_rank) - 1, 
+                    batch.topk_token_ids.to(local_rank)
+                ] 
 
-                assert gathered_logits.shape[0] == gathered_labels.shape[0]
-
-                epoch_loss += nn.functional.cross_entropy(
-                    gathered_logits, gathered_labels, reduction="sum"
+                # ce is sum -p(x)logq(x), where p is the true distr and q is the model distr
+                ce_by_token = (
+                    -batch.topk_logprobs.to(local_rank).exp()  # p(x), true distr
+                    * topk_pred_logprobs  # q(x), model distr
                 )
-                epoch_denom += mask.sum()
 
-                del outputs
-                continue
-
-            outputs = model(
-                input_ids=batch.input_ids.to(local_rank)[:, :-1],
-            )
-
-            if not config.eval_log_table:
-                mask = labels != -100
-                epoch_loss += nn.functional.cross_entropy(
-                    outputs.logits[mask], labels[mask], reduction="sum"
-                )
-                epoch_denom += mask.sum()
-
-            else:
-                # SE (03/24): We iterate over the elements in the batch and compute the loss for each element
-                # so we can add a record to the results table for each element.
-                for elem_idx in range(batch.input_ids.size(0)):
-                    elem_input_ids = batch.input_ids[elem_idx]
-                    elem_logits = outputs.logits[elem_idx]
-                    elem_labels = labels[elem_idx]
-
-                    mask = elem_labels != -100
-                    token_loss = nn.functional.cross_entropy(
-                        elem_logits[mask], elem_labels[mask], reduction="none"
-                    )
-                    epoch_loss += token_loss.sum()
-                    epoch_denom += mask.sum()
-
-                    result = {
-                        "loss": token_loss.mean().item(),
-                        "ppl": math.exp(token_loss.mean().item()),
-                        "input_text": tokenizer.decode(elem_input_ids),
-                        "labels_ids": elem_labels[mask].tolist(),
-                        "labels_tokens": [
-                            tokenizer.decode(label)
-                            for label in elem_labels[mask].tolist()
-                        ],
-                        # SE (03/24): Need to negate the loss to get the log probability
-                        # since cross entropy gives nll
-                        "token_logprobs": (-token_loss).tolist(),
-                        "optimizer_step": optimizer_step,
-                        "epoch": epoch,
-                        **batch.metadata[elem_idx],
-                    }
-
-                    if not eval_dataset.only_eval_rank_0 or is_rank_zero:
-                        if config.log_logprob_viz:
-                            from cartridges.analysis.figures.likelihoods import (
-                                visualize_text_likelihoods,
-                            )
-
-                            fig = visualize_text_likelihoods(result)
-                            result["logprob_plot"] = figure_to_wandb(fig)
-
-                        results.append(result)
+                epoch_loss += (ce_by_token.sum())
+                epoch_denom += batch.input_ids.shape[0]
 
             if cache_tuning:
                 assert cache is not None
@@ -691,7 +615,7 @@ def evaluate_perplexity(
 
             del outputs
 
-            if is_ddp and not eval_dataset.only_eval_rank_0:
+            if is_ddp:
                 dist.all_reduce(epoch_loss, op=dist.ReduceOp.SUM)
                 dist.all_reduce(epoch_denom, op=dist.ReduceOp.SUM)
                 dist.all_reduce(epoch_num_system_and_user_tokens, op=dist.ReduceOp.SUM)
@@ -702,7 +626,7 @@ def evaluate_perplexity(
             dist.barrier()
         logger.info(f"Eval loss - {epoch_loss / epoch_denom} ")
 
-    if is_ddp and not eval_dataset.only_eval_rank_0:
+    if is_ddp:
         gathered_results = [None for _ in range(dist.get_world_size())]
         dist.all_gather_object(gathered_results, results)
         # flatten the list of lists
@@ -734,7 +658,7 @@ def evaluate_perplexity(
             step=optimizer_step,
         )
 
-    logger.info("done evaling - " + eval_dataset.name)
+    logger.info("done evaling - " + ds_config.name_for_wandb)
 
     if is_ddp:
         # SE (05/03): this barrier is just to be safe, can probably be removed
@@ -747,7 +671,7 @@ def evaluate_generations(
     
     model: CacheAndModel,
     tokenizer: AutoTokenizer,
-    dataset: CartridgeGenerateDataset,
+    dataset: GenerateEvalDataset,
     optimizer_step: int,
     local_rank,
     step: int = None,

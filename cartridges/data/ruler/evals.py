@@ -7,7 +7,7 @@ from transformers import PreTrainedTokenizerFast
 
 from cartridges.data.ruler.niah import NIAHConfig, NIAHQuery, NIAHSample
 from cartridges.data.ruler.variable_tracking import VariableTrackingConfig, VariableTrackingQuery, VariableTrackingSample
-from cartridges.datasets import CartridgeGenerateDataset, CartridgeGenerateDatasetElement
+from cartridges.datasets import GenerateEvalDataset, GenerateEvalDatasetElement
 from cartridges.data.longhealth.utils import LongHealthQuestion, LongHealthPatient, load_longhealth_dataset
 from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE, MODELS_WITH_THINKING
 
@@ -15,7 +15,7 @@ from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE,
 
 
 
-class NIAHGenerateDataset(CartridgeGenerateDataset):
+class NIAHGenerateDataset(GenerateEvalDataset):
     class Config(ObjectConfig):
         _pass_as_config = True
         niah_path: Optional[str] = None
@@ -45,7 +45,7 @@ class NIAHGenerateDataset(CartridgeGenerateDataset):
 
     def __getitem__(
         self, index: int
-    ) -> CartridgeGenerateDatasetElement:
+    ) -> GenerateEvalDatasetElement:
         # convo: ContextConvo = ContextConvo.model_validate(self.data[index])
         queries: NIAHQuery = self.queries[index]
 
@@ -75,7 +75,7 @@ class NIAHGenerateDataset(CartridgeGenerateDataset):
         )
 
 
-        return CartridgeGenerateDatasetElement(
+        return GenerateEvalDatasetElement(
             input_ids=input_ids,
             prompt=prompt,
             answer=queries.answers,
@@ -105,7 +105,7 @@ class NIAHGenerateDataset(CartridgeGenerateDataset):
         return correct, {"pred_answers": str(pred_answers)}
 
 
-class VariableTrackingGenerateDataset(CartridgeGenerateDataset):
+class VariableTrackingGenerateDataset(GenerateEvalDataset):
     class Config(ObjectConfig):
         _pass_as_config = True
         variable_tracking_path: Optional[str] = None
@@ -128,7 +128,7 @@ class VariableTrackingGenerateDataset(CartridgeGenerateDataset):
 
     def __getitem__(
         self, index: int
-    ) -> CartridgeGenerateDatasetElement:
+    ) -> GenerateEvalDatasetElement:
         query: VariableTrackingQuery = self.queries[index]
 
         kwargs = {}
@@ -155,7 +155,7 @@ class VariableTrackingGenerateDataset(CartridgeGenerateDataset):
             **kwargs,  
         )
 
-        return CartridgeGenerateDatasetElement(
+        return GenerateEvalDatasetElement(
             input_ids=input_ids,
             prompt=full_prompt,
             answer=query.answers,

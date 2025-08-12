@@ -10,7 +10,7 @@ from cartridges.models.llama.modeling_llama import FlexLlamaForCausalLM
 from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
 from cartridges.train import GenerationEvalConfig, TrainConfig
 from cartridges.models.config import HFModelConfig
-from cartridges.datasets import CartridgeTrainDataset
+from cartridges.datasets import TrainDataset
 from cartridges.utils import WandBConfig
 from cartridges.data.longhealth.evals import LongHealthMultipleChoiceGenerateDataset
 
@@ -58,7 +58,7 @@ config = TrainConfig(
     epochs=2,
     global_batch_size=32,
 
-    dataset=CartridgeTrainDataset.Config(
+    dataset=TrainDataset.Config(
         data_sources=[
             (source, None)
             for source in data_sources
@@ -81,8 +81,8 @@ config = TrainConfig(
             temperature=0.3,
         )
     ],
-    ppl_eval_every_n_steps=512,
-    ppl_evals=[],
+    loss_eval_every_n_steps=512,
+    loss_evals=[],
     distributed_backend="gloo",
 
     wandb=WandBConfig(

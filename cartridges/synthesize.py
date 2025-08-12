@@ -19,7 +19,7 @@ import wandb
 
 from cartridges.synthesizers.base import AsyncConvoSynthesizer
 from cartridges.utils import WandBConfig, prepare_wandb, get_logger, get_default_wandb_config
-from cartridges.structs import TrainingExample
+from cartridges.structs import Conversation
 
 
 logger = get_logger(__name__)
@@ -62,7 +62,7 @@ class SynthesizeConfig(RunConfig):
 
         total_batches = math.ceil(self.num_samples / self.batch_size)
 
-        all_rows: list[TrainingExample] = asyncio.run(
+        all_rows: list[Conversation] = asyncio.run(
             self._run_async_batches_with_queue(total_batches=total_batches),
         )
     
@@ -104,9 +104,9 @@ class SynthesizeConfig(RunConfig):
     async def _run_async_batches_with_queue(
         self, 
         total_batches: int
-    ) -> list[TrainingExample]:
+    ) -> list[Conversation]:
         """Run batches using a queue for better control."""
-        all_rows: list[TrainingExample] = []
+        all_rows: list[Conversation] = []
         
         # Create queue of batch indices
         batch_queue = asyncio.Queue()
@@ -178,7 +178,7 @@ async def _process_batch_async(
     total_batches: int,
     synthesizer: AsyncConvoSynthesizer,
     config: SynthesizeConfig,
-) -> list[TrainingExample]:
+) -> list[Conversation]:
     batch_size = min(
         config.batch_size,
         config.num_samples - batch_idx * config.batch_size,
@@ -200,7 +200,7 @@ async def _process_batch_async(
 
     return convos
 
-def _save_wandb_preview(rows: list[TrainingExample]):
+def _save_wandb_preview(rows: list[Conversation]):
     import random
     sampled_rows = random.sample(rows, min(256, len(rows)))
     preview_df = pd.DataFrame(

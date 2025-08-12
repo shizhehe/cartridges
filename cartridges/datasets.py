@@ -1,6 +1,7 @@
 from __future__ import annotations
 from abc import abstractmethod
 from collections import deque
+import json
 import pickle
 from pathlib import Path
 import random
@@ -15,7 +16,7 @@ from transformers import PreTrainedTokenizerFast
 from pydrantic import ObjectConfig
 import numpy as np
 
-from cartridges.structs import TrainingExample
+from cartridges.structs import Conversation
 from torch.utils.data import BatchSampler, Sampler
 from cartridges.utils import get_logger, wandb
 
@@ -51,12 +52,12 @@ class TokenCounts:
         )
 
 def _base_convert_messages_to_element_retokenize(
-    messages: List[TrainingExample.Message],
+    messages: List[Conversation.Message],
     tokenizer: PreTrainedTokenizerFast,
     message_start_tokens: dict[str, list[int]],
     message_end_tokens: dict[str, list[int]],
     message_extra_end_tokens: dict[str, list[int]],
-) -> CartridgeDatasetElement:
+) -> DatasetElement:
     input_ids, topk_token_ids, topk_logprobs, topk_token_idxs = [], [], [], []
     token_counts = TokenCounts()
 
@@ -78,7 +79,7 @@ def _base_convert_messages_to_element_retokenize(
             num_assistant_tokens=len(input_ids) if message.role == "assistant" else 0,
         )
 
-    return CartridgeDatasetElement(
+    return DatasetElement(
         input_ids=torch.tensor(input_ids, dtype=torch.long),
         topk_token_ids=torch.from_numpy(np.concatenate(topk_token_ids)),
         topk_logprobs=torch.from_numpy(np.concatenate(topk_logprobs)),
@@ -90,17 +91,19 @@ def _base_convert_messages_to_element_retokenize(
 
 
 def _base_convert_messages_to_element(
-    messages: List[TrainingExample.Message],
+    messages: List[Conversation.Message],
     message_start_tokens: dict[str, list[int]],
     message_end_tokens: dict[str, list[int]],
     message_extra_end_tokens: dict[str, list[int]],
     tokenizer: PreTrainedTokenizerFast,
-) -> CartridgeDatasetElement:
+) -> DatasetElement:
     input_ids, topk_token_ids, topk_logprobs, topk_token_idxs = [], [], [], []
     token_counts = TokenCounts()
 
     for i, message in enumerate(messages):
         if message.token_ids is None:
+            # Some synthesizers may not return token ids for some messages, in which case
+            # we actually need to do the retokenization. 
             msg_token_ids = tokenizer.encode(message.content, add_special_tokens=False)
         else:
             msg_token_ids = message.token_ids
@@ -138,7 +141,7 @@ def _base_convert_messages_to_element(
             num_assistant_tokens=len(input_ids) if message.role == "assistant" else 0,
         )
 
-    return CartridgeDatasetElement(
+    return DatasetElement(
         input_ids=torch.tensor(input_ids, dtype=torch.long),
         topk_token_ids=torch.from_numpy(np.concatenate(topk_token_ids)),
         topk_logprobs=torch.from_numpy(np.concatenate(topk_logprobs)),
@@ -148,10 +151,10 @@ def _base_convert_messages_to_element(
     )
 
 def qwen_messages_to_element(
-    messages: List[TrainingExample.Message],
+    messages: List[Conversation.Message],
     retokenize: bool = False,
     tokenizer: PreTrainedTokenizerFast | None = None,
-) -> CartridgeDatasetElement:
+) -> DatasetElement:
     fn = _base_convert_messages_to_element_retokenize if retokenize else _base_convert_messages_to_element
 
     return fn(
@@ -172,10 +175,10 @@ def qwen_messages_to_element(
     )
 
 def llama3_messages_to_element(
-    messages: List[TrainingExample.Message],
+    messages: List[Conversation.Message],
     retokenize: bool = False,
     tokenizer: PreTrainedTokenizerFast | None = None,
-) -> CartridgeDatasetElement:
+) -> DatasetElement:
     fn = _base_convert_messages_to_element_retokenize if retokenize else _base_convert_messages_to_element
 
     return fn(
@@ -199,10 +202,10 @@ def llama3_messages_to_element(
     )
 
 def llama2_messages_to_element(
-    messages: List[TrainingExample.Message],
+    messages: List[Conversation.Message],
     retokenize: bool = False,
     tokenizer: PreTrainedTokenizerFast | None = None,
-) -> CartridgeDatasetElement:
+) -> DatasetElement:
     fn = _base_convert_messages_to_element_retokenize if retokenize else _base_convert_messages_to_element
 
     return fn(
@@ -241,50 +244,36 @@ MODEL_TO_MESSAGE_CONVERTER = {k.lower(): v for k, v in MODEL_TO_MESSAGE_CONVERTE
 
 
 @dataclass
-class CartridgeDatasetElement:
+class DatasetElement:
     input_ids: torch.Tensor
-    
-    topk_logprobs: torch.Tensor
-    topk_token_ids: torch.Tensor
-    topk_token_idxs: torch.Tensor
 
     metadata: list[dict[str, Any]]
     token_counts: TokenCounts
-    
-    context_ids: torch.Tensor|None = None
-    context_mask: torch.Tensor|None = None
 
+    topk_logprobs: Optional[torch.Tensor] = None
+    topk_token_ids: Optional[torch.Tensor] = None
+    topk_token_idxs: Optional[torch.Tensor] = None
 
 @dataclass
-class CartridgeDatasetBatch:
+class DatasetBatch:
     input_ids: torch.Tensor
     element_ids: torch.Tensor
     position_ids: torch.Tensor
 
-    topk_logprobs: torch.Tensor
-    topk_token_ids: torch.Tensor
-    topk_token_idxs: torch.Tensor
-
     metadata: list[dict[str, Any]]
     token_counts: TokenCounts
     loss_weight: Optional[torch.Tensor] = None
-    context_ids: Optional[torch.Tensor] = None
-    context_mask: Optional[torch.Tensor] = None
+
+    topk_logprobs: Optional[torch.Tensor] = None
+    topk_token_ids: Optional[torch.Tensor] = None
+    topk_token_idxs: Optional[torch.Tensor] = None
 
 
 def msg(content, role: Literal["user"] | Literal["assistant"] | Literal["system"]):
     return {"content": content, "role": role}
 
 
-@dataclass
-class TokenData:
-    token_id: int
-    top_tokens: list[int]
-    top_logprobs: list[float]
-    apply_loss: bool
-
-
-class CartridgeTrainDataset(Dataset):
+class TrainDataset(Dataset):
     """ This dataset 
 
     - In "truncate" mode, if adding an element to the current batch would exceed the `seq_length`, the element 
@@ -311,7 +300,6 @@ class CartridgeTrainDataset(Dataset):
         packing_mode: Literal["truncate", "pad"]="pad"
         packed_seq_length: int = 2048
 
-        dataset_weights: Optional[list[float]] = None
         user_prompt_prefix: list[str] | None = None
 
 
@@ -320,39 +308,50 @@ class CartridgeTrainDataset(Dataset):
         self.config = config
         self.tokenizer = tokenizer
         
-        self.elements: List[TrainingExample] = self._prepare_elements()
+        self.elements: List[DatasetElement] = self._prepare_elements()
         # each batch is a list of element indices
         self.batches: List[List[int]] = self._prepare_batches(seed=seed)  
     
-    def _prepare_elements(self) -> list[TrainingExample]:
+    def _prepare_data_source(self, source: str, limit: int | None) -> list[Conversation]:
+        if source.endswith(".pkl"):
+            pkl_path = source
+            if not Path(pkl_path).exists():
+                modal_pkl_path = os.path.join("/root/cartridges-datasets", os.path.relpath(source, "/"))
+                if not Path(modal_pkl_path).exists():
+                    raise FileNotFoundError(f"File {source} not found either locally or in modal")
+                pkl_path = modal_pkl_path
+
+        else:
+            dataset_dir = (
+                wandb.get_artifact_dir(source) / "dataset"
+                if self.config.is_wandb
+                else Path(source)
+            )
+
+            if not dataset_dir.exists():
+                wandb.download_artifact(source)
+            pkl_path = dataset_dir / "dataset.pkl"
+
+        with open(pkl_path, "rb") as f:
+            data_dict = pickle.load(f)
+        assert data_dict.keys() == {"rows"}
+
+        return data_dict["rows"][:limit]
+
+    def _prepare_elements(self) -> list[DatasetElement]:
         data = []
         for source, limit in self.config.data_sources:
-            if source.endswith(".pkl"):
-                pkl_path = source
-                if not Path(pkl_path).exists():
-                    modal_pkl_path = os.path.join("/root/cartridges-datasets", os.path.relpath(source, "/"))
-                    if not Path(modal_pkl_path).exists():
-                        raise FileNotFoundError(f"File {source} not found either locally or in modal")
-                    pkl_path = modal_pkl_path
+            data.extend(self._prepare_data_source(source, limit))
 
-            else:
-                dataset_dir = (
-                    wandb.get_artifact_dir(source) / "dataset"
-                    if self.config.is_wandb
-                    else Path(source)
-                )
+        elements = []
+        for row in data:
+            elements.append(MODEL_TO_MESSAGE_CONVERTER[self.tokenizer.name_or_path.lower()](
+                row.messages,
+                retokenize=self.config.targets == "tokens",
+                tokenizer=self.tokenizer,
+            ))
 
-                if not dataset_dir.exists():
-                    wandb.download_artifact(source)
-                pkl_path = dataset_dir / "dataset.pkl"
-
-            with open(pkl_path, "rb") as f:
-                data_dict = pickle.load(f)
-            assert data_dict.keys() == {"rows"}
-
-            data += data_dict["rows"][:limit]
-
-        return data
+        return elements
     
     def _prepare_batches(self, seed: int) -> List[List[int]]:
         """
@@ -370,7 +369,7 @@ class CartridgeTrainDataset(Dataset):
         curr_batch, curr_seq_len = [], 0
         while queue:
             idx = queue[0]
-            elem: CartridgeDatasetElement = self._get_element(idx)
+            elem: DatasetElement = self._get_element(idx)
             
             if curr_seq_len == 0 and len(elem.input_ids) > self.config.packed_seq_length:
                 # if the current element is by itself longer than the sequence length,
@@ -401,20 +400,15 @@ class CartridgeTrainDataset(Dataset):
     def __len__(self):
         return len(self.batches)
     
-    def _get_element(self, elem_idx: int) -> CartridgeDatasetElement:
-        row = self.elements[elem_idx]
-        return MODEL_TO_MESSAGE_CONVERTER[self.tokenizer.name_or_path.lower()](
-            row.messages,
-            retokenize=self.config.targets == "tokens",
-            tokenizer=self.tokenizer,
-        )
+    def _get_element(self, elem_idx: int) -> DatasetElement:
+        return self.elements[elem_idx]
     
     def _get_batch(self, batch_idx: int):
         elem_idxs = self.batches[batch_idx]
         elements = [self._get_element(elem_idx) for elem_idx in elem_idxs]
         return self.collate(elements)
 
-    def __getitem__(self, index: int) -> CartridgeDatasetBatch:
+    def __getitem__(self, index: int) -> DatasetBatch:
         return self._get_batch(index)
         
     def reload(self):
@@ -431,10 +425,8 @@ class CartridgeTrainDataset(Dataset):
 
     def collate(
         self,
-        batch: (
-            list[CartridgeDatasetElement]
-        ),
-    ) -> CartridgeDatasetBatch:
+        batch: list[DatasetElement]
+    ) -> DatasetBatch:
         """
         Collate a list of dataset elements into a single sequence of length `self.config.packed_seq_length`.
         The elements are packed into a single sequence 
@@ -488,7 +480,7 @@ class CartridgeTrainDataset(Dataset):
             element_ids = torch.cat([element_ids, padding])
             position_ids = torch.cat([position_ids, padding])
 
-        return CartridgeDatasetBatch(
+        return DatasetBatch(
             input_ids=input_ids,
             element_ids=element_ids,
             position_ids=position_ids,
@@ -499,16 +491,51 @@ class CartridgeTrainDataset(Dataset):
             token_counts=token_counts,
         )
 
-class CartridgePerplexityDataset(Dataset):
+class LossEvalDataset(TrainDataset):
     class Config(ObjectConfig):
         _pass_as_config = True
-        dataset: CartridgeTrainDataset.Config
+        
+        # path to a file containing conversations 
+        # accepted formats are: *.jsonl
+        # should contain a column called "messages" and a column called "metadata"
+        path: str
 
-    def __init__(self, config: Config, tokenizer: PreTrainedTokenizerFast, seed: int):
-        self.config = config
-        self.tokenizer = tokenizer
+        is_wandb: bool = False
+        targets: Literal["tokens"] = "tokens"
+
+        packing_mode: Literal["truncate", "pad"]="pad"
+        packed_seq_length: int = 2048
+
+        user_prompt_prefix: list[str] | None = None
+
+
+    def _prepare_elements(self) -> list[Conversation]:
+        data: list[Conversation] = []
+        if self.config.path.endswith(".pkl"):
+            data = self._prepare_data_source(self.config.path, None)
+        elif self.config.path.endswith(".jsonl"):
+            with open(self.config.path, "r") as f:
+                for line in f:
+                    row = json.loads(line)
+                    data.append(Conversation(
+                        messages=row["messages"],
+                        metadata=row["metadata"],
+                        system_prompt="",
+                    ))
+
+        elements = []
+        for row in data:
+            elements.append(MODEL_TO_MESSAGE_CONVERTER[self.tokenizer.name_or_path.lower()](
+                row.messages,
+                retokenize=self.config.targets == "tokens",
+                tokenizer=self.tokenizer,
+            ))
+        
+        return elements
+    
+
 @dataclass
-class CartridgeGenerateDatasetElement:
+class GenerateEvalDatasetElement:
     input_ids: torch.Tensor
     prompt: str
 
@@ -520,7 +547,7 @@ class CartridgeGenerateDatasetElement:
     # are structured as prior messages
     prompt_messages: Optional[List[Dict[str,str]]] = None
 
-class CartridgeGenerateDataset(Dataset):
+class GenerateEvalDataset(Dataset):
     class Config(ObjectConfig):
         _pass_as_config = True
     
@@ -530,6 +557,6 @@ class CartridgeGenerateDataset(Dataset):
         self.seed = seed
 
     @abstractmethod
-    def __getitem__(self, index: int) -> CartridgeGenerateDatasetElement:
+    def __getitem__(self, index: int) -> GenerateEvalDatasetElement:
         raise NotImplementedError
         

@@ -10,11 +10,10 @@ from cartridges.synthesize import SynthesizeConfig
 from cartridges.synthesizers.self_study import SelfStudySynthesizer
 from cartridges.utils import WandBConfig
 from cartridges.data.resources import TextFileResource
-from cartridges.clients.tokasaurus import TokasaurusClient
+from cartridges.clients.openai import OpenAIClient
 
-client = TokasaurusClient.Config(
-    url="https://hazyresearch--toka-qwen3-4b-1xh100-min0-serve.modal.run",
-    model_name="Qwen/Qwen3-4b",
+client = OpenAIClient.Config(
+    model_name="gpt-5-mini-2025-08-07"
 )
 
 config = SynthesizeConfig(
@@ -22,7 +21,9 @@ config = SynthesizeConfig(
     synthesizer=SelfStudySynthesizer.Config(
         client=client,
         max_rounds=1,
-        prob_thinking=0.2,
+        prob_thinking=0.0,
+        temperature_a=1.0,
+        temperature_b=1.0,
         tools=[],
         resources=[
             TextFileResource.Config(
@@ -35,21 +36,21 @@ config = SynthesizeConfig(
                     "creative",
                 ],
                 chunker=TokenChunker.Config(
-                    tokenizer=client.model_name,
-                    min_tokens_per_chunk=512,
-                    max_tokens_per_chunk=1024,
+                    tokenizer="Qwen/Qwen3-4b",
+                    min_tokens_per_chunk=None,
+                    max_tokens_per_chunk=65536,
                 ),
             )
         ],
+        num_top_logprobs=None,
     ),
 
-    num_samples=8192, 
-    batch_size=32,  
-    max_num_batches_in_parallel=256,
+    num_samples=32, 
+    batch_size=1,  
+    max_num_batches_in_parallel=32,
 
     name=FormatStringVariable(f"{Path(__file__).stem}_{{synthesizer.client.model_name}}_n{{num_samples}}"),
     run_id=FormatStringVariable("{name}"),
-    output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),
     wandb=WandBConfig(
         project="cartridges",
         entity="hazy-research",

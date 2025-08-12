@@ -184,7 +184,7 @@ async def process_latex_project(directory: str) -> str:
 
 if __name__ == "__main__":
     
-    resource = TexResource.Config(
+    resource = LaTeXResource.Config(
         arxiv_id="2506.06266",
         chunker=TokenChunker.Config(
             tokenizer="Qwen/Qwen3-4b",

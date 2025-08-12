@@ -39,7 +39,7 @@ class TextResource(Resource):
     class Config(Resource.Config):
         text: str
         chunker: Chunker.Config
-        
+
         seed_prompts: List[SEED_TYPES]
 
     def __init__(self, config: Config):
@@ -58,7 +58,7 @@ class TextResource(Resource):
         seed_prompts = sample_seed_prompts(self.config.seed_prompts, batch_size)
         return chunk, seed_prompts
 
-class FileTextResource(TextResource):
+class TextFileResource(TextResource):
 
     class Config(Resource.Config):
         path: str
@@ -67,7 +67,7 @@ class FileTextResource(TextResource):
 
     def __init__(self, config: Config):
         self.config = config
-        super().__init__(config)
+        self.chunker = None
     
     async def setup(self):
         self.text = open(self.config.path).read()

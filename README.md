@@ -19,12 +19,27 @@ The code is based on our paper *[Cartridges: Lightweight and general-purpose lon
 26× while maintaining quality. (See our [blogpost](https://hazyresearch.stanford.edu/blog/2025-06-08-cartridges) for more.)
 
 
+## Quick Start
+
+**Want to try Cartridges immediately?** Here's the fastest path:
+
+1. **Setup**: `git clone https://github.com/HazyResearch/cartridges && cd cartridges && pip install uv && uv pip install -e .`
+2. **Set environment variables** (see [Setup](#setup) for details)
+3. **Try the example**: `python examples/arxiv/arxiv_synthesize.py` → `python examples/arxiv/arxiv_train.py`
+4. **Chat with your cartridge**: `python -m cartridges.utils.chat <your_wandb_run_id>`
+
 **Table of contents**
+- [Quick Start](#quick-start)
 - [Setup](#setup)
-- [Architecture Overview](#architecture-overview)
-- [Synthesizing Training Data with Self-Study](#synthesizing-training-data-with-self-study)
-- [Training a Cartridge](#training-a-Cartridge)
-- [Serving Cartridges](#serving-Cartridges)
+- [Running Self-Study](#running-self-study)
+  - [Step 1: Synthesize training data](#step-1-synthesize-training-data)
+    - [Step 1.1: Configure Resources](#step-11-configure-resources)
+    - [Step 1.2: Prepare an Inference Server](#step-12-prepare-an-inference-server)
+    - [Step 1.3: Run the Synthesis](#step-13-run-the-synthesis)
+  - [Step 2: Run context-distillation (i.e. training) on the synthesized data](#step-2-run-context-distillation-ie-training-on-the-synthesized-data)
+    - [Step 2.1: Evaluation](#step-21-evaluation)
+- [Serving Cartridges](#serving-cartridges)
+- [Troubleshooting](#troubleshooting)
 - [Acknowledgments and Citation](#acknowledgments-and-citation)
 
 
@@ -108,13 +123,13 @@ if __name__ == "__main__":
 #### Step 1.1: Configure Resources
 A "resource" is an object that feeds chunks of the context and a "seed prompt" to a synthesizer.  See Section 4 of [our paper](https://arxiv.org/pdf/2506.06266) for more details.
 
-Since we want to train Cartridge for a research paper, we'll use the [`LaTeXResource`](./cartridges/resources/latex.py) type.
+Since we want to train Cartridge for a research paper, we'll use the [`TextFileResource`](./cartridges/data/resources.py) type.
 
 ```python 
-from cartridges.resources.latex import LatexResource
+from cartridges.data.resources import TextFileResource
 
-resource_config = LaTeXResource.Config(
-    arxiv_id="2506.06266",
+resource_config = TextFileResource.Config(
+    path= "examples/arxiv/cartridges.tex",
     seed_prompts=["structuring", "summarization", "question"],
     chunker=TokenChunker.Config(
         tokenizer=client.model_name,
@@ -124,9 +139,12 @@ resource_config = LaTeXResource.Config(
 )
 ```
 
-We provide several other basic resource types like `TextResource`, `FileTextResource`, `JSONResource`. We're also adding some more specialized resource types like `SlackResource` and `GMailResource`.
+We provide several other basic resource types for common data formats like `JSONResource`. 
 
-For each, you can find all the configuration options in the class definition.
+We're also gradually adding more specialized resource types like that do a better job chunking specific data formats and feeding relevant seed prompts:
+- [`LaTeXResource`](./cartridges/data/tex/resources.py) for training a Cartridge on a LaTeX project. In fact, we could have used this instead of the `TextFileResource` above: `LaTeXResource.Config(arxiv_id="2506.06266", ...)`
+- [`SlackResource`](./cartridges/data/slack/resources.py) for training a Cartridge on Slack messages through the Slack API. This uses the Slack API to fetch recent messages from your channels. 
+- [`GMailResource`](./cartridges/data/gmail/resources.py) for Gmail messages. This uses an MCP server to fetch recent messages from your inbox.
 
 
 #### Step 1.2: Prepare an Inference Server
@@ -249,7 +267,7 @@ Copy this path to your clipboard. See [`TrainingExample`](./cartridges/structs.p
 
 <details>
 <summary>
-<i> 💻 Explore synthesized dataset in the visualization UI!</i>
+💻 <i>Explore synthesized dataset in the visualization UI!</i>
 </summary>
 
 We (read: Claude Code) implemented a nice visualization tool for exploring the synthesized dataset.
@@ -264,7 +282,10 @@ To run it, follow the instruction in [`viz/README.md`](./viz/README.md).
 *Note: See `examples/arxiv/arxiv_train.py` for the full script developed in this section.*
 
 
-See [`TrainConfig`](./cartridges/train.py#L66) for the full schema of the main config we use for training. Below we provide a simple example of a config file.
+See [`TrainConfig`](./cartridges/train.py#L66) for documentation on the configuration. Below we provide a simple example of a config file.
+
+
+
 
 **Make sure to set the `DATA_SOURCE` variable to the path to the synthesized dataset from above.**
 
@@ -301,13 +322,79 @@ if __name__ == "__main__":
     import pydrantic
     pydrantic.main(config)
 ```
-
-### Data parallel training
-To launch a data parallel training run, you can run:
+**Data parallel training.** To launch a data parallel training run, use `torchrun`:
 
 ```bash
 torchrun --standalone --nproc_per_node=2 path/to/file.py
 ```
+
+> **Note:** We're occassionally seeing a NCCL collective operation timeout when running 
+> data parallel training. If you encounter this error, you can set `distributed_backend="gloo"`
+> while we debug the issue.
+
+#### Step 2.1: Evaluation
+
+During training, we can periodically evaluate the Cartridge on a held-out dataset. We support two types of evaluation: loss and generation-based evaluations.
+
+**Generation Evaluations.**
+```python 
+config = TrainConfig(
+    ...
+    generate_eval_every_n_steps=100,
+    generate_evals=[
+        GenerationEvalConfig(
+            dataset=CartridgeGenerateDataset.Config(
+                data_sources=[(DATA_SOURCE, None)],
+            ),
+        )
+    ...
+)
+```
+
+**Loss Evaluations.** These measure how well the cartridge predicts the next token on held-out data.
+```python 
+config = TrainConfig(
+    ...
+    loss_eval_every_n_steps=100,
+    loss_evals=[
+        LossEvalConfig(
+            dataset=CartridgePerplexityDataset.Config(
+                data_sources=[(DATA_SOURCE, None)],
+                packed_seq_length=2048,
+                packing_mode="truncate",
+            ),
+            name_for_wandb="loss_eval",
+        )
+    ],
+    ...
+)
+```
+
+**Generation Evaluations.** These evaluate the cartridge's ability to generate coherent responses to questions about the content.
+```python 
+config = TrainConfig(
+    ...
+    generate_eval_every_n_steps=100,
+    generate_evals=[
+        GenerationEvalConfig(
+            dataset=CartridgeGenerateDataset.Config(
+                data_sources=[(DATA_SOURCE, None)],
+            ),
+            name_for_wandb="generation_eval",
+            generate_max_new_tokens=128,
+            num_samples=3,
+            temperature=0.7,
+            batch_size=1,
+        )
+    ],
+    ...
+)
+```
+
+**Evaluation Tips:**
+- Use `num_samples > 1` for generation evals to get multiple outputs per prompt
+- Increase `temperature` for generation evals to get more diverse outputs
+- Monitor both loss (lower is better) and generation quality metrics in WandB
 
 
 ## Serving Cartridges
@@ -316,30 +403,52 @@ We describe two ways to serve and chat with a trained Cartridge: a simple, but s
 
 ### Chatting with a Cartridge locally
 
+Use the interactive CLI to chat with your trained cartridge:
+
+```bash
+python -m cartridges.utils.chat <wandb_run_id>
+```
+
+> **Note**: We currently only support downloading cartridges from wandb, but should eventually get this working for local cartridges as well.
+
+**Finding your run ID**: You can find the run ID in your output. Look for lines like:
+```
+wandb: Run data is saved locally in /tmp/wandb/run-20241201_123456-abc1def2
+wandb: Synced 5 files to https://wandb.ai/your-entity/cartridges/runs/abc1def2
+```
+The run ID is the final part (`abc1def2`), or use the full path format: `your-entity/your-project/abc1def2`
+You can also find the run ID in the "Overview" tab of the WandB UI under "Run path". 
+
 
 ### Serving with Tokasuaurus [Fastest and recommended]
 We've implemented (h/t @geoffreyangus) an integration with [Tokasaurus](https://github.com/ScalingIntelligence/tokasaurus), a simple LLM inference server optimized for high throughput. 
 
-To run the Tokasaurus server, you will need to (install Tokasaurus from source)[], switch to the branch `geoff/cartridges`, and then follow the instructions [here](https://github.com/ScalingIntelligence/tokasaurus/tree/geoff/cartridges?tab=readme-ov-file#cartridges) to make API calls to the server.
-
-We 
-
-```python
-client = TokasaurusClient(
-    url="https://your-modal-deployment-url.modal.run",
-    model_name="meta-llama/Llama-3.2-3B-Instruct"
-)
-```
+To run the Tokasaurus server, you will need to (install Tokasaurus from source)[], switch to the branch `geoff/cartridges`, and then start up the server:
 
 ```bash
-streamlit run cartridges/analysis/dashboards/chat_w_cache.py
+tksrs model=Qwen/Qwen3-4b kv_cache_num_tokens='(512 * 1024)'
 ```
 
-### Serving with Basic PyTorch [Easiest but slow]
+Once you have a Tokasaurus server running, you can make requests using an OpenAI-like API with an extra field for Cartridges. Don't forget to make sure that the port matches the outputs of `tksrs`.
 
-```bash
-streamlit run cartridges/analysis/dashboards/chat_w_cache.py
+```python 
+import requests
+
+# Make a request with a cartridge from HuggingFace
+response = requests.post("http://localhost:10210/v1/cartridge/chat/completions", json={
+    "model": "default",
+    "messages": [{"role": "user", "content": "Help me understand this."}],
+    "max_tokens": 50,
+    "cartridges": [{
+        "id": "hazyresearch/cartridge-wauoq23f",
+        "source": "wandb",
+        "force_redownload": False
+    }]
+})
 ```
+
+Tokasaurus can also pull Cartridges from HuggingFace and local files. You can also compose multiple cartridges in a single request. See the [Tokasaurus documentation](https://github.com/ScalingIntelligence/tokasaurus/tree/geoff/cartridges?tab=readme-ov-file#cartridges) for the full instructions.
+
 
 ## Acknowledgments and Citation
 There are tons of people and organizations who have supported this project. Below we shout out a few, but check out the the paper for a full list.

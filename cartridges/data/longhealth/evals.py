@@ -4,13 +4,13 @@ import random
 from pydrantic import ObjectConfig
 from transformers import PreTrainedTokenizerFast
 
-from cartridges.datasets import CartridgeGenerateDataset, CartridgeGenerateDatasetElement
+from cartridges.datasets import GenerateEvalDataset, GenerateEvalDatasetElement
 from cartridges.data.longhealth.utils import LongHealthQuestion, LongHealthPatient, load_longhealth_dataset
 from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE, MODELS_WITH_THINKING
 
 
 
-class LongHealthMultipleChoiceGenerateDataset(CartridgeGenerateDataset):
+class LongHealthMultipleChoiceGenerateDataset(GenerateEvalDataset):
     class Config(ObjectConfig):
         _pass_as_config = True
         patient_ids: Optional[List[str]] = None
@@ -81,7 +81,7 @@ class LongHealthMultipleChoiceGenerateDataset(CartridgeGenerateDataset):
 
     def __getitem__(
         self, index: int
-    ) -> CartridgeGenerateDatasetElement:
+    ) -> GenerateEvalDatasetElement:
         # convo: ContextConvo = ContextConvo.model_validate(self.data[index])
         question: LongHealthQuestion = self.questions[index]
 
@@ -97,7 +97,7 @@ class LongHealthMultipleChoiceGenerateDataset(CartridgeGenerateDataset):
             **kwargs,
         )
 
-        return CartridgeGenerateDatasetElement(
+        return GenerateEvalDatasetElement(
             input_ids=input_ids,
             prompt=question.question,
             answer=question.correct,

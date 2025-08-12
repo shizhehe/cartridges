@@ -2,8 +2,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Literal, Optional
 
-import numpy as np
-
 from cartridges.clients.base import FlatTopLogprobs
 from cartridges.utils import get_logger
 
@@ -12,7 +10,13 @@ logger = get_logger(__name__)
 
 
 @dataclass
-class TrainingExample:
+class Conversation:
+    messages: list[Conversation.Message]
+    system_prompt: str
+    metadata: dict
+    type: Optional[str] = None
+
+
     @dataclass
     class Message:
         content: str
@@ -21,18 +25,6 @@ class TrainingExample:
         
         # Sparse dictionary of top logprobs for each token
         top_logprobs: Optional[FlatTopLogprobs] = None
-    """
-    Attrs:
-        messages: conversation as openai text.
-        metadata: arbitrary metadata
-        type: type of this context convo
-    """
-    messages: list[TrainingExample.Message]
-    system_prompt: str
-
-    type: str
-    metadata: dict
-
 
 
     def _repr_html_(self) -> str:
@@ -59,5 +51,54 @@ class TrainingExample:
 
     def to_html(self) -> str:
         return self._repr_html_()
+    
+    def from_dict(row: dict) -> Conversation:
+        return Conversation(
+            messages=[
+                Conversation.Message(
+                    content=message["content"],
+                    role=message["role"],
+                    token_ids=message["token_ids"],
+                    top_logprobs=(
+                        FlatTopLogprobs(**message["top_logprobs"]) 
+                        if message["top_logprobs"] is not None else None
+                    )
+                ) 
+                for message in row["messages"]
+            ],
+            system_prompt=row["system_prompt"],
+            metadata=row["metadata"],
+            type=row["type"],
+        )
 
+def conversations_to_parquet(conversations: list[Conversation], path: str):
+    import pyarrow.parquet as pq
+    import pyarrow as pa
+    from dataclasses import asdict
 
+    rows = (asdict(row) for row in conversations)
+    table = pa.Table.from_pylist(list(rows)) 
+    pq.write_table(table, path, compression="snappy")
+
+def conversations_from_parquet(path: str) -> list[Conversation]:
+    import pandas as pd 
+    rows = pd.read_parquet(path).to_dict(orient="records")
+    return [Conversation.from_dict(row) for row in rows]
+
+def conversations_to_pkl(conversations: list[Conversation], path: str):
+    """For backwards compatibility, we will eventually only support parquet as it is 
+    roughly half the size of pkl."""
+    import pickle
+    with open(path, "wb") as f:
+        pickle.dump(conversations, f)
+    
+def conversations_from_pkl(path: str) -> list[Conversation]:
+    """For backwards compatibility, we will eventually only support parquet as it is 
+    roughly half the size of pkl."""
+    import pickle
+    with open(path, "rb") as f:
+        return pickle.load(f)
+
+class TrainingExample(Conversation):
+    # backwards compatibility
+    pass

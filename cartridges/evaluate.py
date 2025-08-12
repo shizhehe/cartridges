@@ -15,7 +15,7 @@ import wandb
 import pydrantic
 
 from cartridges.data.resources import Resource
-from cartridges.datasets import CartridgeGenerateDatasetElement, CartridgeGenerateDataset
+from cartridges.datasets import GenerateEvalDatasetElement, GenerateEvalDataset
 from cartridges.clients.base import Client, ClientConfig, ClientResponse
 
 from cartridges.train import GenerationEvalConfig
@@ -133,7 +133,7 @@ async def _process_batch(
     batch_start: int,
     batch_end: int,
     generator: BaselineGenerator,
-    dataset: CartridgeGenerateDataset,
+    dataset: GenerateEvalDataset,
     eval_config: GenerationEvalConfig,
 ):
     num_samples = eval_config.num_samples
@@ -193,7 +193,7 @@ class BaselineGenerator(ABC):
         self.config = config
 
     async def generate(
-        self, elements: List[CartridgeGenerateDatasetElement]
+        self, elements: List[GenerateEvalDatasetElement]
     ) -> List[GenerateBaselineResponse]:
         raise NotImplementedError()
 
@@ -264,7 +264,7 @@ class ICLBaseline(BaselineGenerator):
         return system_prompt
 
     async def generate(
-        self, elements: List[CartridgeGenerateDatasetElement]
+        self, elements: List[GenerateEvalDatasetElement]
     ) -> List[GenerateBaselineResponse]:
 
         chats = []

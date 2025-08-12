@@ -4,11 +4,11 @@ import asyncio
 import time
 import uuid
 import random
-from typing import List
+from typing import Dict, List, Optional
 
 from transformers import AutoTokenizer
 
-from cartridges.structs import TrainingExample
+from cartridges.structs import Conversation
 from cartridges.data.tools import instantiate_tools
 from cartridges.clients.base import ClientConfig, ClientSample, FlatTopLogprobs
 from cartridges.synthesizers.base import AsyncConvoSynthesizer, ConvoSynthesizer
@@ -58,7 +58,7 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
         temperature_b: float = 0.0
         max_completion_tokens_b: int = 1024
 
-        num_top_logprobs: int = 20
+        num_top_logprobs: Optional[int] = 20
         min_prob_mass: float = 0.99
 
 
@@ -66,7 +66,6 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
         self.config = config
 
         self.client = self.config.client.instantiate()
-        self.tokenizer = AutoTokenizer.from_pretrained(self.config.client.model_name)
     
         self.is_setup = False
 
@@ -100,7 +99,7 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
 
     async def sample_convos(
         self, batch_idx: int, batch_size: int, total_batches: int
-    ) -> list[TrainingExample]:
+    ) -> list[Conversation]:
         batch_id = f"{batch_idx}"
 
         if not self.is_setup:
@@ -349,7 +348,7 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
         convos: list[list[dict]],
         metas: list[dict],
         contexts: list[str] | None,
-    ) -> list[TrainingExample]:
+    ) -> list[Conversation]:
         examples = []
         for chat, meta, context in zip(
             convos,
@@ -367,9 +366,9 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
 
             
             examples.append(
-                TrainingExample(
+                Conversation(
                     messages=[
-                        TrainingExample.Message(
+                        Conversation.Message(
                             role=message["role"],
                             content=message["content"],
                             token_ids=message["resp_obj"].token_ids,

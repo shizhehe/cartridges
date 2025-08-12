@@ -1,7 +1,7 @@
 import abc
 from pydrantic import ObjectConfig
 
-from cartridges.structs import TrainingExample
+from cartridges.structs import Conversation
 
 import numpy as np
 
@@ -20,7 +20,7 @@ class ConvoSynthesizer(abc.ABC):
         batch_idx: int,
         num_convos: int,
         total_batches: int,
-    ) -> list[TrainingExample]:
+    ) -> list[Conversation]:
         raise NotImplementedError()
 
 class AsyncConvoSynthesizer(ConvoSynthesizer):
@@ -32,5 +32,5 @@ class AsyncConvoSynthesizer(ConvoSynthesizer):
         batch_idx: int,
         num_convos: int,
         total_batches: int,
-    ) -> list[TrainingExample]:
+    ) -> list[Conversation]:
         raise NotImplementedError()

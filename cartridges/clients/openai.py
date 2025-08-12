@@ -1,6 +1,6 @@
 import os
 import time
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Literal, Optional, Type
 import openai
 from openai.types.chat.chat_completion import ChatCompletion
 import asyncio
@@ -75,6 +75,8 @@ class OpenAIClient(Client):
         If config.api_key is set, it will override OPENAI_API_KEY in the environment.
         """
         self.config = config
+
+        self.type: Literal["openai", "hf"] = "openai" if config.base_url is None else "hf"
         
         self.client = self.client_class(
             api_key=config.api_key if config.api_key else os.getenv("OPENAI_API_KEY"),
@@ -128,10 +130,11 @@ class OpenAIClient(Client):
         temperature: float = 0.6,
         stop: List[str] = [],
         max_completion_tokens: Optional[int] = None,
+        top_logprobs: Optional[int] = None,
         conversation_id: Optional[str] = None,
         enable_thinking: Optional[bool] = None,
         cartridges: Optional[List[Dict[str, Any]]] = None,
-        **kwargs
+        modal_upstream_id: Optional[str] = None,
     ) -> ClientResponse:
         assert len(chats) > 0
         
@@ -140,13 +143,19 @@ class OpenAIClient(Client):
             chats = [chats]
 
         extra_body = {}
-        if enable_thinking is not None:
+        kwargs = {}
+        if enable_thinking is not None and self.type == "hf":
             extra_body = {
                 "chat_template_kwargs": {"enable_thinking": enable_thinking}
             }
+        elif self.type == "openai":
+            kwargs["reasoning_effort"] = "high" if enable_thinking else "low"
         
         if cartridges is not None:
             extra_body["cartridges"] = cartridges
+        
+        if modal_upstream_id is not None and self.type != "openai":
+            extra_body["modal_upstream_id"] = modal_upstream_id
         
         # Create individual async tasks for each chat
         async def process_single_chat(messages: List[Dict[str, Any]]) -> tuple[ChatCompletion, List[Dict[str, Any]]]:
@@ -154,13 +163,14 @@ class OpenAIClient(Client):
                 return await self.client.chat.completions.create(
                     model=self.config.model_name,
                     messages=m,
-                    max_tokens=max_completion_tokens,
+                    max_completion_tokens=max_completion_tokens,
                     temperature=temperature,
                     stop=stop if stop else None,
                     n=1,
-                    logprobs=True,
+                    top_logprobs=top_logprobs,
+                    logprobs=top_logprobs is not None,
                     extra_body=extra_body,
-                    **kwargs
+                    **kwargs,
                 )
             
             # Handle message truncation with retry logic

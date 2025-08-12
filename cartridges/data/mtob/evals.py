@@ -5,8 +5,8 @@ from cartridges.data.mtob.load import (
     load_train_examples,
 )  # Added load_train_examples
 from cartridges.datasets import (
-    CartridgeGenerateDataset,
-    CartridgeGenerateDatasetElement,
+    GenerateEvalDataset,
+    GenerateEvalDatasetElement,
 )
 from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE, MODELS_WITH_THINKING
 from cartridges.train import GenerationEvalConfig
@@ -46,8 +46,8 @@ def extract_answer_from_cot(text: str) -> str:
         return text.strip()
 
 
-class MTOBGenerateDataset(CartridgeGenerateDataset):
-    class Config(CartridgeGenerateDataset.Config):
+class MTOBGenerateDataset(GenerateEvalDataset):
+    class Config(GenerateEvalDataset.Config):
         _pass_as_config = True
         use_cot: bool = False  # Added CoT config flag
         # ignored
@@ -60,7 +60,7 @@ class MTOBGenerateDataset(CartridgeGenerateDataset):
         self.tokenizer = tokenizer
         # Data loading and setting source/target languages will happen in subclasses
 
-    def __getitem__(self, index: int) -> CartridgeGenerateDatasetElement:
+    def __getitem__(self, index: int) -> GenerateEvalDatasetElement:
         row = self.data[index]
 
         # Select prompt based on config
@@ -83,7 +83,7 @@ class MTOBGenerateDataset(CartridgeGenerateDataset):
             **kwargs,
         )
 
-        return CartridgeGenerateDatasetElement(
+        return GenerateEvalDatasetElement(
             input_ids=input_ids,
             prompt=user_content,  # Keep original sentence as prompt context if needed
             answer=row["ground_truth"],

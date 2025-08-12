@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 import random
-from typing import List
+from typing import List, Optional
 
 from pydrantic import ObjectConfig
 from transformers import AutoTokenizer
@@ -24,7 +24,7 @@ class TokenChunker(Chunker):
 
     class Config(Chunker.Config):
         tokenizer: str
-        min_tokens_per_chunk: int = 512
+        min_tokens_per_chunk: Optional[int] = 512
         max_tokens_per_chunk: int = 1024
 
     def __init__(self, config: Config, text: str):
@@ -35,8 +35,19 @@ class TokenChunker(Chunker):
         self.tokens = self.tokenizer.encode(text)
 
     def sample_chunk(self) -> List[str]:
-        start_idx = random.randint(0, len(self.tokens) - self.config.max_tokens_per_chunk)
-        end_idx = start_idx + self.config.max_tokens_per_chunk
+        if self.config.min_tokens_per_chunk is None:
+            tokens_in_chunk = self.config.max_tokens_per_chunk
+        else:
+            tokens_in_chunk = random.randint(
+                self.config.min_tokens_per_chunk, 
+                self.config.max_tokens_per_chunk
+            )
+        if tokens_in_chunk > len(self.tokens):
+            return self.text
+            
+        start_idx = random.randint(0, len(self.tokens) - tokens_in_chunk)
+        end_idx = start_idx + tokens_in_chunk
+        print(f"tokens_in_chunk: {tokens_in_chunk}, start_idx: {start_idx}, end_idx: {end_idx}")
         return self.tokenizer.decode(self.tokens[start_idx:end_idx])
 
 
