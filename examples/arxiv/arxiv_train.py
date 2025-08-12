@@ -5,10 +5,8 @@ import pydrantic
 from cartridges.initialization.random import KVFromRandomText
 from cartridges.train import TrainConfig, LossEvalConfig
 from cartridges.models import HFModelConfig, FlexQwen3ForCausalLM
-from cartridges.datasets import TrainDataset, LossEvalDataset
+from cartridges.datasets import DataSource, TrainDataset, LossEvalDataset
 
-
-DATA_SOURCE = "/data/sabri/cartridges/2025-08-08-17-26-20-arxiv_synthesize/arxiv_synthesize_Qwen/Qwen3-4b_n8192-0/artifact/dataset.pkl"
 
 
 config = TrainConfig(
@@ -25,7 +23,12 @@ config = TrainConfig(
     global_batch_size=32,
 
     dataset=TrainDataset.Config(
-        data_sources=[(DATA_SOURCE, None)],
+        data_sources=[
+            DataSource(
+                path="hazyresearch/arxiv_synthesize_qwen-qwen3-4b_n8192-0",
+                type="hf",
+            ),
+        ],
         top_k_logits=20,
         packed_seq_length=2048,
         packing_mode="truncate",
@@ -35,7 +38,10 @@ config = TrainConfig(
     loss_evals=[
         LossEvalConfig(
             dataset=LossEvalDataset.Config(
-                path="/data/sabri/cartridges/2025-08-11-16-39-24-arxiv_synthesize_eval/arxiv_synthesize_eval_gpt-5-mini-2025-08-07_n32-0/artifact/dataset.pkl",
+                data_source=DataSource(
+                    path="hazyresearch/arxiv_synthesize_eval_gpt-5-mini-2025-08-07_n32-0",
+                    type="hf",
+                ),
                 packed_seq_length=2048,
                 packing_mode="truncate",
             ),

@@ -1,24 +1,24 @@
 from __future__ import annotations
+import os
+from typing import Dict, List, Literal, Optional, Any
 from abc import abstractmethod
 from collections import deque
 import json
 import pickle
 from pathlib import Path
 import random
+from dataclasses import dataclass
 
 from torch.utils.data import Dataset
-from dataclasses import dataclass
-from typing import Dict, List, Literal, Optional, Any
 import torch
-import os
-
 from transformers import PreTrainedTokenizerFast
-from pydrantic import ObjectConfig
+from pydrantic import ObjectConfig, BaseConfig
 import numpy as np
 
-from cartridges.structs import Conversation
-from torch.utils.data import BatchSampler, Sampler
+from cartridges.structs import Conversation, read_conversations
 from cartridges.utils import get_logger, wandb
+from cartridges.utils.hf import read_conversations_from_hf
+from cartridges.utils.wandb import read_conversations_from_wandb
 
 # SE(04/02): required to silence tokenizer warnings when using dataloders with
 # multiple worker processes
@@ -106,7 +106,7 @@ def _base_convert_messages_to_element(
             # we actually need to do the retokenization. 
             msg_token_ids = tokenizer.encode(message.content, add_special_tokens=False)
         else:
-            msg_token_ids = message.token_ids
+            msg_token_ids = list(message.token_ids)
         msg_input_ids = message_start_tokens[message.role] + msg_token_ids
         
         end_tokens = message_end_tokens[message.role]
@@ -273,6 +273,11 @@ def msg(content, role: Literal["user"] | Literal["assistant"] | Literal["system"
     return {"content": content, "role": role}
 
 
+class DataSource(BaseConfig):
+    path: str
+    type: Literal["local", "wandb", "hf"]
+    limit: int | None = None
+
 class TrainDataset(Dataset):
     """ This dataset 
 
@@ -292,7 +297,7 @@ class TrainDataset(Dataset):
 
     class Config(ObjectConfig):
         _pass_as_config = True
-        data_sources: list[tuple[str, int | None],]  # path, limit
+        data_sources: list[str | DataSource]  
         is_wandb: bool = False
         top_k_logits: int = 20
         targets: Literal["logits", "tokens"] = "logits"
@@ -312,36 +317,26 @@ class TrainDataset(Dataset):
         # each batch is a list of element indices
         self.batches: List[List[int]] = self._prepare_batches(seed=seed)  
     
-    def _prepare_data_source(self, source: str, limit: int | None) -> list[Conversation]:
-        if source.endswith(".pkl"):
-            pkl_path = source
-            if not Path(pkl_path).exists():
-                modal_pkl_path = os.path.join("/root/cartridges-datasets", os.path.relpath(source, "/"))
-                if not Path(modal_pkl_path).exists():
-                    raise FileNotFoundError(f"File {source} not found either locally or in modal")
-                pkl_path = modal_pkl_path
-
+    def _prepare_data_source(self, source: str | DataSource) -> list[Conversation]:
+        if isinstance(source, str):
+            is_local = ".pkl" in source or ".parquet" in source
+            source = DataSource(path=source, type="local" if is_local else "wandb")
+        
+        if source.type == "local":
+            data = read_conversations(source.path)
+        elif source.type == "wandb":
+            data = read_conversations_from_wandb(source.path)
+        elif source.type == "hf":
+            data = read_conversations_from_hf(source.path)
         else:
-            dataset_dir = (
-                wandb.get_artifact_dir(source) / "dataset"
-                if self.config.is_wandb
-                else Path(source)
-            )
+            raise ValueError(f"Unsupported data source type: {source.type}")
 
-            if not dataset_dir.exists():
-                wandb.download_artifact(source)
-            pkl_path = dataset_dir / "dataset.pkl"
-
-        with open(pkl_path, "rb") as f:
-            data_dict = pickle.load(f)
-        assert data_dict.keys() == {"rows"}
-
-        return data_dict["rows"][:limit]
+        return data[:source.limit] if source.limit is not None else data
 
     def _prepare_elements(self) -> list[DatasetElement]:
         data = []
-        for source, limit in self.config.data_sources:
-            data.extend(self._prepare_data_source(source, limit))
+        for source in self.config.data_sources:
+            data.extend(self._prepare_data_source(source))
 
         elements = []
         for row in data:
@@ -496,9 +491,8 @@ class LossEvalDataset(TrainDataset):
         _pass_as_config = True
         
         # path to a file containing conversations 
-        # accepted formats are: *.jsonl
-        # should contain a column called "messages" and a column called "metadata"
-        path: str
+        # accepted formats are: *.jsonl, *.parquet, *.pkl, a wandb artifact id, or a huggingface repo id
+        data_source: str | DataSource
 
         is_wandb: bool = False
         targets: Literal["tokens"] = "tokens"
@@ -511,17 +505,7 @@ class LossEvalDataset(TrainDataset):
 
     def _prepare_elements(self) -> list[Conversation]:
         data: list[Conversation] = []
-        if self.config.path.endswith(".pkl"):
-            data = self._prepare_data_source(self.config.path, None)
-        elif self.config.path.endswith(".jsonl"):
-            with open(self.config.path, "r") as f:
-                for line in f:
-                    row = json.loads(line)
-                    data.append(Conversation(
-                        messages=row["messages"],
-                        metadata=row["metadata"],
-                        system_prompt="",
-                    ))
+        data = self._prepare_data_source(self.config.data_source)
 
         elements = []
         for row in data:

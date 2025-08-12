@@ -8,7 +8,7 @@ from cartridges.data.chunkers import TokenChunker
 from cartridges.data.resources import TextFileResource
 from cartridges.synthesize import SynthesizeConfig
 from cartridges.synthesizers.self_study import SelfStudySynthesizer
-from cartridges.utils import WandBConfig
+from cartridges.utils.wandb import WandBConfig
 from cartridges.data.resources import TextFileResource
 from cartridges.clients.tokasaurus import TokasaurusClient
 
@@ -55,7 +55,7 @@ config = SynthesizeConfig(
         entity="hazy-research",
         tags=[f"arxiv_synthesis"],
     ),
-    save_wandb_artifact=False,
+    upload_to_wandb=False,
     save_wandb_preview=False,
 )
 

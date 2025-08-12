@@ -17,7 +17,9 @@ from pydantic import Field
 
 import torch.distributed as dist
 
+
 if TYPE_CHECKING:
+    from cartridges.structs import Conversation
     from cartridges.train import CacheAndModel
 
 
@@ -240,6 +242,60 @@ def fetch_wandb_runs(
 
     return df, None
 
+def read_conversations_from_wandb(
+    artifact_id: str,
+    versions: Literal["latest", "all"] = "latest",
+    project_name: str = "cartridges",
+    entity: str = "hazy-research",
+) -> list["Conversation"]:
+    """
+    Read conversations from a Weights & Biases artifact containing conversation data.
+
+    Parameters:
+    - artifact_id (str): The ID of the artifact containing conversations. Can include version (e.g., "artifact:v1")
+    - versions (Literal["latest", "all"]): Whether to fetch only the latest version or all versions. Default is "latest".
+    - project_name (str): The name of the W&B project. Default is "cartridges".
+    - entity (str): The W&B entity (username or team name). Default is "hazy-research".
+
+    Returns:
+    - list[Conversation]: A list of Conversation objects loaded from the artifact.
+    """
+    from cartridges.structs import read_conversations
+    # Initialize wandb API
+    api = wandb.Api()
+    
+    # Build full artifact path
+    full_artifact_id = f"{entity}/{project_name}/{artifact_id}"
+    
+    if ":" not in full_artifact_id:
+        # If no version is specified, get the latest version
+        artifact = api.artifact(f"{full_artifact_id}:latest")
+    else:
+        artifact = api.artifact(full_artifact_id)
+    
+    # Download the artifact to a temporary directory
+    artifact_dir = artifact.download(root=tempfile.mkdtemp())
+    
+    # Look for conversation files in the artifact directory
+    conversations = []
+    
+    # Search for parquet or pkl files containing conversations
+    for root, dirs, files in os.walk(artifact_dir):
+        for file in files:
+            file_path = Path(root) / file
+            
+            if file.endswith(".parquet") or file.endswith(".pkl"):
+                try:
+                    file_conversations = read_conversations(str(file_path))
+                    conversations.extend(file_conversations)
+                except Exception as e:
+                    # Skip files that can't be read as conversations
+                    continue
+    
+    if not conversations:
+        raise ValueError(f"No conversation files found in artifact {artifact_id}")
+    
+    return conversations
 
 def fetch_wandb_table(
     artifact_id: str,

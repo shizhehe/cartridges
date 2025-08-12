@@ -34,8 +34,8 @@ from cartridges.datasets import (
     TrainDataset,
 )
 from cartridges.models.config import ModelConfig
-from cartridges.utils import WandBConfig, get_logger, prepare_wandb, seed_everything
-from cartridges.utils.wandb import download_artifacts, figure_to_wandb
+from cartridges.utils import get_logger, seed_everything
+from cartridges.utils.wandb import download_artifacts, WandBConfig, prepare_wandb
 
 
 logger = get_logger(__name__)

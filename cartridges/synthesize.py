@@ -6,9 +6,8 @@ import os
 from pathlib import Path
 import math
 
-import pickle
 import time
-from typing import Literal, Optional, Union
+from typing import Optional
 
 import concurrent.futures
 from pydrantic import RunConfig
@@ -18,38 +17,70 @@ import tqdm
 import wandb
 
 from cartridges.synthesizers.base import AsyncConvoSynthesizer
-from cartridges.utils import WandBConfig, prepare_wandb, get_logger, get_default_wandb_config
-from cartridges.structs import Conversation
+from cartridges.structs import Conversation, write_conversations
+from cartridges.utils import get_logger
+from cartridges.utils.wandb import prepare_wandb, WandBConfig, get_default_wandb_config
+from cartridges.utils.hf import upload_run_dir_to_hf
 
 
 logger = get_logger(__name__)
 
 
 class SynthesizeConfig(RunConfig):
-    name: Optional[str] = "generate"
 
-    tokenizer: Optional[str] = None
-
+    # the configuration for the synthesizer to use for the dataset
+    # if you're not sure what to use, you should use `cartridges.synthesizers.SelfStudySynthesizer`.
+    # however, you can also use your own synthesizer by subclassing `AsyncConvoSynthesizer`
+    # and implementing the `sample_convos` method.
+    # See `examples/arxiv/arxiv_synthesize.py` for an example.
     synthesizer: AsyncConvoSynthesizer.Config
-
+    
+    # total number of conversation to synthesize 
     num_samples: int
-    batch_size: int
 
+    # these two parameters (`batch_size` and `max_num_batches_in_parallel`) are critical 
+    # for maximizing GPU utilization during synthesis. 
+    # a batch is a set of conversations that are conditioned on the same chunk of the context
+    # when `batch_size > 1`, we exploit prefix-sharing, which improves GPU utilization.
+    # `max_num_batches_in_parallel` controls the number of workers, with each runing one
+    # batch at a time.  As a very rough rule of thumb, you should aim to have 
+    # `batch_size * num_batches_in_parallel` ~= 128 - 256. Larger batch sizes will hurt
+    # data diversity, but lead to higher throughput. 
+    # if you're using Modal or another configuration with horizontal autoscaling, be 
+    # sure to coordinate `max_num_batches_in_parallel` with `allow_concurrent_inputs`
+    # so that you can have about 128 - 256 conversations running per GPU at a time.
+    batch_size: int
     max_num_batches_in_parallel: int
     worker_timeout: int = 6 * 60  # only allow six minutes between completed batches
 
-    wandb: Optional[WandBConfig] = Field(default_factory=get_default_wandb_config)
-    save_wandb_preview: bool = True
-    save_wandb_artifact: bool = True
-    save_metadata: bool = True  # metadata is previewed in wandb always, but can exclude from dataset
+    # --- BEGIN CONFIGURATIONS FOR HOW TO SAVE THE GENERATED DATASET ---
 
-    # this is the root directory for all outputs
-    # a subdirectory will be created for the run
+    # name of the run, will be used to name the run directory where the generated dataset
+    # is saved
+    name: Optional[str] = "synthesize"
+
+    # wandb configuration, `upload_to_wandb` controls whether to upload the dataset to 
+    # wandb as an artifact. `save_wandb_preview` controls whether to save a small 
+    # preview of the dataset to the wandb for inspection. 
+    wandb: Optional[WandBConfig] = Field(default_factory=get_default_wandb_config)
+    upload_to_wandb: bool = False
+    save_wandb_preview: bool = True
+    
+    # whether to upload the generated dataset to huggingface (as a parquet file)
+    # "hf_repo_id" is the name of the huggingface repo to upload to and it can 
+    # include {wandb_run_id} and {name} in the repo id and they will be replaced
+    # with the wandb run id and name of the run
+    upload_to_hf: bool = False
+    hf_repo_id: Optional[str] = None 
+
+    # this is the root directory for outputs, a subdirectory will be created for the run
+    # based on "name"
     output_dir: Optional[str] = Field(default=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."))
 
 
     def run(self):
         assert self.name is not None
+        assert not self.upload_to_hf or self.hf_repo_id is not None
 
         os.environ["TOKENIZERS_PARALLELISM"] = "true"
         assert self.run_dir is not None
@@ -71,24 +102,15 @@ class SynthesizeConfig(RunConfig):
 
         if self.save_wandb_preview:
             _save_wandb_preview(all_rows)
-        
-        if not self.save_metadata:
-            for row in all_rows:
-                row.metadata = {}
 
         output_dir = self.run_dir / "artifact"
         output_dir.mkdir()
-        final_output_path = output_dir / "dataset.pkl"
-        with open(final_output_path, "wb") as f:
-            pickle.dump(
-                {
-                    "rows": all_rows,
-                },
-                f,
-            )
+        final_output_path = output_dir / "dataset.parquet"
+        write_conversations(all_rows, final_output_path)
+
         logger.info(f"Final output saved to {final_output_path}")
 
-        if self.save_wandb_artifact:
+        if self.upload_to_wandb:
             artifact = wandb.Artifact(name=self.name, type="dataset")
             artifact.add_dir(local_path=str(output_dir.absolute()), name="dataset")
             wandb.log_artifact(artifact)
@@ -98,6 +120,10 @@ class SynthesizeConfig(RunConfig):
             logger.info(
                 f"Saved dataset to wandb as artifact {artifact.name}, took {time.time() - t:.1f}s"
             )
+        
+        if self.upload_to_hf:
+            hf_id = self.hf_repo_id.format(wandb_run_id=self.wandb.run_id, name=self.name)
+            upload_run_dir_to_hf(self.run_dir, hf_id)
 
         wandb.finish()
 

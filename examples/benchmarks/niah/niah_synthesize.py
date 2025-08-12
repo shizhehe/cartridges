@@ -73,7 +73,7 @@ config = SynthesizeConfig(
         entity="hazy-research",
         tags=[f"longhealth_synthesis"],
     ),
-    save_wandb_artifact=False,
+    upload_to_wandb=False,
     save_wandb_preview=False,
 )
 

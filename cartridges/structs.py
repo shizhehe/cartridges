@@ -71,7 +71,25 @@ class Conversation:
             type=row["type"],
         )
 
-def conversations_to_parquet(conversations: list[Conversation], path: str):
+def write_conversations(conversations: list[Conversation], path: str):
+    path_str = str(path)
+    if path_str.endswith(".parquet"):
+        _conversations_to_parquet(conversations, path)
+    elif path_str.endswith(".pkl"):
+        _conversations_to_pkl(conversations, path)
+    else:
+        raise ValueError(f"Unsupported file extension: {path_str}")
+
+def read_conversations(path: str) -> list[Conversation]:
+    path_str = str(path)
+    if path_str.endswith(".parquet"):
+        return _conversations_from_parquet(path)
+    elif path_str.endswith(".pkl"):
+        return _conversations_from_pkl(path)
+    else:
+        raise ValueError(f"Unsupported file extension: {path_str}")
+
+def _conversations_to_parquet(conversations: list[Conversation], path: str):
     import pyarrow.parquet as pq
     import pyarrow as pa
     from dataclasses import asdict
@@ -80,24 +98,30 @@ def conversations_to_parquet(conversations: list[Conversation], path: str):
     table = pa.Table.from_pylist(list(rows)) 
     pq.write_table(table, path, compression="snappy")
 
-def conversations_from_parquet(path: str) -> list[Conversation]:
+def _conversations_from_parquet(path: str) -> list[Conversation]:
     import pandas as pd 
     rows = pd.read_parquet(path).to_dict(orient="records")
     return [Conversation.from_dict(row) for row in rows]
 
-def conversations_to_pkl(conversations: list[Conversation], path: str):
+def _conversations_to_pkl(conversations: list[Conversation], path: str):
     """For backwards compatibility, we will eventually only support parquet as it is 
     roughly half the size of pkl."""
     import pickle
     with open(path, "wb") as f:
         pickle.dump(conversations, f)
     
-def conversations_from_pkl(path: str) -> list[Conversation]:
+def _conversations_from_pkl(path: str) -> list[Conversation]:
     """For backwards compatibility, we will eventually only support parquet as it is 
     roughly half the size of pkl."""
     import pickle
     with open(path, "rb") as f:
-        return pickle.load(f)
+        data = pickle.load(f)
+
+    if isinstance(data, dict) and "rows" in data:
+        # backwards compatibility
+        return data["rows"]
+    else:
+        return data
 
 class TrainingExample(Conversation):
     # backwards compatibility
