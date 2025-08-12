@@ -32,6 +32,7 @@ from cartridges.datasets import (
     GenerateEvalDataset,
     LossEvalDataset,
     TrainDataset,
+    DataSource,
 )
 from cartridges.models.config import ModelConfig
 from cartridges.utils import get_logger, seed_everything
@@ -65,14 +66,14 @@ class TrainConfig(RunConfig):
     wandb: Optional[WandBConfig] = None
     dataset: TrainDataset.Config
 
-    # dataset for evaluating perplexity on other generations
+    # datasets for evaluating perplexity on other generations
     # NOTE: steps here is the number of **optimizer steps**, which we keep track of
     # with the `optimizer_step` variable. This is different than the number of batches
     # processed, which is given by `iter_idx`.
     loss_eval_every_n_steps: Optional[int] = None
     loss_evals: list[LossEvalConfig] = field(default_factory=list)
 
-    # dataset for actually producing generations
+    # datasets for actually producing generations
     # NOTE: steps here is the number of **optimizer steps**, which we keep track of
     # with the `optimizer_step` variable. This is different than the number of batches
     # processed, which is given by `iter_idx`.
@@ -115,29 +116,6 @@ class TrainConfig(RunConfig):
     def run(self):
         return train(self)
 
-
-def get_dataset_names(
-    config: TrainDataset.Config | GenerateEvalDataset.Config,
-) -> list[str]:
-    return (
-        [artifact_name for (artifact_name, _) in config.data_sources]
-        if config.is_wandb
-        else []
-    )
-
-
-def download_wandb_artifacts(config: TrainConfig):
-    artifact_names = get_dataset_names(config.dataset)
-
-    for eval_or_gen_ds in itertools.chain(
-        config.loss_evals, config.generate_evals
-    ):
-        if isinstance(eval_or_gen_ds.dataset, (TrainDataset.Config)):
-            artifact_names += get_dataset_names(eval_or_gen_ds.dataset)
-
-    download_artifacts(artifact_names)
-
-
 def train(config: TrainConfig):
     seed_everything(config.seed)
     is_ddp = "LOCAL_RANK" in os.environ
@@ -169,8 +147,6 @@ def train(config: TrainConfig):
     logger.info(f"Num devices: {num_devices}")
 
     logger.info(f"Train outputs will be saved to {config.run_dir}")
-    # logger.info("Initializing tokenizer and dataset")
-    download_wandb_artifacts(config)
     tokenizer = AutoTokenizer.from_pretrained(config.model.pretrained_model_name_or_path)    
 
     t0 = time.time()

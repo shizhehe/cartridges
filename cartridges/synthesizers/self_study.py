@@ -11,7 +11,7 @@ from transformers import AutoTokenizer
 from cartridges.structs import Conversation
 from cartridges.data.tools import instantiate_tools
 from cartridges.clients.base import ClientConfig, ClientSample, FlatTopLogprobs
-from cartridges.synthesizers.base import AsyncConvoSynthesizer, ConvoSynthesizer
+from cartridges.synthesizers.base import AsyncConvoSynthesizer
 from cartridges.data.tools import Tool, ToolSet, ToolOutput
 from cartridges.data import MODEL_TO_TOOL_TEMPLATE, MODEL_TO_TOOL_CALL_PARSER, ToolCall, render_tool_template
 from cartridges.utils import get_logger
@@ -36,7 +36,7 @@ You are in a conversation about the following user information.
 
 class SelfStudySynthesizer(AsyncConvoSynthesizer):
 
-    class Config(ConvoSynthesizer.Config):
+    class Config(AsyncConvoSynthesizer.Config):
         client: ClientConfig
 
         resources: List[Resource.Config]

@@ -122,7 +122,7 @@ class SynthesizeConfig(RunConfig):
             )
         
         if self.upload_to_hf:
-            hf_id = self.hf_repo_id.format(wandb_run_id=self.wandb.run_id, name=self.name)
+            hf_id = self.hf_repo_id.format(wandb_run_id=wandb.run.id, name=self.name)
             upload_run_dir_to_hf(self.run_dir, hf_id)
 
         wandb.finish()

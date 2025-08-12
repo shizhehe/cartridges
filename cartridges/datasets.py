@@ -16,7 +16,8 @@ from pydrantic import ObjectConfig, BaseConfig
 import numpy as np
 
 from cartridges.structs import Conversation, read_conversations
-from cartridges.utils import get_logger, wandb
+from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE, MODELS_WITH_THINKING
+from cartridges.utils import get_logger
 from cartridges.utils.hf import read_conversations_from_hf
 from cartridges.utils.wandb import read_conversations_from_wandb
 
@@ -278,6 +279,23 @@ class DataSource(BaseConfig):
     type: Literal["local", "wandb", "hf"]
     limit: int | None = None
 
+def _prepare_data_source(source: str | DataSource) -> list[Conversation]:
+    if isinstance(source, str):
+        is_local = ".pkl" in source or ".parquet" in source
+        source = DataSource(path=source, type="local" if is_local else "wandb")
+    
+    if source.type == "local":
+        data = read_conversations(source.path)
+    elif source.type == "wandb":
+        data = read_conversations_from_wandb(source.path)
+    elif source.type == "hf":
+        data = read_conversations_from_hf(source.path)
+    else:
+        raise ValueError(f"Unsupported data source type: {source.type}")
+
+    return data[:source.limit] if source.limit is not None else data
+
+
 class TrainDataset(Dataset):
     """ This dataset 
 
@@ -316,27 +334,11 @@ class TrainDataset(Dataset):
         self.elements: List[DatasetElement] = self._prepare_elements()
         # each batch is a list of element indices
         self.batches: List[List[int]] = self._prepare_batches(seed=seed)  
-    
-    def _prepare_data_source(self, source: str | DataSource) -> list[Conversation]:
-        if isinstance(source, str):
-            is_local = ".pkl" in source or ".parquet" in source
-            source = DataSource(path=source, type="local" if is_local else "wandb")
-        
-        if source.type == "local":
-            data = read_conversations(source.path)
-        elif source.type == "wandb":
-            data = read_conversations_from_wandb(source.path)
-        elif source.type == "hf":
-            data = read_conversations_from_hf(source.path)
-        else:
-            raise ValueError(f"Unsupported data source type: {source.type}")
-
-        return data[:source.limit] if source.limit is not None else data
 
     def _prepare_elements(self) -> list[DatasetElement]:
         data = []
         for source in self.config.data_sources:
-            data.extend(self._prepare_data_source(source))
+            data.extend(_prepare_data_source(source))
 
         elements = []
         for row in data:
@@ -505,7 +507,7 @@ class LossEvalDataset(TrainDataset):
 
     def _prepare_elements(self) -> list[Conversation]:
         data: list[Conversation] = []
-        data = self._prepare_data_source(self.config.data_source)
+        data = _prepare_data_source(self.config.data_source)
 
         elements = []
         for row in data:
@@ -534,13 +536,49 @@ class GenerateEvalDatasetElement:
 class GenerateEvalDataset(Dataset):
     class Config(ObjectConfig):
         _pass_as_config = True
+
+        data_source: str | DataSource
+        cot: bool = False
     
     def __init__(self, config: Config, tokenizer: PreTrainedTokenizerFast, seed: int):
         self.config = config
         self.tokenizer = tokenizer
         self.seed = seed
 
+        self.data: list[Conversation] = _prepare_data_source(self.config.data_source)
+
     @abstractmethod
     def __getitem__(self, index: int) -> GenerateEvalDatasetElement:
-        raise NotImplementedError
+        convo: Conversation = self.data[index]
+        assert len(convo.messages) > 1, "Conversation must have at least 2 messages"
+        assert convo.messages[-1].role == "assistant", "Last message must be assistant"
+
+
+        kwargs = {}
+        if self.tokenizer.name_or_path in MODELS_WITH_THINKING:
+            kwargs["enable_thinking"] = self.config.cot
+
+        input_ids = self.tokenizer.apply_chat_template(
+            [
+                {"role": msg.role, "content": msg.content}
+                for msg in convo.messages[:-1]
+            ],
+            add_generation_prompt=True,
+            return_tensors="pt",
+            chat_template=MODEL_TO_CHAT_TEMPLATE.get(self.tokenizer.name_or_path, None),
+            **kwargs,
+        )
+
+        return GenerateEvalDatasetElement(
+            input_ids=input_ids,    
+            prompt=convo.messages[-2].content,
+            answer=convo.messages[-1].content,
+            convo_id=str(index),
+            metadata={"idx": index}
+        )
+    
+    def __len__(self):
+        return len(self.data)
+
+        
         

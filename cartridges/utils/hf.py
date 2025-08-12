@@ -35,7 +35,33 @@ def read_conversations_from_hf(repo_id: str, token: Optional[str] = None) -> lis
     # Download dataset from HuggingFace Hub
     logger.info(f"Downloading dataset from {repo_id}")
 
-    url = f"https://huggingface.co/datasets/{repo_id}/resolve/main/data/train-00000-of-00001.parquet"
+    # Try to download all shards by first checking what's available
+    try:
+        from huggingface_hub import HfApi
+        api = HfApi()
+        repo_files = api.list_repo_files(repo_id, repo_type="dataset", token=token)
+        
+        # Find all parquet files in the data directory
+        parquet_files = [f for f in repo_files if f.startswith("data/") and f.endswith(".parquet")]
+        
+        if not parquet_files:
+            raise ValueError(f"No parquet files found in data/ directory of {repo_id}")
+        
+        # Download and combine all shards
+        all_conversations = []
+        for parquet_file in sorted(parquet_files):
+            url = f"https://huggingface.co/datasets/{repo_id}/resolve/main/{parquet_file}"
+            conversations = read_conversations(url)
+            all_conversations.extend(conversations)
+            logger.info(f"Loaded {len(conversations)} conversations from {parquet_file}")
+        
+        conversations = all_conversations
+        
+    except ImportError:
+        # Fallback to single file if huggingface_hub is not available
+        logger.warning("huggingface_hub not available, falling back to single shard")
+        url = f"https://huggingface.co/datasets/{repo_id}/resolve/main/data/train-00000-of-00001.parquet"
+        conversations = read_conversations(url)
     conversations = read_conversations(url)
     
     logger.info(f"Loaded {len(conversations)} conversations from {repo_id}")

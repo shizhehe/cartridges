@@ -55,8 +55,12 @@ config = SynthesizeConfig(
         entity="hazy-research",
         tags=[f"arxiv_synthesis"],
     ),
+    
     upload_to_wandb=False,
     save_wandb_preview=False,
+    
+    upload_to_hf=True,
+    hf_repo_id="hazyresearch/{wandb_run_id}",
 )
 
 
