@@ -12,21 +12,12 @@
 </div>
 
 
-**What is this?** This repository provides code for training a cartridge, a small KV cache representing amount of textual information. It uses a test-time training recipe called self-study.
+**What is this?** This repository provides code for training a cartridge, a small KV cache that represents a large corpus of textual information. It uses a test-time training recipe called self-study.
 The code is based on our paper *[Cartridges: Lightweight and general-purpose long context representations via self-study](https://arxiv.org/abs/2506.06266)*.
 
 **tl;dr** When we put lots of text (*e.g.* a whole code repo) into a language model's context, generation cost soars because of the KV cache's size. *What if we trained a smaller KV cache for our documents offline?* Using a test-time training recipe called self-study, we show that this simple idea can improve throughput by 
 26× while maintaining quality. (See our [blogpost](https://hazyresearch.stanford.edu/blog/2025-06-08-cartridges) for more.)
 
-
-## Quick Start
-
-**Want to try Cartridges immediately?** Here's the fastest path:
-
-1. **Setup**: `git clone https://github.com/HazyResearch/cartridges && cd cartridges && pip install uv && uv pip install -e .`
-2. **Set environment variables** (see [Setup](#setup) for details)
-3. **Try the example**: `python examples/arxiv/arxiv_synthesize.py` → `python examples/arxiv/arxiv_train.py`
-4. **Chat with your cartridge**: `python -m cartridges.utils.chat <your_wandb_run_id>`
 
 **Table of contents**
 - [Quick Start](#quick-start)
@@ -98,13 +89,11 @@ The config has a couple of key fields missing: the resource, which controls what
 There are many other configuration options we're not covering here, so refer to the [`SynthesizeConfig`](./cartridges/synthesize.py#L10) and [`SelfStudySynthesizer`](./cartridges/synthesizers/self_study.py#L10) for the full list.
 
 ```python
-import pydrantic
-
 from cartridges.synthesize import SynthesizeConfig
 from cartridges.synthesizers.self_study import SelfStudySynthesizer
 
-resource_config = ...  # see 'Step 2: Configure Resources'
-client_config = ...  # see 'Step 3: Prepare an Inference Server'
+resource_config = ...  # see 'Step 1.1: Configure Resources'
+client_config = ...  # see 'Step 1.2: Prepare an Inference Server'
 
 config = SynthesizeConfig(
     synthesizer=SelfStudySynthesizer.Config(
@@ -116,6 +105,8 @@ config = SynthesizeConfig(
 )
 
 if __name__ == "__main__": 
+    # library that allows us to override the Pydantic configs from the command line
+    import pydrantic  
     pydrantic.main([config])
 ```
 
@@ -261,7 +252,7 @@ You can update the config on the command line like `python examples/arxiv/arxiv_
 
 Once the run is complete, it will save the results to a pickle file and print the path:
 ```bash
->>> Final output saved to /path/to/output/dir/artifact/dataset.pkl
+>>> Final output saved to /path/to/output/dir/artifact/dataset.parquet
 ```
 Copy this path to your clipboard. See [`TrainingExample`](./cartridges/structs.py#L10) for the schema of the output.
 
