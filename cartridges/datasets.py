@@ -1,22 +1,25 @@
-from collections import defaultdict
+from __future__ import annotations
+import os
+from typing import Dict, List, Literal, Optional, Any
+from abc import abstractmethod
+from collections import deque
+import json
 import pickle
-import pyarrow as pa
 from pathlib import Path
 import random
-import pandas as pd
-from torch.utils.data import Dataset
 from dataclasses import dataclass
-from typing import Dict, List, Literal, Optional, Any
+
+from torch.utils.data import Dataset
 import torch
-import os
-
 from transformers import PreTrainedTokenizerFast
-from pydrantic import ObjectConfig
+from pydrantic import ObjectConfig, BaseConfig
+import numpy as np
 
-from cartridges.context import StructuredContext
-from cartridges.structs import TrainingExample
-from torch.utils.data import BatchSampler, Sampler
-from cartridges.utils import get_logger, wandb
+from cartridges.structs import Conversation, read_conversations
+from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE, MODELS_WITH_THINKING
+from cartridges.utils import get_logger
+from cartridges.utils.hf import read_conversations_from_hf
+from cartridges.utils.wandb import read_conversations_from_wandb
 
 # SE(04/02): required to silence tokenizer warnings when using dataloders with
 # multiple worker processes
@@ -31,24 +34,6 @@ END_HEADER_ID = 128007
 USER_TOKEN_ID = 882
 ASSISTANT_TOKEN_ID = 78191
 
-# SE (03/08): We need to add {% generation %} to the template to get it to work
-# with `return_assistant_tokens_mask=True`.
-# Tested that the template is equivalent in scratch/sabri/m03d08_dev_tokenizer_tempalte.ipynb
-# RE(03/15): there were a few things that were not equivalent.
-TEMPLATE = """\
-{%- for message in messages %}
-    {%- if  (message.role == 'assistant') %}
-        {{- '<|start_header_id|>' + message['role'] + '<|end_header_id|>\n\n' }}{% generation %}{{- message['content'] | trim + '<|eot_id|>' }}{% endgeneration %}
-
-    {%- else %}
-        {{- '<|start_header_id|>' + message['role'] + '<|end_header_id|>\n\n'+ message['content'] | trim + '<|eot_id|>' }}
-        
-    {%- endif %}
-{%- endfor %}
-{%- if add_generation_prompt %}
-    {{- '<|start_header_id|>assistant<|end_header_id|>\n\n' }}
-{%- endif %}
-"""
 
 
 @dataclass
@@ -67,198 +52,362 @@ class TokenCounts:
             num_assistant_tokens=self.num_assistant_tokens + other.num_assistant_tokens,
         )
 
+def _base_convert_messages_to_element_retokenize(
+    messages: List[Conversation.Message],
+    tokenizer: PreTrainedTokenizerFast,
+    message_start_tokens: dict[str, list[int]],
+    message_end_tokens: dict[str, list[int]],
+    message_extra_end_tokens: dict[str, list[int]],
+) -> DatasetElement:
+    input_ids, topk_token_ids, topk_logprobs, topk_token_idxs = [], [], [], []
+    token_counts = TokenCounts()
+
+    for i, message in enumerate(messages):
+        token_ids = tokenizer.encode(message.content, add_special_tokens=False)
+        token_ids += message_end_tokens[message.role] + message_extra_end_tokens[message.role]
+        msg_input_ids = message_start_tokens[message.role] + token_ids
+
+        if message.role == "assistant":
+            topk_token_ids.append(token_ids)
+            topk_logprobs.append(np.zeros(len(token_ids), dtype=np.float16))
+            topk_token_idxs.append(np.arange(len(token_ids), dtype=np.int32) + len(input_ids) + len(message_start_tokens[message.role]))
+
+        input_ids.extend(msg_input_ids)
+    
+        # FIXME: this is broken in the case that we truncate the input ids
+        token_counts += TokenCounts(
+            num_system_and_user_tokens=len(input_ids) if message.role == "user" else 0,
+            num_assistant_tokens=len(input_ids) if message.role == "assistant" else 0,
+        )
+
+    return DatasetElement(
+        input_ids=torch.tensor(input_ids, dtype=torch.long),
+        topk_token_ids=torch.from_numpy(np.concatenate(topk_token_ids)),
+        topk_logprobs=torch.from_numpy(np.concatenate(topk_logprobs)),
+        topk_token_idxs=torch.from_numpy(np.concatenate(topk_token_idxs)),
+        metadata=[],
+        token_counts=token_counts,
+    )
+
+
+
+def _base_convert_messages_to_element(
+    messages: List[Conversation.Message],
+    message_start_tokens: dict[str, list[int]],
+    message_end_tokens: dict[str, list[int]],
+    message_extra_end_tokens: dict[str, list[int]],
+    tokenizer: PreTrainedTokenizerFast,
+) -> DatasetElement:
+    input_ids, topk_token_ids, topk_logprobs, topk_token_idxs = [], [], [], []
+    token_counts = TokenCounts()
+
+    for i, message in enumerate(messages):
+        if message.token_ids is None:
+            # Some synthesizers may not return token ids for some messages, in which case
+            # we actually need to do the retokenization. 
+            msg_token_ids = tokenizer.encode(message.content, add_special_tokens=False)
+        else:
+            msg_token_ids = list(message.token_ids)
+        msg_input_ids = message_start_tokens[message.role] + msg_token_ids
+        
+        end_tokens = message_end_tokens[message.role]
+        # usually, messages will end with some tokenizer-specific "end" token(s) (e.g. <|endoftext|>)
+        ends_with_eot = len(msg_input_ids) >= len(end_tokens) and msg_input_ids[-len(end_tokens):] == end_tokens
+        if (not ends_with_eot and i < len(messages) - 1):
+            # (1) if it does not, this means that the generation hit the max token limit. In 
+            # this case, if we're not the last message in the conversation, we add the end 
+            # tokens in, so that the next message starts with the correct tokens.
+            # Otherwise, we can just leave it as is.
+            msg_input_ids += end_tokens + message_extra_end_tokens[message.role]
+        elif ends_with_eot and i < len(messages) - 1:
+            # (2) if it does end with the eot tokens, then we need to add the extra end 
+            # then we just need to add any extra end tokens that come after the 
+            # eot tokens and before the next message starts.
+            msg_input_ids += message_extra_end_tokens[message.role]
+        elif ends_with_eot and i == len(messages) - 1:
+            # (3) if we're the last message in the 
+            # conversation, then we don't need to add anything.
+            pass
+
+        if message.top_logprobs is not None:
+            topk_token_ids.append(message.top_logprobs.token_id)
+            topk_logprobs.append(message.top_logprobs.logprobs)
+            topk_token_idxs.append(message.top_logprobs.token_idx + len(input_ids) + len(message_start_tokens[message.role]))
+
+        input_ids.extend(msg_input_ids)
+    
+        # FIXME: this is broken in the case that we truncate the input ids
+        token_counts += TokenCounts(
+            num_system_and_user_tokens=len(input_ids) if message.role == "user" else 0,
+            num_assistant_tokens=len(input_ids) if message.role == "assistant" else 0,
+        )
+
+    return DatasetElement(
+        input_ids=torch.tensor(input_ids, dtype=torch.long),
+        topk_token_ids=torch.from_numpy(np.concatenate(topk_token_ids)),
+        topk_logprobs=torch.from_numpy(np.concatenate(topk_logprobs)),
+        topk_token_idxs=torch.from_numpy(np.concatenate(topk_token_idxs)),
+        metadata=[],
+        token_counts=token_counts,
+    )
+
+def qwen_messages_to_element(
+    messages: List[Conversation.Message],
+    retokenize: bool = False,
+    tokenizer: PreTrainedTokenizerFast | None = None,
+) -> DatasetElement:
+    fn = _base_convert_messages_to_element_retokenize if retokenize else _base_convert_messages_to_element
+
+    return fn(
+        messages,
+        tokenizer=tokenizer,
+        message_start_tokens={
+            "user": [151644, 872,198],
+            "assistant": [151644, 77091,198],
+        },
+        message_end_tokens={
+            "user": [151645],
+            "assistant": [151645],
+        },
+        message_extra_end_tokens={
+            "user": [198],
+            "assistant": [198],
+        },
+    )
+
+def llama3_messages_to_element(
+    messages: List[Conversation.Message],
+    retokenize: bool = False,
+    tokenizer: PreTrainedTokenizerFast | None = None,
+) -> DatasetElement:
+    fn = _base_convert_messages_to_element_retokenize if retokenize else _base_convert_messages_to_element
+
+    return fn(
+        messages,
+        tokenizer=tokenizer,
+        message_start_tokens={
+            # "<|start_header_id|>", "user", "<|end_header_id|>", "\n\n"
+            "user": [128006, 882, 128007, 271],
+            # "<|start_header_id|>", "assistant", "<|end_header_id|>", "\n\n"
+            "assistant": [128006, 78191, 128007, 271],
+        },
+        message_end_tokens={
+            # "<|eot_id|>"
+            "user": [128009],
+            "assistant": [128009],
+        },
+        message_extra_end_tokens={
+            "user": [],
+            "assistant": [],
+        },
+    )
+
+def llama2_messages_to_element(
+    messages: List[Conversation.Message],
+    retokenize: bool = False,
+    tokenizer: PreTrainedTokenizerFast | None = None,
+) -> DatasetElement:
+    fn = _base_convert_messages_to_element_retokenize if retokenize else _base_convert_messages_to_element
+
+    return fn(
+        messages,
+        tokenizer=tokenizer,
+        message_start_tokens={
+            # "<|start_header_id|>", "user", "<|end_header_id|>", "\n\n"
+            "user": [128006, 882, 128007, 271],
+            # "<|start_header_id|>", "assistant", "<|end_header_id|>", "\n\n"
+            "assistant": [128006, 78191, 128007, 271],
+        },
+        message_end_tokens={
+            # "<|eot_id|>"
+            "user": [128009],
+            "assistant": [128009],
+        },
+        message_extra_end_tokens={
+            "user": [],
+            "assistant": [],
+        },
+    )
+
+MODEL_TO_MESSAGE_CONVERTER = {
+    "Qwen/Qwen3-0.6b": qwen_messages_to_element,
+    "Qwen/Qwen3-1.7b": qwen_messages_to_element,
+    "Qwen/Qwen3-4b": qwen_messages_to_element,
+    "Qwen/Qwen3-8b": qwen_messages_to_element,
+    "Qwen/Qwen3-14b": qwen_messages_to_element,
+    "Qwen/Qwen3-32b": qwen_messages_to_element,
+    "meta-llama/Llama-3.1-8B-Instruct": llama3_messages_to_element,
+    "meta-llama/Llama-3.2-3B-Instruct": llama3_messages_to_element,
+    "meta-llama/Llama-3.2-1B-Instruct": llama3_messages_to_element,
+    "meta-llama/Llama-2-7b-chat-hf": llama2_messages_to_element,
+}
+MODEL_TO_MESSAGE_CONVERTER = {k.lower(): v for k, v in MODEL_TO_MESSAGE_CONVERTER.items()}
+
 
 @dataclass
-class CartridgeDatasetElementLogitLabels:
+class DatasetElement:
     input_ids: torch.Tensor
-    
 
-    topk_logprobs: torch.Tensor
-    topk_tokens: torch.Tensor
-
-    mask: torch.Tensor
     metadata: list[dict[str, Any]]
     token_counts: TokenCounts
-    
-    context_ids: torch.Tensor|None = None
-    context_mask: torch.Tensor|None = None
 
+    topk_logprobs: Optional[torch.Tensor] = None
+    topk_token_ids: Optional[torch.Tensor] = None
+    topk_token_idxs: Optional[torch.Tensor] = None
 
 @dataclass
-class CartridgeDatasetBatchLogitLabels:
+class DatasetBatch:
     input_ids: torch.Tensor
+    element_ids: torch.Tensor
+    position_ids: torch.Tensor
 
-    topk_logprobs: torch.Tensor
-    topk_tokens: torch.Tensor
-
-    mask: torch.Tensor
     metadata: list[dict[str, Any]]
     token_counts: TokenCounts
     loss_weight: Optional[torch.Tensor] = None
-    context_ids: Optional[torch.Tensor] = None
-    context_mask: Optional[torch.Tensor] = None
-    
-@dataclass
-class CartridgeDatasetElementTokenLabels:
-    input_ids: torch.Tensor
-    labels: torch.Tensor
-    metadata: dict[str, Any]
-    token_counts: List[TokenCounts]
-    mask: torch.Tensor
 
-
-@dataclass
-class CartridgeDatasetBatchTokenLabels:
-    input_ids: torch.Tensor
-    labels: torch.Tensor
-    metadata: list[dict[str, Any]]
-    token_counts: List[TokenCounts]
-    mask: torch.Tensor
+    topk_logprobs: Optional[torch.Tensor] = None
+    topk_token_ids: Optional[torch.Tensor] = None
+    topk_token_idxs: Optional[torch.Tensor] = None
 
 
 def msg(content, role: Literal["user"] | Literal["assistant"] | Literal["system"]):
     return {"content": content, "role": role}
 
 
-SENTINEL_MESSAGE = "sentinel"
+class DataSource(BaseConfig):
+    path: str
+    type: Literal["local", "wandb", "hf"]
+    limit: int | None = None
+
+def _prepare_data_source(source: str | DataSource) -> list[Conversation]:
+    if isinstance(source, str):
+        is_local = ".pkl" in source or ".parquet" in source
+        source = DataSource(path=source, type="local" if is_local else "wandb")
+    
+    if source.type == "local":
+        data = read_conversations(source.path)
+    elif source.type == "wandb":
+        data = read_conversations_from_wandb(source.path)
+    elif source.type == "hf":
+        data = read_conversations_from_hf(source.path)
+    else:
+        raise ValueError(f"Unsupported data source type: {source.type}")
+
+    return data[:source.limit] if source.limit is not None else data
 
 
-@dataclass
-class TokenData:
-    token_id: int
-    top_tokens: list[int]
-    top_logprobs: list[float]
-    apply_loss: bool
+class TrainDataset(Dataset):
+    """ This dataset 
 
+    - In "truncate" mode, if adding an element to the current batch would exceed the `seq_length`, the element 
+    is added to a new batch instead. However, if an individual element's sequence length exceeds `seq_length`, 
+    it is forced to be truncated and added to a new batch on its own.
+    
+    - In "pad" mode, elements are added to the current batch until adding another would exceed `seq_length`. 
+    The current batch is then finalized, and a new batch is started. The final batch is padded to ensure 
+    consistent batch sizes.
 
-class CartridgeTrainDataset(Dataset):
+    Args:
+        packing_mode (Literal["truncate", "pad"]): The mode of operation for batching, either "truncate" or "pad".
+        packed_seq_length (int): The maximum allowed sequence length for each batch.
+        shuffle (bool): Whether to shuffle the batches. Currently, only shuffling is supported.
+    """
+
     class Config(ObjectConfig):
         _pass_as_config = True
-        data_sources: list[tuple[str, int | None],]  # path, limit
-        max_sequence_length: int | None = None
+        data_sources: list[str | DataSource]  
         is_wandb: bool = False
-        label_type: Literal["tokens"] | Literal["logits"] | Literal["online"]
         top_k_logits: int = 20
-        dataset_weights: Optional[list[float]] = None
+        targets: Literal["logits", "tokens"] = "logits"
+
+        packing_mode: Literal["truncate", "pad"]="pad"
+        packed_seq_length: int = 2048
+
         user_prompt_prefix: list[str] | None = None
-        # system_prompt: str | None = None
 
-    data: list[TrainingExample]
-    context: StructuredContext
 
-    def __init__(self, config: Config, tokenizer: PreTrainedTokenizerFast):
+    def __init__(self, config: Config, tokenizer: PreTrainedTokenizerFast, seed: int):
 
         self.config = config
-
-        self.data = []
-        self.datasets = []
-        context = None
-
-        for source, limit in config.data_sources:
-            if source.endswith(".pkl"):
-                pkl_path = source
-                if not Path(pkl_path).exists():
-                    modal_pkl_path = os.path.join("/root/Cartridges-datasets", os.path.relpath(source, "/"))
-                    if not Path(modal_pkl_path).exists():
-                        raise FileNotFoundError(f"File {source} not found either locally or in modal")
-                    pkl_path = modal_pkl_path
-
-            else:
-                dataset_dir = (
-                    wandb.get_artifact_dir(source) / "dataset"
-                    if config.is_wandb
-                    else Path(source)
-                )
-
-                if not dataset_dir.exists():
-                    wandb.download_artifact(source)
-                pkl_path = dataset_dir / "dataset.pkl"
-
-            with open(pkl_path, "rb") as f:
-                data_dict = pickle.load(f)
-            assert data_dict.keys() == {"rows", "context"}
-
-            self.data += data_dict["rows"][:limit]
-            if context is None:
-                context = data_dict["context"]
-
-        assert context is not None
-        self.context = context
-
         self.tokenizer = tokenizer
+        
+        self.elements: List[DatasetElement] = self._prepare_elements()
+        # each batch is a list of element indices
+        self.batches: List[List[int]] = self._prepare_batches(seed=seed)  
+
+    def _prepare_elements(self) -> list[DatasetElement]:
+        data = []
+        for source in self.config.data_sources:
+            data.extend(_prepare_data_source(source))
+
+        elements = []
+        for row in data:
+            elements.append(MODEL_TO_MESSAGE_CONVERTER[self.tokenizer.name_or_path.lower()](
+                row.messages,
+                retokenize=self.config.targets == "tokens",
+                tokenizer=self.tokenizer,
+            ))
+
+        return elements
     
-    def _getitem_tokens(
-        self,
-        index: int,
-        row: TrainingExample,
-    ) -> CartridgeDatasetElementTokenLabels:
-        token_ids = torch.tensor(row.token_ids)
-        input_ids = token_ids
-        token_labels = token_ids
+    def _prepare_batches(self, seed: int) -> List[List[int]]:
+        """
+        This function attempts to create batches of dataset elements such that the total sequence length of each batch 
+        does not exceed a specified limit (`seq_length`). The batching process can operate in two modes: "truncate" 
+        and "pad". 
 
-        mask = torch.ones_like(input_ids, dtype=torch.bool)
-        # SE(04/03): need to ensure that this is a boolean mask
-        assert mask.dtype == torch.bool
+        Note that this function does not actually handle the truncation or padding, this is left to the collate function.
+        Which is applied the fly in the dataloader worker. 
+        """
+        batches = [] 
+        elem_idxs = random.Random(seed).sample(range(len(self.elements)), len(self.elements))
+        queue = deque(elem_idxs)
 
-        token_counts = TokenCounts(
-            num_system_and_user_tokens=(~mask).sum(),
-            num_assistant_tokens=mask.sum(),
-        )
-        return CartridgeDatasetElementTokenLabels(
-            input_ids=input_ids,
-            labels=token_labels,
-            metadata=[],
-            token_counts=token_counts,
-            mask=mask,
-        )
+        curr_batch, curr_seq_len = [], 0
+        while queue:
+            idx = queue[0]
+            elem: DatasetElement = self._get_element(idx)
+            
+            if curr_seq_len == 0 and len(elem.input_ids) > self.config.packed_seq_length:
+                # if the current element is by itself longer than the sequence length,
+                # then the only option is to truncate it. So we just add it to the batch
+                # and start a new batch.
+                curr_batch.append(queue.popleft())
+                batches.append(curr_batch)
+                curr_batch, curr_seq_len = [], 0
+            elif curr_seq_len + len(elem.input_ids) > self.config.packed_seq_length:
+                # when the current batch would be too long if we add the current element,
+                # if we are in truncate mode, then we just add the current element to the batch
+                # and start a new batch. Otherwise, we just start a new batch.
+                if self.config.packing_mode == "truncate":
+                    curr_batch.append(queue.popleft())
+                batches.append(curr_batch)
+                curr_batch, curr_seq_len = [], 0
+            else:
+                # otherwise, we just add the current element to the batch and continue
+                curr_batch.append(queue.popleft())
+                curr_seq_len += len(elem.input_ids)
+        
+        if curr_batch:
+            # need to add the last batch
+            batches.append(curr_batch)
+        
+        return batches
 
     def __len__(self):
-        return len(self.data)
+        return len(self.batches)
+    
+    def _get_element(self, elem_idx: int) -> DatasetElement:
+        return self.elements[elem_idx]
+    
+    def _get_batch(self, batch_idx: int):
+        elem_idxs = self.batches[batch_idx]
+        elements = [self._get_element(elem_idx) for elem_idx in elem_idxs]
+        return self.collate(elements)
 
-    def __getitem__(self, index: int) -> CartridgeDatasetElementLogitLabels:
-        row = self.data[index]
-        if self.config.label_type == "tokens":
-            return self._getitem_tokens(index, row)
-
-        assert isinstance(row, TrainingExample)
+    def __getitem__(self, index: int) -> DatasetBatch:
+        return self._get_batch(index)
         
-        # truncate the input ids
-        if (
-            self.config.max_sequence_length is not None
-            and len(row.token_ids) > self.config.max_sequence_length
-        ):
-            row.token_ids = row.token_ids[:self.config.max_sequence_length + 1]
-            row.top_logprob_ids = row.top_logprob_ids[:self.config.max_sequence_length]
-            row.top_logprob_logprobs = row.top_logprob_logprobs[:self.config.max_sequence_length]
-
-        element = CartridgeDatasetElementLogitLabels(
-            input_ids=torch.from_numpy(row.token_ids[:-1]),
-            topk_tokens=torch.from_numpy(row.top_logprob_ids),
-            topk_logprobs=torch.from_numpy(row.top_logprob_logprobs),
-            mask=torch.full_like(torch.from_numpy(row.token_ids[:-1]), True),
-            metadata=[],
-            
-            # FIXME: this is broken in the case that we truncate the input ids
-            token_counts=TokenCounts(
-                # -1 because we last token is jut output (not input)
-                num_assistant_tokens=row.num_output_tokens - 1,
-                num_system_and_user_tokens=len(row.token_ids)
-                - row.num_output_tokens
-                - 1,
-            ),
-        )
-
-        assert len(element.topk_logprobs.shape) == 2
-        assert element.topk_logprobs.shape == element.topk_tokens.shape
-        assert element.topk_logprobs.shape[1] == self.config.top_k_logits
-
-        assert len(element.input_ids.shape) == 1
-        assert element.input_ids.shape == element.mask.shape
-
-        assert element.topk_logprobs.shape[0] == element.input_ids.shape[0]
-
-        return element
-
     def reload(self):
         # Check if dataset has data_source_indices attribute
         if hasattr(self, "data_source_indices") and self.data_source_indices:
@@ -273,127 +422,106 @@ class CartridgeTrainDataset(Dataset):
 
     def collate(
         self,
-        batch: (
-            list[CartridgeDatasetElementLogitLabels]
-            | list[CartridgeDatasetElementTokenLabels]
-        ),
-    ) -> CartridgeDatasetBatchLogitLabels | CartridgeDatasetBatchTokenLabels:
+        batch: list[DatasetElement]
+    ) -> DatasetBatch:
         """
-        Collate a list of dataset elements into a batch.
-
-        Args:
-            batch: A list of dataset elements, either logit labels or token labels
-
-        Returns:
-            A batch object containing the batched input_ids, labels, and mask (for logit labels)
-
-        Raises:
-            ValueError: If the batch contains mixed element types
+        Collate a list of dataset elements into a single sequence of length `self.config.packed_seq_length`.
+        The elements are packed into a single sequence 
         """
-        # TODO: get rid of this hack
-        # batch = [i for i in batch if i is not None]
         if not batch:
             raise ValueError("Empty batch provided to collate function")
 
-        # Ensure all elements are of the same type
-        first_element_type = type(batch[0])
-        if not all(isinstance(element, first_element_type) for element in batch):
-            raise ValueError(
-                f"All elements in the batch must be of the same type. "
-                f"Expected {first_element_type.__name__}, but found mixed types."
-            )
+        input_ids, element_ids, position_ids = [], [], []
+        topk_token_ids, topk_logprobs, topk_token_idxs = [], [], []
+        metadatas = []
+        token_counts = TokenCounts()
+        curr_token_idx = 0
+        for element_id, element in enumerate(batch):
+            input_ids.append(element.input_ids)
+            element_ids.append(torch.full_like(element.input_ids, element_id, dtype=torch.long))
+            position_ids.append(torch.arange(len(element.input_ids), dtype=torch.long))
+            topk_token_ids.append(element.topk_token_ids)
+            topk_logprobs.append(element.topk_logprobs)
+            topk_token_idxs.append(element.topk_token_idxs + curr_token_idx)
+            metadatas.append(element.metadata)
+            token_counts += element.token_counts
+            curr_token_idx += len(element.input_ids)
+        
+        input_ids = torch.cat(input_ids, dim=0)
+        element_ids = torch.cat(element_ids, dim=0)
+        position_ids = torch.cat(position_ids, dim=0)
+        topk_token_ids = torch.cat(topk_token_ids, dim=0)
+        topk_logprobs = torch.cat(topk_logprobs, dim=0)
+        topk_token_idxs = torch.cat(topk_token_idxs, dim=0)
 
-        # Copy over input IDs
-        max_len = max(element.input_ids.size(0) for element in batch)
-        batch_size = len(batch)
-        input_ids = torch.full((batch_size, max_len), EOS_TOKEN_ID, dtype=torch.long)
-        metadata = [elem.metadata for elem in batch]
-        token_counts = [elem.token_counts for elem in batch]
+        if len(input_ids) > self.config.packed_seq_length:
+            # if the input ids are longer than the sequence length, 
+            # we need to truncate them
+            input_ids = input_ids[:self.config.packed_seq_length]
+            element_ids = element_ids[:self.config.packed_seq_length]
+            position_ids = position_ids[:self.config.packed_seq_length]
 
-        # Determine the batch type based on the first element
-        if isinstance(batch[0], CartridgeDatasetElementTokenLabels):
-            # Create tensors to hold the batched data
-            labels = torch.full(
-                (batch_size, max_len), -100, dtype=torch.long
-            )  # -100 is ignored in loss calculation
+            # we also need to filter out any targets that are from the truncated part of
+            # the input ids
+            mask = topk_token_idxs < self.config.packed_seq_length
+            topk_token_ids = topk_token_ids[mask]
+            topk_logprobs = topk_logprobs[mask]
+            topk_token_idxs = topk_token_idxs[mask]
 
-            mask = torch.zeros_like(input_ids, dtype=torch.bool)
+        elif len(input_ids) < self.config.packed_seq_length:
+            # if the input ids are shorter than the sequence length, we need to pad them
+            # it is critical that the sequence length stays constant to avoid 
+            # flex attention recompiles.
+            padding = torch.full((self.config.packed_seq_length - len(input_ids),), 0, dtype=torch.long)
+            input_ids = torch.cat([input_ids, padding])
+            element_ids = torch.cat([element_ids, padding])
+            position_ids = torch.cat([position_ids, padding])
 
-            for i, element in enumerate(batch):
-                assert isinstance(element, CartridgeDatasetElementTokenLabels)
-                seq_len = element.input_ids.shape[0]
-                input_ids[i, :seq_len] = element.input_ids
-                labels[i, : element.input_ids.shape[0]] = element.labels
-                mask[i, :seq_len] = element.mask
-
-            return CartridgeDatasetBatchTokenLabels(
-                input_ids,
-                labels,
-                metadata=metadata,
-                token_counts=token_counts,
-                mask=mask,
-            )
-
-        try:
-            assert isinstance(batch[0], CartridgeDatasetElementLogitLabels)
-        except:
-            breakpoint()
-
-        mask = torch.zeros_like(input_ids, dtype=torch.bool)
-        k = batch[0].topk_tokens.shape[-1]
-
-        topk_tokens = torch.full(
-            (batch_size, max_len, k),
-            fill_value=EOS_TOKEN_ID,
-            dtype=torch.long,
-        )
-        topk_logprobs = torch.full(
-            (batch_size, max_len, k),
-            fill_value=-k,  # HACK: prevent overflows
-            dtype=torch.float,
-        )
-
-        # Fill the tensors with data from each element
-        for i, element in enumerate(batch):
-            assert isinstance(element, CartridgeDatasetElementLogitLabels)
-
-            assert element.topk_tokens.shape == element.topk_logprobs.shape
-            assert len(element.topk_tokens.shape) == 2
-
-            seq_len = element.input_ids.shape[0]
-
-            input_ids[i, :seq_len] = element.input_ids
-            topk_tokens[i, :seq_len] = element.topk_tokens
-            topk_logprobs[i, :seq_len] = element.topk_logprobs
-            mask[i, :seq_len] = element.mask
-
-        loss_weight = None
-        if (
-            hasattr(self, "data_source_indices")
-            and len(self.data_source_indices) > 0
-            and len(self.data_source_indices) >= len(batch)
-        ):
-            loss_weight = torch.ones_like(input_ids, dtype=torch.float)
-            for i, element in enumerate(batch):
-                seq_len = element.input_ids.shape[0]
-                dataset_idx = self.data_source_indices[i]
-                loss_weight[i, :seq_len] = (
-                    self.dataset_weights[dataset_idx]
-                    if hasattr(self, "dataset_weights")
-                    else 1.0
-                )
-        return CartridgeDatasetBatchLogitLabels(
+        return DatasetBatch(
             input_ids=input_ids,
-            topk_tokens=topk_tokens,
+            element_ids=element_ids,
+            position_ids=position_ids,
+            topk_token_ids=topk_token_ids,
             topk_logprobs=topk_logprobs,
-            mask=mask,
-            loss_weight=loss_weight,
-            metadata=metadata,
+            topk_token_idxs=topk_token_idxs,
+            metadata=metadatas,
             token_counts=token_counts,
         )
 
+class LossEvalDataset(TrainDataset):
+    class Config(ObjectConfig):
+        _pass_as_config = True
+        
+        # path to a file containing conversations 
+        # accepted formats are: *.jsonl, *.parquet, *.pkl, a wandb artifact id, or a huggingface repo id
+        data_source: str | DataSource
+
+        is_wandb: bool = False
+        targets: Literal["tokens"] = "tokens"
+
+        packing_mode: Literal["truncate", "pad"]="pad"
+        packed_seq_length: int = 2048
+
+        user_prompt_prefix: list[str] | None = None
+
+
+    def _prepare_elements(self) -> list[Conversation]:
+        data: list[Conversation] = []
+        data = _prepare_data_source(self.config.data_source)
+
+        elements = []
+        for row in data:
+            elements.append(MODEL_TO_MESSAGE_CONVERTER[self.tokenizer.name_or_path.lower()](
+                row.messages,
+                retokenize=self.config.targets == "tokens",
+                tokenizer=self.tokenizer,
+            ))
+        
+        return elements
+    
+
 @dataclass
-class CartridgeGenerateDatasetElement:
+class GenerateEvalDatasetElement:
     input_ids: torch.Tensor
     prompt: str
 
@@ -405,75 +533,52 @@ class CartridgeGenerateDatasetElement:
     # are structured as prior messages
     prompt_messages: Optional[List[Dict[str,str]]] = None
 
-class CartridgeGenerateDataset(CartridgeTrainDataset):
+class GenerateEvalDataset(Dataset):
     class Config(ObjectConfig):
         _pass_as_config = True
-        data_sources: list[tuple[str, int | None],]  # path, limit
-        is_wandb: bool = False
-        label_type: Literal["tokens"] | Literal["logits"]
-        top_k_logits: int = 20
-        dataset_weights: Optional[list[float]] = None
-        user_prompt_prefix: list[str] | None = None
-        # system_prompt: str | None = None
 
-    def __getitem__(self, index: int) -> CartridgeGenerateDatasetElement:
-        convo: ContextConvo = self.data[index]
+        data_source: str | DataSource
+        cot: bool = False
+    
+    def __init__(self, config: Config, tokenizer: PreTrainedTokenizerFast, seed: int):
+        self.config = config
+        self.tokenizer = tokenizer
+        self.seed = seed
 
-        prompt = convo.messages[0].content
+        self.data: list[Conversation] = _prepare_data_source(self.config.data_source)
+
+    @abstractmethod
+    def __getitem__(self, index: int) -> GenerateEvalDatasetElement:
+        convo: Conversation = self.data[index]
+        assert len(convo.messages) > 1, "Conversation must have at least 2 messages"
+        assert convo.messages[-1].role == "assistant", "Last message must be assistant"
+
+
+        kwargs = {}
+        if self.tokenizer.name_or_path in MODELS_WITH_THINKING:
+            kwargs["enable_thinking"] = self.config.cot
 
         input_ids = self.tokenizer.apply_chat_template(
-            (
-                # [{"role": "system", "content": self.config.system_prompt}]
-                # if self.config.system_prompt is not None
-                # else []
-                []
-            )
-            + [{"role": "user", "content": prompt}],
+            [
+                {"role": msg.role, "content": msg.content}
+                for msg in convo.messages[:-1]
+            ],
             add_generation_prompt=True,
             return_tensors="pt",
-            chat_template=TEMPLATE,
+            chat_template=MODEL_TO_CHAT_TEMPLATE.get(self.tokenizer.name_or_path, None),
+            **kwargs,
         )
 
-        return CartridgeGenerateDatasetElement(
-            input_ids=input_ids,
-            prompt=prompt,
-            answer=convo.messages[1].content,
-            convo_id=convo.id,
-            metadata={
-                "idx": index,
-            },
+        return GenerateEvalDatasetElement(
+            input_ids=input_ids,    
+            prompt=convo.messages[-2].content,
+            answer=convo.messages[-1].content,
+            convo_id=str(index),
+            metadata={"idx": index}
         )
-
-
-class CartridgeDatasetBatchSampler(BatchSampler):
-    def __init__(
-        self, 
-        sampler: Sampler,
-        dataset: CartridgeTrainDataset,
-        batch_size: int, 
-        shuffle: bool = True,
-    ):
-        self.batches = [] 
-        assert shuffle
-        
-        # get lengths of each element 
-        lengths = []
-        for idx in sampler:
-            elem: CartridgeDatasetElementLogitLabels = dataset[idx]
-            lengths.append((len(elem.input_ids), idx))
-        sorted_idxs = sorted(lengths, key=lambda x: x[0])
-
-        self.idx_batches = [
-            [idx for _, idx in sorted_idxs[i:i + batch_size]] 
-            for i in range(0, len(sorted_idxs), batch_size) 
-        ]
-        
-        random.shuffle(self.idx_batches)
     
-    def __iter__(self):
-        for batch_idxs in self.idx_batches:
-            yield batch_idxs
-
     def __len__(self):
-        return len(self.idx_batches)
+        return len(self.data)
 
+        
+        

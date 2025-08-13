@@ -16,23 +16,17 @@ dependencies = [
     "einops",
     "tqdm",
     "wandb",
-    "ipykernel",
     "pydrantic",
     "tiktoken",
-    "together",
     "peft",
-    "matplotlib",
-    "pymupdf",
-    "pymupdf4llm",
-    "anthropic",
     "evaluate",
+    "markdown"
 ]
 
 [project.scripts]
 pdr = "pdr.cli:main"
 
-[tool.pyright]
-include = ["cartridges"]
+
 
 [tool.setuptools]
 packages = ["cartridges", "scripts"]

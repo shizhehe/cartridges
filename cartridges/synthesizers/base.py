@@ -1,31 +1,16 @@
 import abc
 from pydrantic import ObjectConfig
 
-from cartridges.structs import TrainingExample
-from cartridges.context import StructuredContext
-
-import numpy as np
+from cartridges.structs import Conversation
 
 
-class ConvoSynthesizer(abc.ABC):
+class AsyncConvoSynthesizer(abc.ABC):
 
     class Config(ObjectConfig):
         _pass_as_config: bool = True
 
-    def __init__(self, config: Config, context:  StructuredContext):
+    def __init__(self, config: Config):
         self.config = config
-        self.context = context
-
-    @abc.abstractmethod
-    def sample_convos(
-        self,
-        batch_idx: int,
-        num_convos: int,
-        total_batches: int,
-    ) -> list[TrainingExample]:
-        raise NotImplementedError()
-
-class AsyncConvoSynthesizer(ConvoSynthesizer):
 
 
     @abc.abstractmethod
@@ -34,5 +19,5 @@ class AsyncConvoSynthesizer(ConvoSynthesizer):
         batch_idx: int,
         num_convos: int,
         total_batches: int,
-    ) -> list[TrainingExample]:
+    ) -> list[Conversation]:
         raise NotImplementedError()

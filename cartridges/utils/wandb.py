@@ -3,13 +3,14 @@ import os
 from pathlib import Path
 import tempfile
 from functools import partial
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Tuple
 
 import concurrent.futures
 from matplotlib.figure import Figure
 import pandas as pd
 import torch
 from tqdm import tqdm
+from transformers import AutoTokenizer
 import wandb
 from pydrantic import BaseConfig
 from pydantic import Field
@@ -17,13 +18,31 @@ from pydantic import Field
 import torch.distributed as dist
 
 
+if TYPE_CHECKING:
+    from cartridges.structs import Conversation
+    from cartridges.train import CacheAndModel
+
+
 class WandBConfig(BaseConfig):
-    project: str = "Cartridges"
+    project: str = "cartridges"
     entity: Optional[str] = None
     name: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     notes: Optional[str] = None
     group: Optional[str] = None
+
+
+def get_default_wandb_config() -> Optional["WandBConfig"]:
+    """Get default WandB config from environment variables if they are set."""
+    project = os.environ.get("CARTRIDGES_WANDB_PROJECT")
+    entity = os.environ.get("CARTRIDGES_WANDB_ENTITY")
+    
+    if project or entity:
+        return WandBConfig(
+            project=project or "cartridges",
+            entity=entity
+        )
+    return None
 
 
 def prepare_wandb(
@@ -132,7 +151,7 @@ def unflatten(d: dict) -> dict:
 
 
 def fetch_wandb_runs(
-    project_name: str = "hazy-research/Cartridges",
+    project_name: str = "hazy-research/cartridges",
     filters: dict = None,
     wandb_run_ids: List[str] = None,
     step: Optional[int] = None,
@@ -223,11 +242,65 @@ def fetch_wandb_runs(
 
     return df, None
 
+def read_conversations_from_wandb(
+    artifact_id: str,
+    versions: Literal["latest", "all"] = "latest",
+    project_name: str = "cartridges",
+    entity: str = "hazy-research",
+) -> list["Conversation"]:
+    """
+    Read conversations from a Weights & Biases artifact containing conversation data.
+
+    Parameters:
+    - artifact_id (str): The ID of the artifact containing conversations. Can include version (e.g., "artifact:v1")
+    - versions (Literal["latest", "all"]): Whether to fetch only the latest version or all versions. Default is "latest".
+    - project_name (str): The name of the W&B project. Default is "cartridges".
+    - entity (str): The W&B entity (username or team name). Default is "hazy-research".
+
+    Returns:
+    - list[Conversation]: A list of Conversation objects loaded from the artifact.
+    """
+    from cartridges.structs import read_conversations
+    # Initialize wandb API
+    api = wandb.Api()
+    
+    # Build full artifact path
+    full_artifact_id = f"{entity}/{project_name}/{artifact_id}"
+    
+    if ":" not in full_artifact_id:
+        # If no version is specified, get the latest version
+        artifact = api.artifact(f"{full_artifact_id}:latest")
+    else:
+        artifact = api.artifact(full_artifact_id)
+    
+    # Download the artifact to a temporary directory
+    artifact_dir = artifact.download(root=tempfile.mkdtemp())
+    
+    # Look for conversation files in the artifact directory
+    conversations = []
+    
+    # Search for parquet or pkl files containing conversations
+    for root, dirs, files in os.walk(artifact_dir):
+        for file in files:
+            file_path = Path(root) / file
+            
+            if file.endswith(".parquet") or file.endswith(".pkl"):
+                try:
+                    file_conversations = read_conversations(str(file_path))
+                    conversations.extend(file_conversations)
+                except Exception as e:
+                    # Skip files that can't be read as conversations
+                    continue
+    
+    if not conversations:
+        raise ValueError(f"No conversation files found in artifact {artifact_id}")
+    
+    return conversations
 
 def fetch_wandb_table(
     artifact_id: str,
     versions: Literal["latest", "all"] = "latest",
-    project_name: str = "Cartridges",
+    project_name: str = "cartridges",
     entity: str = "hazy-research",
 ) -> pd.DataFrame:
     """
@@ -414,3 +487,71 @@ def figure_to_wandb(fig: Figure) -> wandb.Image:
     wandb_img = wandb.Image(pil_img)
     plt.close(fig)
     return wandb_img
+
+def _list_cache_files(run_id: str) -> list[str]:
+    import wandb
+    import re
+
+    api = wandb.Api()
+
+    # Get all files from the run
+    files = [file.name for file in api.run(run_id).files()]
+
+    # Filter for cache-*.pt files using regex
+    cache_files = [file for file in files if re.match(r"^cache-.*\.pt$", file)]
+
+    # Extract the epoch or step number from each cache file and create a mapping
+    file_to_step = {}
+    for file in cache_files:
+        # Try to match both epoch and step patterns
+        match = re.search(r"cache-(epoch|step)(\d+)\.pt", file)
+        if match:
+            step_num = int(match.group(2))
+            file_to_step[file] = step_num
+
+    # Sort the files by their step/epoch number
+    sorted_cache_files = sorted(cache_files, key=lambda x: file_to_step.get(x, 0), reverse=True)
+    return sorted_cache_files
+
+def load_model_and_cache_from_wandb(
+    wandb_run_id: str,
+    filename: Optional[str] = None,
+    device: str = "cuda",
+) -> tuple["CacheAndModel", AutoTokenizer]:
+    from cartridges.train import TrainConfig, CacheAndModel
+    from cartridges.cache import TrainableCache
+
+    is_ddp = "LOCAL_RANK" in os.environ
+    is_rank_zero = (not is_ddp) or (dist.get_rank() == 0)
+
+    train_config = TrainConfig.from_wandb(wandb_run_id, strict=False)
+
+    model = train_config.model.instantiate().to(device)
+    # tokenizer = AutoTokenizer.from_pretrained(train_config.tokenizer)
+
+
+    cache_files = _list_cache_files(wandb_run_id)
+    if len(cache_files) == 0:
+        raise ValueError(f"No cache checkpoints found for wandb run {wandb_run_id}")
+    
+    if filename is not None:
+        assert filename in cache_files, f"Cache file {filename} not found in wandb run {wandb_run_id}"
+    else:
+        filename = cache_files[0]
+    print(f"Loading cache from {filename}")
+
+    if is_rank_zero:
+        out = wandb.restore(
+            filename, run_path=wandb_run_id, root=train_config.run_dir
+        )
+    
+    if is_ddp:
+        dist.barrier()
+
+    cache = TrainableCache.from_pretrained(
+        os.path.join(train_config.run_dir, filename), 
+        device=device
+    )
+
+    return CacheAndModel(cache=cache, model=model)
+

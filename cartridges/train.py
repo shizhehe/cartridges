@@ -1,83 +1,57 @@
 from __future__ import annotations
+from abc import ABCMeta, abstractmethod
 import contextlib
 from dataclasses import dataclass, field
 import itertools
 import math
 from math import cos, pi
-from pathlib import Path
-from abc import ABCMeta, abstractmethod
-import time
-from typing import Literal, Optional
-import re
 import os
+from pathlib import Path
+import re
+import time
+from typing import Dict, List, Literal, Optional
 
 import pandas as pd
+from pydantic import Field
+from pydrantic import BaseConfig, ObjectConfig, RunConfig
 import torch
+import torch.amp
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.optim as optim
 from torch.utils.data import DataLoader
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
-import torch.amp
+from tqdm.auto import tqdm
 from transformers import AutoTokenizer
 import wandb
-from tqdm.auto import tqdm
-from pydrantic import ObjectConfig, BaseConfig, RunConfig
 
+from cartridges.cache import AttnConfig, KVCacheFactory, TrainableCache
 from cartridges.datasets import (
-    CartridgeTrainDataset,
-    CartridgeDatasetBatchLogitLabels,
-    CartridgeDatasetBatchSampler,
-    CartridgeGenerateDataset,
-    CartridgeGenerateDatasetElement,
-    CartridgeDatasetBatchTokenLabels,
+    DatasetBatch,
+    GenerateEvalDataset,
+    LossEvalDataset,
+    TrainDataset,
+    DataSource,
 )
 from cartridges.models.config import ModelConfig
-from cartridges.cache import AttnConfig, KVCacheFactory, TrainableCache
-from cartridges.utils import WandBConfig, prepare_wandb, seed_everything, get_logger
-from cartridges.utils.wandb import download_artifacts, figure_to_wandb
-from cartridges.context import BaseContextConfig
+from cartridges.utils import get_logger, seed_everything
+from cartridges.utils.wandb import download_artifacts, WandBConfig, get_default_wandb_config, prepare_wandb
 
 
 logger = get_logger(__name__)
 
 
-class EvalDatasetConfig(BaseConfig):
-
-    # the "local" batch size is the batch size per device.
-    local_batch_size: Optional[int] = 1
-    dataset: ObjectConfig
+class LossEvalConfig(BaseConfig):
+    dataset: LossEvalDataset.Config | TrainDataset.Config
     name_for_wandb: str
-    only_eval_rank_0: bool = False
-    dataloader_num_workers: int = 0
 
+class GenerationEvalConfig(BaseConfig):
+    dataset: GenerateEvalDataset.Config
 
-@dataclass
-class EvalDataset:
-    dataset: CartridgeTrainDataset
-    batch_size: int
-    name: str
-    only_eval_rank_0: bool = False
-    dataloader_num_workers: int = 0
-
-
-class GenerateDatasetConfig(BaseConfig):
-    dataset: ObjectConfig
     name_for_wandb: str
-    dataloader_num_workers: int = 0
-    num_samples: int = 1
-    num_samples_final: Optional[int] = None
-    temperature: float = 0.0
-    batch_size: int = 1
-    override_max_tokens: int | None = None
-
-
-@dataclass
-class GenerateDataset:
-    dataset: CartridgeGenerateDataset
-    name: str
+    generate_max_new_tokens: int = 128
     dataloader_num_workers: int = 0
     num_samples: int = 1
     num_samples_final: Optional[int] = None
@@ -88,37 +62,31 @@ class GenerateDataset:
 
 class TrainConfig(RunConfig):
     name: str = "default"  # A name for the run for wandb
+    output_dir: str = os.environ["CARTRIDGES_OUTPUT_DIR"]
     model: ModelConfig
-    wandb: Optional[WandBConfig] = None
-    dataset: CartridgeTrainDataset.Config
-    context: BaseContextConfig
+    wandb: Optional[WandBConfig] = Field(default_factory=get_default_wandb_config)
+    dataset: TrainDataset.Config
 
-    # dataset for evaluating perplexity on other generations
+    # datasets for evaluating perplexity on other generations
     # NOTE: steps here is the number of **optimizer steps**, which we keep track of
     # with the `optimizer_step` variable. This is different than the number of batches
     # processed, which is given by `iter_idx`.
-    eval_every_n_steps: Optional[int] = None
-    eval_datasets: list[EvalDatasetConfig] = field(default_factory=list)
-    eval_log_table: bool = True
-    eval_max_samples: Optional[int] = None
+    loss_eval_every_n_steps: Optional[int] = None
+    loss_evals: list[LossEvalConfig] = field(default_factory=list)
 
-    # dataset for actually producing generations
+    # datasets for actually producing generations
     # NOTE: steps here is the number of **optimizer steps**, which we keep track of
     # with the `optimizer_step` variable. This is different than the number of batches
     # processed, which is given by `iter_idx`.
-    generate_every_n_steps: Optional[int] = None
-    generate_datasets: list[GenerateDatasetConfig] = field(default_factory=list)
-    generate_max_new_tokens: int = 128
+    generate_eval_every_n_steps: Optional[int] = None
+    generate_before_training: bool = True
+    generate_evals: list[GenerationEvalConfig] = field(default_factory=list)
 
-    # the global batch size is the total batch size across all devices and gradient
-    # accumulation steps
-    # we will infer the number of gradient accumulation steps from the `global_batch_size`,
-    # the `local_batch_size`, and the number of devices
-    global_batch_size: int = 1024
-    local_batch_size: int = 32
-    use_batch_sampler: bool = False
+    # the `global_batch_size` is the total batch size across all devices and gradient
+    # accumulation steps. We will infer the number of gradient accumulation steps from the
+    # `global_batch_size`, and the number of devices.
+    global_batch_size: int = 1
 
-    tokenizer: str = "meta-llama/Llama-3.2-1B-Instruct"
     epochs: int = 5
     device: str = "cuda"
     distributed_backend: Literal["nccl", "gloo"] = "nccl"
@@ -126,10 +94,10 @@ class TrainConfig(RunConfig):
     optimizer: Literal["adam"] = "adam"
     lr: float = 1e-4
     lr_scheduler: Optional[Scheduler.Config] = None
+    weight_decay: float = 0.0
 
     kv_cache_initializer: Optional[KVCacheFactory.Config] = None
     pretrained_cache_path: Optional[str] = None
-    loss_type: Literal["tokens", "logits"] = "logits"
 
     # NOTE: steps here is the number of **optimizer steps**, which we keep track of
     # with the `optimizer_step` variable. This is different than the number of batches
@@ -138,6 +106,7 @@ class TrainConfig(RunConfig):
     save_after_training: bool = True
     keep_last_n_saved: int = 1
     save_to_wandb: bool = True
+    log_time: bool = False
 
     max_optimizer_steps: int = -1
 
@@ -148,38 +117,11 @@ class TrainConfig(RunConfig):
     def run(self):
         return train(self)
 
-
-def get_dataset_names(
-    config: CartridgeTrainDataset.Config | CartridgeGenerateDataset.Config,
-) -> list[str]:
-    return (
-        [artifact_name for (artifact_name, _) in config.data_sources]
-        if config.is_wandb
-        else []
-    )
-
-
-def download_wandb_artifacts(config: TrainConfig):
-    artifact_names = get_dataset_names(config.dataset)
-
-    for eval_or_gen_ds in itertools.chain(
-        config.eval_datasets, config.generate_datasets
-    ):
-        if isinstance(
-            eval_or_gen_ds.dataset,
-            (CartridgeTrainDataset.Config, CartridgeGenerateDataset.Config),
-        ):
-            artifact_names += get_dataset_names(eval_or_gen_ds.dataset)
-
-    download_artifacts(artifact_names)
-
-
 def train(config: TrainConfig):
     seed_everything(config.seed)
     is_ddp = "LOCAL_RANK" in os.environ
     if is_ddp:
         local_rank = int(os.environ["LOCAL_RANK"])
-        print(f"Setting device to {local_rank}")
         torch.cuda.set_device(local_rank)
 
         # SE (03/21): Sometimes, we want to run train multiple times within
@@ -199,60 +141,44 @@ def train(config: TrainConfig):
 
     # compute the correct number of gradient accumulation steps
     assert config.global_batch_size % num_devices == 0
-    assert config.global_batch_size % config.local_batch_size == 0
     accumulate_grad_steps = (
-        config.global_batch_size // config.local_batch_size // num_devices
+        config.global_batch_size // num_devices
     )
-    print(f"Global batch size: {config.global_batch_size}")
-    print(f"Local batch size: {config.local_batch_size}")
-    print(f"Num devices: {num_devices}")
+    logger.info(f"Global batch size: {config.global_batch_size}")
+    logger.info(f"Num devices: {num_devices}")
 
     logger.info(f"Train outputs will be saved to {config.run_dir}")
-    # logger.info("Initializing tokenizer and dataset")
-    download_wandb_artifacts(config)
-    tokenizer = AutoTokenizer.from_pretrained(config.tokenizer)
+    tokenizer = AutoTokenizer.from_pretrained(config.model.pretrained_model_name_or_path)    
 
-    # Load all the datasets in parallel
-    ds_load_start_time = time.time()
-
-    logger.info("Starting to load datasets")
-    dataset = config.dataset.instantiate(tokenizer=tokenizer)
+    t0 = time.time()
+    dataset = config.dataset.instantiate(tokenizer=tokenizer, seed=config.seed)
     logger.info(
-        f"Fininshed loading training dataset from disk, took {(time.time() - ds_load_start_time):.3}s"
-    )
-    eval_datasets = [
-        EvalDataset(
-            dataset=dataset_config.dataset.instantiate(tokenizer=tokenizer),
-            batch_size=dataset_config.local_batch_size,
-            name=dataset_config.name_for_wandb,
-            only_eval_rank_0=dataset_config.only_eval_rank_0,
-            dataloader_num_workers=dataset_config.dataloader_num_workers,
-        )
-        for dataset_config in config.eval_datasets
-    ]
-
-    generate_datasets = [
-        GenerateDataset(
-            name=generate_dataset_config.name_for_wandb,
-            dataset=generate_dataset_config.dataset.instantiate(tokenizer=tokenizer),
-            dataloader_num_workers=generate_dataset_config.dataloader_num_workers,
-            num_samples=generate_dataset_config.num_samples,
-            temperature=generate_dataset_config.temperature,
-            batch_size=generate_dataset_config.batch_size,
-            num_samples_final=generate_dataset_config.num_samples_final,
-            override_max_tokens=generate_dataset_config.override_max_tokens,
-        )
-        for generate_dataset_config in config.generate_datasets
-    ]
-    logger.info(
-        f"Finished to loading datasets from disk, took {(time.time() - ds_load_start_time):.2}s"
+        f"Fininshed loading training dataset from disk, took {(time.time() - t0):.3}s"
     )
 
-    context = config.context.instantiate()
+    ppl_evals: list[tuple[LossEvalConfig, TrainDataset]] = [    
+        (ds_config, ds_config.dataset.instantiate(tokenizer=tokenizer, seed=config.seed))
+        for ds_config in config.loss_evals
+    ]
+    generate_evals: list[tuple[GenerationEvalConfig, GenerateEvalDataset]] = [
+        (eval_config, eval_config.dataset.instantiate(tokenizer=tokenizer, seed=config.seed))
+        for eval_config in config.generate_evals
+    ]
+    logger.info(
+        f"Finished loading eval and generate datasets from disk, took {(time.time() - t0):.2}s"
+    )
+
     model = config.model.instantiate().to(local_rank).to(torch.bfloat16)
+    attn_config=AttnConfig(
+        n_layers=model.config.num_hidden_layers,
+        n_heads=model.config.num_key_value_heads,
+        head_dim=(
+            model.config.head_dim
+            if hasattr(model.config, "head_dim")
+            else model.config.hidden_size // model.config.num_attention_heads
+        ),
+    )
     
-
-    # TODO(RE: I believe this assertion is a fair one.
     assert config.model.tuning_method in ("custom_prefix", "peft")
     use_peft = config.model.tuning_method == "peft"
     
@@ -260,17 +186,10 @@ def train(config: TrainConfig):
     if not use_peft:
         load_start_time = time.time()
         logger.info("Using custom prefix tuning (TrainableCache)")
-        cache: (
-            TrainableCache
-        ) = config.kv_cache_initializer.instantiate().initalize_kv_cache(
-            context=context,  
-            tokenizer=tokenizer,
-            model=model,
-            attn_config=AttnConfig(
-                n_layers=model.config.num_hidden_layers,
-                n_heads=model.config.num_key_value_heads,
-                head_dim=model.config.hidden_size // model.config.num_attention_heads,
-            ),
+
+        initializer = config.kv_cache_initializer.instantiate()
+        cache: TrainableCache = initializer.initialize_kv_cache(
+            tokenizer=tokenizer, model=model, attn_config=attn_config,
         )
         logger.info(
             f"Done loading trainable cache, time: {(time.time() - load_start_time):.2f}s"
@@ -279,7 +198,6 @@ def train(config: TrainConfig):
     else:
         cache_tuning = False
 
-    assert isinstance(dataset, CartridgeTrainDataset)
 
     # Different model wrapping logic based on tuning method
     if use_peft:
@@ -293,10 +211,7 @@ def train(config: TrainConfig):
             param.requires_grad = False
 
         cache = cache.to(local_rank)
-        wrapped_model = CacheAndModel(
-            cache,
-            model,
-        )
+        wrapped_model = CacheAndModel(cache, model,)
 
     if is_ddp:
 
@@ -320,29 +235,22 @@ def train(config: TrainConfig):
             generator=torch.Generator().manual_seed(config.seed),
         )
 
-    if config.use_batch_sampler:
-        sampler = CartridgeDatasetBatchSampler(
-            sampler=train_sampler,
-            dataset=dataset,
-            batch_size=config.local_batch_size,
-            shuffle=True,
-        )
-        sampler_kwargs = {"batch_sampler": sampler}
-    else:
-        sampler_kwargs = {"sampler": train_sampler, "batch_size": config.local_batch_size}
-    
     dataloader = DataLoader(
-        dataset,
-        collate_fn=dataset.collate,
-        **sampler_kwargs,
+        dataset, 
+        sampler=train_sampler,
+        # our dataset already handles batching, so we force the batch size to 1
+        # and extract it in the collate. We still use the dataloader to leverage
+        # a single worker to avoid blocking the main process
+        batch_size=1, 
+        collate_fn=lambda x: x[0], 
+        num_workers=1, 
     )
 
-    # Set up optimizer based on tuning method
-    if use_peft:
-        optimizer = optim.Adam(wrapped_model.parameters(), lr=config.lr)
-    else:
-        optimizer = optim.Adam(cache.parameters(), lr=config.lr)
-
+    optimizer = optim.Adam(
+        wrapped_model.parameters() if use_peft else cache.parameters(), 
+        lr=config.lr,
+        weight_decay=config.weight_decay,
+    )
 
     # Initialize counter variables
     # optimizer_step: number of optimizer steps taken, iter_idx: number of loop iterations, epoch_idx: number of epochs completed
@@ -368,7 +276,7 @@ def train(config: TrainConfig):
         if cache_tuning:
             wandb_log_dict.update(
                 {
-                    "num_trainable_tokens": cache.num_trainable_tokens,
+                    "num_trainable_tokens": cache._num_trainable_tokens,
                     "cache_trainable_params": sum(
                         p.numel() for p in cache.parameters() if p.requires_grad
                     ),
@@ -384,13 +292,15 @@ def train(config: TrainConfig):
 
         logger.info(f"Setup wandb with model stats: {wandb_log_dict}")
 
+
     def do_evaluation():
-        for dataset in eval_datasets:
-            evaluate(
+        for ds_config, dataset in ppl_evals:
+            evaluate_perplexity(
                 config=config,
                 model=wrapped_model,
                 cache=cache,
                 eval_dataset=dataset,
+                ds_config=ds_config,
                 optimizer_step=optimizer_step,
                 epoch=epoch_idx,
                 local_rank=local_rank,
@@ -398,15 +308,9 @@ def train(config: TrainConfig):
             )
 
     def do_evaluate_generations(step: int = None, final: bool = False):
-        for generate_dataset in generate_datasets:
-            eval_fn = (
-                evaluate_generations
-                if generate_dataset.batch_size == 1
-                else evaluate_generations_batch
-            )
-            eval_fn = evaluate_generations_batch
-            eval_fn(
-                config=config,
+        for eval_config, generate_dataset in generate_evals:
+            evaluate_generations(
+                config=eval_config,
                 model=wrapped_model,
                 tokenizer=tokenizer,
                 dataset=generate_dataset,
@@ -414,6 +318,7 @@ def train(config: TrainConfig):
                 local_rank=local_rank,
                 step=step,
                 final=final,
+                log_to_wandb=config.wandb is not None,
             )
 
     if config.lr_scheduler is not None:
@@ -432,23 +337,25 @@ def train(config: TrainConfig):
             leave=False,
             disable=not is_rank_zero,
         )
+        logger.info(f"Dataloader length: {len(dataloader)}")
         for batch in train_pbar:
-
-            batch: CartridgeDatasetBatchTokenLabels | CartridgeDatasetBatchLogitLabels
+            batch: DatasetBatch
             do_step = (iter_idx + 1) % accumulate_grad_steps == 0
 
             if (
-                config.eval_every_n_steps is not None
-                and optimizer_step % config.eval_every_n_steps == 0
+                config.loss_eval_every_n_steps is not None
+                and optimizer_step % config.loss_eval_every_n_steps == 0
                 and iter_idx % accumulate_grad_steps
                 == 0  # only on the first batch of each optimizer step
             ):
                 do_evaluation()
 
+            
             if (
-                config.generate_every_n_steps is not None
-                and optimizer_step % config.generate_every_n_steps == 0
+                config.generate_eval_every_n_steps is not None
+                and optimizer_step % config.generate_eval_every_n_steps == 0
                 and iter_idx % accumulate_grad_steps == 0
+                and (config.generate_before_training or iter_idx > 0)
             ):
                 do_evaluate_generations(step=iter_idx)
 
@@ -463,59 +370,45 @@ def train(config: TrainConfig):
             with ddp_ctx_manager:
                 with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
 
+                    t0 = time.time()
                     outputs = wrapped_model(
                         input_ids=batch.input_ids.to(local_rank),
-                        labels=(
-                            batch.labels.to(local_rank)
-                            if config.loss_type == "tokens"
-                            else None
-                        ),
+                        seq_ids=batch.element_ids.to(local_rank),
+                        position_ids=batch.position_ids.to(local_rank),
+                    )
+                    if config.log_time:
+                        torch.cuda.synchronize()
+                        logger.info(f"Forward pass time: {time.time() - t0:.2f}s")
+
+                    topk_pred_logprobs = F.log_softmax(outputs.logits, dim=-1)[
+                        0, 
+                        batch.topk_token_idxs.to(local_rank) - 1, 
+                        batch.topk_token_ids.to(local_rank)
+                    ] 
+
+                    # ce is sum -p(x)logq(x), where p is the true distr and q is the model distr
+                    ce_by_token = (
+                        -batch.topk_logprobs.to(local_rank).exp()  # p(x), true distr
+                        * topk_pred_logprobs  # q(x), model distr
                     )
 
-                    if config.loss_type == "tokens":
-                        # NOTE: we need to divide by the number of gradient accumulation steps
-                        # to ensure we have the same loss as if we were not using gradient accumulation
-                        loss = outputs.loss / accumulate_grad_steps
-                        mask = batch.mask.to(local_rank)
-                    elif config.loss_type == "logits":
-                        topk_tgt_logprobs = batch.topk_logprobs
-                        topk_tgt_tokens = batch.topk_tokens
-                        mask = batch.mask
-                        pred_log_probs = F.log_softmax(outputs.logits, dim=-1)
+                    loss = (ce_by_token.mean() / accumulate_grad_steps)
 
-                        topk_pred_logprobs = pred_log_probs.gather(
-                            dim=2, index=topk_tgt_tokens.to(local_rank)
-                        )
-                        assert topk_pred_logprobs.shape == topk_tgt_logprobs.shape
-
-                        # ce is sum -p(x)logq(x), where p is the true distr and q is the model distr
-                        ce_by_token = (
-                            -topk_tgt_logprobs.to(local_rank).exp()  # p(x), true distr
-                            * topk_pred_logprobs  # q(x), model distr
-                        ).sum(dim=-1)
-
-                        mask = mask.to(local_rank)
-
-                        assert ce_by_token.shape == mask.shape
-                        loss = (
-                            (ce_by_token * mask).sum()
-                            / mask.sum()
-                            / accumulate_grad_steps
-                        )
-                    else:
-                        raise ValueError(f"Unknown loss type: {config.loss_type}")
-
-                # the loss should go outside of the automated-mixed precision context
+                # the backward pass should go outside of the automated-mixed precision context
                 # see here for an example: https://pytorch.org/docs/stable/notes/amp_examples.html
                 # but it should go inside the ddp context manager
+                t0 = time.time()
                 loss.backward()
+                if config.log_time:
+                    torch.cuda.synchronize()
+                    logger.info(f"Backward pass time: {time.time() - t0:.2f}s")
 
             # Update the accumulated metrics
             accum_loss += loss.detach()
             accum_num_input_tokens += torch.tensor(
-                batch.input_ids.size(1), device=local_rank
+                batch.input_ids.size(0), device=local_rank
             )
-            accum_num_target_tokens += mask.sum().detach()
+            accum_num_target_tokens += torch.tensor(0, device=local_rank) # mask.sum().detach() # TODO: fix thisTI
 
             if do_step:
                 optimizer.step()
@@ -607,6 +500,8 @@ def train(config: TrainConfig):
             # Save PEFT model
             logger.info(f"Saving PEFT model to {config.run_dir}/peft_model")
             model.save_pretrained(f"{config.run_dir}/peft_model")
+    
+    logger.info(f"Done training waiting for final barrier.")
 
     # SE (03/21): Careful to synchronize all processes before finishing in case
     # there's another call to `train` in the same process
@@ -618,16 +513,16 @@ def train(config: TrainConfig):
         wandb.finish()
 
 
-def evaluate(
+def evaluate_perplexity(
     config: TrainConfig,
     model,  # Can be either CacheAndModel or a PEFT model
     cache: Optional[TrainableCache],
-    eval_dataset: EvalDataset,
+    eval_dataset: LossEvalDataset,
+    ds_config: LossEvalConfig,
     optimizer_step: int,
     epoch: int,
     local_rank: int,
     cache_tuning: bool,
-    dont_use_lm_head_optimization: bool = False,
 ):
     assert cache_tuning == (cache is not None)
     is_ddp = "LOCAL_RANK" in os.environ
@@ -635,131 +530,62 @@ def evaluate(
     world_size = dist.get_world_size() if is_ddp else 1
 
     logger.info(
-        f"Evaluating `{eval_dataset.name}` (n={len(eval_dataset.dataset)}, {len(eval_dataset.dataset) // world_size} per device, world size={world_size})"
+        f"Evaluating `{ds_config.name_for_wandb}` (n={len(eval_dataset)}, {len(eval_dataset) // world_size} per device, world size={world_size})"
     )
-    tokenizer = eval_dataset.dataset.tokenizer
 
-    sampler = (
-        DistributedSampler(eval_dataset.dataset)
-        if is_ddp and not eval_dataset.only_eval_rank_0
-        else None
-    )
+    sampler = DistributedSampler(eval_dataset)if is_ddp else None
     dataloader = DataLoader(
-        eval_dataset.dataset,
-        batch_size=eval_dataset.batch_size,
-        collate_fn=eval_dataset.dataset.collate,
+        eval_dataset,
         sampler=sampler,
-        num_workers=eval_dataset.dataloader_num_workers,
+
+        # our dataset already handles batching, so we force the batch size to 1
+        # and extract it in the collate. We still use the dataloader to leverage
+        # a single worker to avoid blocking the main process
+        batch_size=1, 
+        collate_fn=lambda x: x[0], 
+        num_workers=1, 
     )
 
     dataloader_pbar = tqdm(
         dataloader,
         total=len(dataloader),
-        desc=f"Evaluation [step={optimizer_step}] ({eval_dataset.name})",
+        desc=f"Evaluation [step={optimizer_step}] ({ds_config.name_for_wandb})",
         leave=False,
         disable=not is_rank_zero,
     )
 
-    prefix = f"eval_{eval_dataset.name}"
+    prefix = f"eval_{ds_config.name_for_wandb}"
 
     results = []
     with torch.no_grad():
-        epoch_loss, epoch_denom = 0.0, 0
+        epoch_loss, epoch_denom = 0.0, torch.tensor(0, device="cuda")
         epoch_num_system_and_user_tokens = torch.tensor(0, device="cuda")
         epoch_num_assistant_tokens = torch.tensor(0, device="cuda")
         epoch_num_elements = torch.tensor(0, device="cuda")
 
         for batch in dataloader_pbar:
-            batch: CartridgeDatasetBatchTokenLabels
-            labels = batch.labels.to(local_rank)[:, 1:]
-
-            epoch_num_system_and_user_tokens += sum(
-                [counts.num_system_and_user_tokens for counts in batch.token_counts]
-            )
-            epoch_num_assistant_tokens += sum(
-                [counts.num_assistant_tokens for counts in batch.token_counts]
-            )
-            epoch_num_elements += len(batch.token_counts)
-
-            # LM head uses a ton of memory for long sequences
-            if dont_use_lm_head_optimization:
-                assert not cache_tuning
-                assert not is_ddp
-
-                assert labels.shape[0] == 1
-                mask = labels != -100
-                gathered_labels = labels[mask]
-
+            batch: DatasetBatch
+            with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
                 outputs = model(
-                    input_ids=batch.input_ids.to(local_rank)[:, :-1],
-                    logits_to_keep=mask[0],
+                    input_ids=batch.input_ids.to(local_rank),
+                    seq_ids=batch.element_ids.to(local_rank),
+                    position_ids=batch.position_ids.to(local_rank),
                 )
 
-                gathered_logits = outputs.logits[mask]
+                topk_pred_logprobs = F.log_softmax(outputs.logits, dim=-1)[
+                    0, 
+                    batch.topk_token_idxs.to(local_rank) - 1, 
+                    batch.topk_token_ids.to(local_rank)
+                ] 
 
-                assert gathered_logits.shape[0] == gathered_labels.shape[0]
-
-                epoch_loss += nn.functional.cross_entropy(
-                    gathered_logits, gathered_labels, reduction="sum"
+                # ce is sum -p(x)logq(x), where p is the true distr and q is the model distr
+                ce_by_token = (
+                    -batch.topk_logprobs.to(local_rank).exp()  # p(x), true distr
+                    * topk_pred_logprobs  # q(x), model distr
                 )
-                epoch_denom += mask.sum()
 
-                del outputs
-                continue
-
-            outputs = model(
-                input_ids=batch.input_ids.to(local_rank)[:, :-1],
-            )
-
-            if not config.eval_log_table:
-                mask = labels != -100
-                epoch_loss += nn.functional.cross_entropy(
-                    outputs.logits[mask], labels[mask], reduction="sum"
-                )
-                epoch_denom += mask.sum()
-
-            else:
-                # SE (03/24): We iterate over the elements in the batch and compute the loss for each element
-                # so we can add a record to the results table for each element.
-                for elem_idx in range(batch.input_ids.size(0)):
-                    elem_input_ids = batch.input_ids[elem_idx]
-                    elem_logits = outputs.logits[elem_idx]
-                    elem_labels = labels[elem_idx]
-
-                    mask = elem_labels != -100
-                    token_loss = nn.functional.cross_entropy(
-                        elem_logits[mask], elem_labels[mask], reduction="none"
-                    )
-                    epoch_loss += token_loss.sum()
-                    epoch_denom += mask.sum()
-
-                    result = {
-                        "loss": token_loss.mean().item(),
-                        "ppl": math.exp(token_loss.mean().item()),
-                        "input_text": tokenizer.decode(elem_input_ids),
-                        "labels_ids": elem_labels[mask].tolist(),
-                        "labels_tokens": [
-                            tokenizer.decode(label)
-                            for label in elem_labels[mask].tolist()
-                        ],
-                        # SE (03/24): Need to negate the loss to get the log probability
-                        # since cross entropy gives nll
-                        "token_logprobs": (-token_loss).tolist(),
-                        "optimizer_step": optimizer_step,
-                        "epoch": epoch,
-                        **batch.metadata[elem_idx],
-                    }
-
-                    if not eval_dataset.only_eval_rank_0 or is_rank_zero:
-                        if config.log_logprob_viz:
-                            from cartridges.analysis.figures.likelihoods import (
-                                visualize_text_likelihoods,
-                            )
-
-                            fig = visualize_text_likelihoods(result)
-                            result["logprob_plot"] = figure_to_wandb(fig)
-
-                        results.append(result)
+                epoch_loss += (ce_by_token.sum())
+                epoch_denom += batch.input_ids.shape[0]
 
             if cache_tuning:
                 assert cache is not None
@@ -767,7 +593,7 @@ def evaluate(
 
             del outputs
 
-            if is_ddp and not eval_dataset.only_eval_rank_0:
+            if is_ddp:
                 dist.all_reduce(epoch_loss, op=dist.ReduceOp.SUM)
                 dist.all_reduce(epoch_denom, op=dist.ReduceOp.SUM)
                 dist.all_reduce(epoch_num_system_and_user_tokens, op=dist.ReduceOp.SUM)
@@ -778,7 +604,7 @@ def evaluate(
             dist.barrier()
         logger.info(f"Eval loss - {epoch_loss / epoch_denom} ")
 
-    if is_ddp and not eval_dataset.only_eval_rank_0:
+    if is_ddp:
         gathered_results = [None for _ in range(dist.get_world_size())]
         dist.all_gather_object(gathered_results, results)
         # flatten the list of lists
@@ -810,267 +636,139 @@ def evaluate(
             step=optimizer_step,
         )
 
-    logger.info("done evaling - " + eval_dataset.name)
+    logger.info("done evaling - " + ds_config.name_for_wandb)
 
     if is_ddp:
         # SE (05/03): this barrier is just to be safe, can probably be removed
         dist.barrier()
 
 
+
 def evaluate_generations(
-    config: TrainConfig,
-    model,  # Can be either CacheAndModel or a PEFT model
+    config: GenerationEvalConfig,
+    
+    model: CacheAndModel,
     tokenizer: AutoTokenizer,
-    dataset: GenerateDataset,
+    dataset: GenerateEvalDataset,
     optimizer_step: int,
     local_rank,
     step: int = None,
     final: bool = False,
+    log_to_wandb: bool = True,
 ):
-    from cartridges.generation import generate, generate_samples
+    from cartridges.generation import flex_generate
 
     is_ddp = "LOCAL_RANK" in os.environ
     is_rank_zero = (not is_ddp) or (dist.get_rank() == 0)
     world_size = dist.get_world_size() if is_ddp else 1
 
-    logger.info(
-        f"Generating `{dataset.name}` (n={len(dataset.dataset)}, {len(dataset.dataset) // world_size} per device)"
-    )
-
-    has_score = hasattr(dataset.dataset, "score")
-    has_batch_score = hasattr(dataset.dataset, "batch_score")
-    prefix = f"generate_{dataset.name}"
-    # if step is not None:
-    #     prefix += f"_step{step}"
-    if dataset.num_samples_final is not None and final:
-        num_samples = dataset.num_samples_final
+    
+    if is_ddp:
+        cache = model.module.cache
+        model = model.module.model
     else:
-        num_samples = dataset.num_samples
-
-    indexes = list(range(len(dataset.dataset)))
-    if is_ddp:
-        indexes = indexes[local_rank::world_size]
-
-    results = []
-    for index in tqdm(
-        indexes,
-        desc=f"Generating [step={optimizer_step}] ({dataset.name})",
-        leave=False,
-        disable=not is_rank_zero,
-    ):
-        if index not in indexes:
-            continue
-
-        element: CartridgeGenerateDatasetElement = dataset.dataset[index]
-
-        kwargs = dict(
-            input_ids=element.input_ids.to(local_rank),
-            cache_and_model=model,
-            tokenizer=tokenizer,
-            max_new_tokens=(
-                config.generate_max_new_tokens
-                if dataset.override_max_tokens is None
-                else dataset.override_max_tokens
-            ),
-        )
-
-        if num_samples > 1 or dataset.temperature > 0.0:
-
-            preds = generate_samples(
-                **kwargs, num_samples=num_samples, temperature=dataset.temperature
-            )
-        else:
-            pred = generate(**kwargs)
-            preds = [pred]
-
-        for sample_idx, pred in enumerate(preds):
-            if has_score:
-                metrics, extras = dataset.dataset.score(
-                    pred=pred, answer=element.answer, convo_id=element.convo_id
-                )
-            else:
-                metrics, extras = None, {}
-
-            if not isinstance(metrics, dict):
-                # Support for older datasets that return a single bool or float as metrics
-                metrics = {"score": metrics}
-            else:
-                metrics = {f"{k}_score": v for k, v in metrics.items()}
-
-            results.append(
-                {
-                    "index": index,
-                    "optimizer_step": optimizer_step,
-                    "prompt": element.prompt,
-                    "answer": element.answer,
-                    "pred": pred,
-                    "convo_id": element.convo_id,
-                    "sample_idx": sample_idx,
-                    "num_system_and_user_tokens": element.input_ids.shape[1],
-                    "num_assistant_tokens": len(tokenizer.encode(pred)),
-                    **metrics,
-                    **element.metadata,
-                    **extras,
-                }
-            )
-
-    batch_score = None
-    if has_batch_score:
-        answers = [(result["index"], result["pred"], result["answer"]) for result in results]
-
-        if is_ddp:
-            gathered_answers = [None for _ in range(dist.get_world_size())]
-            dist.all_gather_object(gathered_answers, answers)
-            # flatten the list of lists
-            answers = [item for sublist in gathered_answers for item in sublist]
-
-        if is_rank_zero:
-            pred = [i[1] for i in answers]
-            gt = [i[2] for i in answers]
-            batch_score = dataset.dataset.batch_score_with_answers(pred, gt)
-
-    if is_ddp:
-        dist.barrier()
-        gathered_results = [None for _ in range(dist.get_world_size())]
-        dist.all_gather_object(gathered_results, results)
-        # flatten the list of lists
-        results = [item for sublist in gathered_results for item in sublist]
-
-    if is_rank_zero:
-        df = pd.DataFrame(results)
-
-        if not df.duplicated(subset=["convo_id", "sample_idx"]).any():
-            logger.warning(
-                "There are duplicate convo_ids in the generation results, dropping duplicates rows."
-            )
-            df = df.drop_duplicates(subset=["convo_id", "sample_idx"])
-
-        score_cols = [col for col in df.columns if col.endswith("score")]
-        avg_scores = {f"{prefix}/{col}": df[col].mean() for col in score_cols}
-
-        if config.wandb is not None:
-            log_dict = {
-                **avg_scores,
-                f"{prefix}/table": df,
-                f"{prefix}/num_system_and_user_tokens": df[
-                    "num_system_and_user_tokens"
-                ].mean(),
-                f"{prefix}/num_assistant_tokens": df["num_assistant_tokens"].mean(),
-            }
-
-            if batch_score is not None:
-                log_dict[f"{prefix}/batch_score"] = batch_score
-
-            wandb.log(
-                log_dict,
-                step=optimizer_step,
-            )
-
-    if is_ddp:
-        dist.barrier()
-
-    return results
-
-
-def evaluate_generations_batch(
-    config: TrainConfig,
-    model,  # Can be either CacheAndModel or a PEFT model
-    tokenizer: AutoTokenizer,
-    dataset: GenerateDataset,
-    optimizer_step: int,
-    local_rank,
-    step: int = None,
-    final: bool = False,
-):
-    from cartridges.generation import generate_batch
-
-    is_ddp = "LOCAL_RANK" in os.environ
-    is_rank_zero = (not is_ddp) or (dist.get_rank() == 0)
-    world_size = dist.get_world_size() if is_ddp else 1
+        cache = model.cache
+        model = model.model
 
     logger.info(
-        f"Generating `{dataset.name}` (n={len(dataset.dataset)}, {len(dataset.dataset) // world_size} per device)"
+        f"Generating `{config.name_for_wandb}` (n={len(dataset)}, {len(dataset) // world_size} per device)"
     )
 
-    has_score = hasattr(dataset.dataset, "score")
-    has_batch_score = hasattr(dataset.dataset, "batch_score")
-    prefix = f"generate_{dataset.name}"
+    has_score = hasattr(dataset, "score")
+    has_batch_score = hasattr(dataset, "batch_score")
+    prefix = f"generate_{config.name_for_wandb}"
 
-    if dataset.num_samples_final is not None and final:
-        num_samples = dataset.num_samples_final
+    if config.num_samples_final is not None and final:
+        num_samples = config.num_samples_final
     else:
-        num_samples = dataset.num_samples
+        num_samples = config.num_samples
 
-    batch_size = dataset.batch_size
-    indexes = list(range(len(dataset.dataset)))
+    batch_size = config.batch_size
+    indexes = list(range(len(dataset)))
     if is_ddp:
         indexes = indexes[local_rank::world_size]
 
     results = []
     for batch_start in tqdm(
         range(0, len(indexes), batch_size),
-        desc=f"Generating [step={optimizer_step}] ({dataset.name})",
+        desc=f"Generating [step={optimizer_step}] ({config.name_for_wandb})",
         leave=False,
         disable=not is_rank_zero,
     ):
+        for sample_idx in range(num_samples):
+            logger.info(f"Generating sample {sample_idx} of {num_samples}")
 
-        elements = [
-            (i, dataset.dataset[indexes[i]])
-            for i in range(batch_start, batch_start + batch_size)
-            if i < len(indexes)
-        ]
-        if len(elements) == 0:
-            continue
-
-        preds = generate_batch(
-            input_ids=[element.input_ids[0].to(local_rank) for _, element in elements],
-            cache_and_model=model,
-            tokenizer=tokenizer,
-            max_new_tokens=(
-                config.generate_max_new_tokens
-                if dataset.override_max_tokens is None
-                else dataset.override_max_tokens
-            ),
-            num_samples=num_samples,
-            temperature=dataset.temperature,
-        )
-
-        elements = [
-            (index, sample_idx, elem)
-            for index, elem in elements
-            for sample_idx in range(num_samples)
-        ]
-
-        for pred, (index, sample_idx, element) in zip(preds, elements):
-            if has_score:
-                metrics, extras = dataset.dataset.score(
-                    pred=pred, answer=element.answer, convo_id=element.convo_id
-                )
-            else:
-                metrics, extras = None, {}
-
-            if not isinstance(metrics, dict):
-                # Support for older datasets that return a single bool or float as metrics
-                metrics = {"score": metrics}
-            else:
-                metrics = {f"{k}_score": v for k, v in metrics.items()}
-
-            results.append(
-                {
-                    "index": index,
-                    "optimizer_step": optimizer_step,
-                    "prompt": element.prompt,
-                    "answer": element.answer,
-                    "pred": pred,
-                    "convo_id": element.convo_id,
-                    "sample_idx": sample_idx,
-                    "num_system_and_user_tokens": element.input_ids.shape[1],
-                    "num_assistant_tokens": len(tokenizer.encode(pred)),
-                    **metrics,
-                    **element.metadata,
-                    **extras,
-                }
+            elements = [
+                (i, dataset[indexes[i]])
+                for i in range(batch_start, batch_start + batch_size)
+                if i < len(indexes)
+            ]
+            if len(elements) == 0:
+                continue
+            input_ids = torch.cat([elem.input_ids[0] for _, elem in elements]).to(local_rank)
+            seq_ids = torch.cat(
+                [
+                    torch.full((elem.input_ids.shape[1],), idx, dtype=torch.long, device=local_rank)
+                    for idx, elem in elements
+                ]
             )
+            position_ids = torch.cat(
+                [torch.arange(elem.input_ids.shape[1], device=local_rank) for _, elem in elements]
+            )
+            pred_ids: Dict[int, List[int]] = flex_generate(
+                input_ids=input_ids,
+                seq_ids=seq_ids,
+                position_ids=position_ids,
+                cache=cache,
+                model=model,
+                tokenizer=tokenizer,
+                max_new_tokens=(
+                    config.generate_max_new_tokens
+                    if config.override_max_tokens is None
+                    else config.override_max_tokens
+                ),
+                temperature=config.temperature,
+                show_progress=is_rank_zero
+            )
+            
+            pred = tokenizer.batch_decode(pred_ids, skip_special_tokens=True)
+
+            elements = {seq_id: elem for seq_id, elem in elements}
+
+            for  (seq_id, curr_pred_ids) in pred_ids.items():
+                element = elements[seq_id]
+                pred = tokenizer.decode(curr_pred_ids, skip_special_tokens=True)
+                
+                if has_score:
+                    metrics, extras = dataset.score(
+                        pred=pred, answer=element.answer, convo_id=element.convo_id
+                    )
+                else:
+                    metrics, extras = None, {}
+
+                if not isinstance(metrics, dict):
+                    # Support for older datasets that return a single bool or float as metrics
+                    metrics = {"score": metrics}
+                else:
+                    metrics = {f"{k}_score": v for k, v in metrics.items()}
+                
+                results.append(
+                    {
+                        "index": indexes[seq_id],
+                        "optimizer_step": optimizer_step,
+                        "prompt": element.prompt,
+                        "answer": element.answer,
+                        "pred": pred,
+                        "convo_id": element.convo_id,
+                        "sample_idx": sample_idx,
+                        "num_system_and_user_tokens": element.input_ids.shape[1],
+                        "num_assistant_tokens": len(pred_ids),
+                        **metrics,
+                        **element.metadata,
+                        **extras,
+                    }
+                )
+    logger.info(f"Generated {len(results)} samples")
 
     batch_score = None
     if has_batch_score:
@@ -1085,7 +783,7 @@ def evaluate_generations_batch(
         if is_rank_zero:
             pred = [i[1] for i in answers]
             gt = [i[2] for i in answers]
-            batch_score = dataset.dataset.batch_score_with_answers(pred, gt)
+            batch_score = dataset.batch_score_with_answers(pred, gt)
 
     if is_ddp:
         dist.barrier()
@@ -1106,7 +804,7 @@ def evaluate_generations_batch(
         score_cols = [col for col in df.columns if col.endswith("score")]
         avg_scores = {f"{prefix}/{col}": df[col].mean() for col in score_cols}
 
-        if config.wandb is not None:
+        if log_to_wandb:
             log_dict = {
                 **avg_scores,
                 f"{prefix}/table": df,
@@ -1127,7 +825,7 @@ def evaluate_generations_batch(
 
     if is_ddp:
         dist.barrier()
-
+    
     return results
 
 
@@ -1211,11 +909,19 @@ class CacheAndModel(nn.Module):
         self.model = model
 
 
-    def forward(self, input_ids, labels=None):
+    def forward(
+        self, 
+        input_ids: torch.Tensor, 
+        seq_ids: torch.Tensor, 
+        position_ids: torch.Tensor,
+        # labels: torch.Tensor
+    ):
 
         out = self.model(
-            input_ids,
-            labels=labels,
+            input_ids=input_ids,
+            seq_ids=seq_ids,
+            position_ids=position_ids,
+            # labels=labels,
             use_cache=True,
             past_key_values=self.cache
         )

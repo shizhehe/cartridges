@@ -3,8 +3,6 @@ import requests
 import yaml
 import logging
 
-from .wandb import WandBConfig, prepare_wandb
-
 
 
 def seed_everything(seed: Optional[int] = None, workers: bool = False) -> int:
@@ -71,13 +69,10 @@ def get_cache_size(model_name: str) -> int:
 
 
 def _convert_to_hashable(obj):
-    from cartridges.context import StructuredContext
     from cartridges.clients.base import Client
     from transformers import AutoTokenizer
     from pydrantic import BaseConfig
-    if isinstance(obj, StructuredContext):
-        return obj.model_dump()
-    elif isinstance(obj, list):
+    if isinstance(obj, list):
         return tuple(_convert_to_hashable(item) for item in obj)
     elif isinstance(obj, dict):
         return tuple((k, _convert_to_hashable(v)) for k, v in sorted(obj.items()))
