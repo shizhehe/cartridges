@@ -39,7 +39,7 @@ def _list_cache_files(run_id: str) -> list[str]:
     sorted_cache_files = sorted(cache_files, key=lambda x: file_to_step.get(x, 0), reverse=True)
     return sorted_cache_files
 
-class KVCacheFromPretrained(KVCacheFactory):
+class KVFromPretrained(KVCacheFactory):
     class Config(KVCacheFactory.Config):
         # path: Path
 

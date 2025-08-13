@@ -320,6 +320,8 @@ if __name__ == "__main__":
     import pydrantic
     pydrantic.main(config)
 ```
+
+
 **Data parallel training.** To launch a data parallel training run, use `torchrun`:
 
 ```bash
@@ -329,6 +331,10 @@ torchrun --standalone --nproc_per_node=2 path/to/file.py
 > **Note:** We're occassionally seeing a NCCL collective operation timeout when running 
 > data parallel training. If you encounter this error, you can set `distributed_backend="gloo"`
 > while we debug the issue.
+
+**KV Cache Initialization.** The `kv_cache_initializer` controls how the cartridge's KV cache is initialized before training. In [`cartridges/initialization`](./cartridges/initialization), we provide several different options including `KVFromRandomText`, `KVFromRandomVectors`, and `KVCacheFromPretrained`. `KVFromRandomText` is usually the best choice. The `max_tokens` parameter determines the size of the cartridge ($p$ in the paper). Larger values improve performance, but increase memory usage and training time.
+
+> **Note:** We've also experimented with more sophisticated initialization strategies based off of summarization and other KV cache compression techniques. We will eventually add support for these to this codebase.
 
 #### Step 2.1: Evaluation
 

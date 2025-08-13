@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 import pydrantic
 
-from cartridges.initialization.random import KVFromRandomText
+from cartridges.initialization import KVFromRandomText
 from cartridges.train import TrainConfig, LossEvalConfig, GenerationEvalConfig
 from cartridges.models import HFModelConfig, FlexQwen3ForCausalLM
 from cartridges.datasets import DataSource, GenerateEvalDataset, TrainDataset, LossEvalDataset
@@ -15,6 +15,7 @@ config = TrainConfig(
         model_cls=FlexQwen3ForCausalLM,
     ),
     kv_cache_initializer=KVFromRandomText.Config(
+        text_source=os.path.join(os.environ["CARTRIDGES_DIR"], "examples/arxiv/cartridges.tex"),
         max_tokens=2048
     ),
     
