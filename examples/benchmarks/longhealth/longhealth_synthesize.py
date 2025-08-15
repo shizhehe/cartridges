@@ -8,8 +8,8 @@ from cartridges.clients.tokasaurus import TokasaurusClient
 from cartridges.synthesize import SynthesizeConfig
 from cartridges.synthesizers.self_study import SelfStudySynthesizer
 from cartridges.data.longhealth.resources import LongHealthResource
-from cartridges.utils import WandBConfig
-from cartridges.configs.utils import short_model_name
+from cartridges.utils.wandb import WandBConfig
+from cartridges.utils import short_model_name
 
 
 
@@ -19,10 +19,9 @@ from cartridges.configs.utils import short_model_name
 # )
 
 client = TokasaurusClient.Config(
-    url="https://hazyresearch--toka-llama-3-2-3b-1xh100-batch-serve.modal.run",
-    model_name="meta-llama/Llama-3.2-3B-Instruct",
+    url="https://hazyresearch--toka-qwen3-4b-1xh100-min0-serve.modal.run",
+    model_name="Qwen/Qwen3-4b",
 )
-
 
 # client = TokasaurusClient.Config(
 #     url="http://0.0.0.0:10210",
