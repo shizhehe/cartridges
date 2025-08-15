@@ -43,8 +43,8 @@ config = SynthesizeConfig(
         ],
     ),
 
-    num_samples=8192, 
-    batch_size=32,  
+    num_samples=256, 
+    batch_size=1,  
     max_num_batches_in_parallel=256,
 
     name=FormatStringVariable(f"{Path(__file__).stem}_{{synthesizer.client.model_name}}_n{{num_samples}}"),
@@ -54,7 +54,7 @@ config = SynthesizeConfig(
     upload_to_wandb=False,
     save_wandb_preview=False,
     
-    upload_to_hf=True,
+    upload_to_hf=False,
     hf_repo_id="hazyresearch/{wandb_run_id}",
 )
 

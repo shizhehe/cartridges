@@ -1,19 +1,29 @@
 
 
-## Starting the server
-If your data is on a remote machine, you need to start the server and frontend on different machines. 
+## Getting started
 
-First run the following on the remote machine in Cursor/VSCode so that the port is automatically forwarded to your local machine:
-```bash
-uvicorn viz.src.server:app --host 0.0.0.0 --port 8001 --reload
-```
-
-Then run the following on your local machine:
+1. Install the dependencies:
 ```bash
 cd viz
+pip install -r requirements.txt
+npm install
+```
+
+2. Start the server:
+```bash
+uvicorn src.server:app --host 0.0.0.0 --port 8001 --reload 
+```
+If your data is on a remote machine, you need to start the server on the remote, forward the port to your local machine, and run the frontend on your local machine due to CORS issues.
+
+You may need to pick a different port if the default 8001 is already in use.
+
+3. Start the frontend:
+Make sure to set the `VITE_API_TARGET` to the port of the server.
+
+```bash
 VITE_API_TARGET=http://localhost:8001 npm run dev
 ```
-Make sure the `VITE_API_TARGET` is set to forwarded port. You can check this in VSCode by going to "Ports: Focus on Ports View" from the command palette (cmd+shift+p).
+
 
 
 
