@@ -2,6 +2,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import abc
 import asyncio
+import os
 import random
 from typing import Any, List, Optional, Literal, Callable
 from pydantic import BaseModel
@@ -73,6 +74,52 @@ class TextFileResource(TextResource):
         self.text = open(self.config.path).read()
         await super().setup()
 
+class DirectoryResource(Resource):
+
+    class Config(Resource.Config):
+        path: str
+        included_extensions: List[str] = [".py", ".txt", ".json", ".yaml", ".yml", ".toml", ".ini", ".xml"]
+        seed_prompts: List[SEED_TYPES]
+
+    def __init__(self, config: Config):
+        self.config = config
+        self.files = []
+
+    async def setup(self):
+        # Get all files in the directory that match the included extensions
+        all_files = [f for f in os.listdir(self.config.path) if os.path.isfile(os.path.join(self.config.path, f))]
+        self.files = [
+            f for f in all_files 
+            if any(f.endswith(ext) for ext in self.config.included_extensions)
+        ]
+
+    async def sample_prompt(self, batch_size: int) -> tuple[str, List[str]]:
+        if not self.files:
+            raise ValueError("No files found in directory. Make sure to call setup() first and check that the directory contains files with the specified extensions.")
+        
+        # Select a random file
+        selected_file = random.choice(self.files)
+        file_path = os.path.join(self.config.path, selected_file)
+        
+        # Read the file content
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except UnicodeDecodeError:
+            # If file can't be decoded as UTF-8, try with latin-1 or skip
+            try:
+                with open(file_path, 'r', encoding='latin-1') as f:
+                    content = f.read()
+            except Exception:
+                content = f"[Unable to read file {selected_file}]"
+        
+        # Create context with file information
+        context = f"File: {selected_file}\n\n{content}"
+        
+        # Generate seed prompts
+        seed_prompts = sample_seed_prompts(self.config.seed_prompts, batch_size)
+        
+        return context, seed_prompts
 
 class BaseStructuredResource(Resource, ABC):
     """This base class is to be used for resources that can be structured as a nested 

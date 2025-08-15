@@ -1,6 +1,8 @@
 import pytest
-from unittest.mock import Mock
-from cartridges.data.resources import BaseStructuredResource
+import tempfile
+import os
+from unittest.mock import Mock, patch
+from cartridges.data.resources import BaseStructuredResource, DirectoryResource
 
 
 class TestStructuredResource(BaseStructuredResource):
@@ -245,3 +247,162 @@ class TestListNestedData:
         expected = [("", "[]")]
         
         assert result == expected
+
+
+class TestDirectoryResource:
+    """Test cases for DirectoryResource"""
+    
+    @pytest.fixture
+    def temp_dir_with_files(self):
+        """Create a temporary directory with test files"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create test files with different extensions
+            test_files = {
+                "test.py": "print('Hello, World!')",
+                "config.json": '{"name": "test", "value": 42}',
+                "README.txt": "This is a README file",
+                "data.yaml": "key: value\nlist:\n  - item1\n  - item2",
+                "binary.exe": b"\x00\x01\x02\x03",  # Binary file
+                "ignored.log": "This should be ignored"
+            }
+            
+            for filename, content in test_files.items():
+                filepath = os.path.join(temp_dir, filename)
+                mode = 'wb' if isinstance(content, bytes) else 'w'
+                encoding = None if isinstance(content, bytes) else 'utf-8'
+                with open(filepath, mode, encoding=encoding) as f:
+                    f.write(content)
+            
+            yield temp_dir, test_files
+    
+    def test_init(self):
+        """Test DirectoryResource initialization"""
+        config = Mock()
+        config.path = "/test/path"
+        config.included_extensions = [".py", ".txt"]
+        config.seed_prompts = ["generic"]
+        
+        resource = DirectoryResource(config)
+        
+        assert resource.config == config
+        assert resource.files == []
+    
+    @pytest.mark.asyncio
+    async def test_setup_filters_by_extension(self, temp_dir_with_files):
+        """Test that setup correctly filters files by extension"""
+        temp_dir, test_files = temp_dir_with_files
+        
+        config = Mock()
+        config.path = temp_dir
+        config.included_extensions = [".py", ".txt", ".json"]
+        config.seed_prompts = ["generic"]
+        
+        resource = DirectoryResource(config)
+        await resource.setup()
+        
+        # Should include only files with specified extensions
+        expected_files = {"test.py", "config.json", "README.txt"}
+        assert set(resource.files) == expected_files
+    
+    @pytest.mark.asyncio
+    async def test_setup_empty_directory(self):
+        """Test setup with empty directory"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = Mock()
+            config.path = temp_dir
+            config.included_extensions = [".py", ".txt"]
+            config.seed_prompts = ["generic"]
+            
+            resource = DirectoryResource(config)
+            await resource.setup()
+            
+            assert resource.files == []
+    
+    @pytest.mark.asyncio
+    async def test_sample_prompt_success(self, temp_dir_with_files):
+        """Test successful sample_prompt execution"""
+        temp_dir, test_files = temp_dir_with_files
+        
+        config = Mock()
+        config.path = temp_dir
+        config.included_extensions = [".py", ".txt"]
+        config.seed_prompts = ["generic"]
+        
+        resource = DirectoryResource(config)
+        await resource.setup()
+        
+        with patch('cartridges.data.resources.sample_seed_prompts') as mock_sample:
+            mock_sample.return_value = ["test prompt 1", "test prompt 2"]
+            
+            context, seed_prompts = await resource.sample_prompt(2)
+            
+            # Should return context with file content
+            assert isinstance(context, str)
+            assert context.startswith("File: ")
+            assert seed_prompts == ["test prompt 1", "test prompt 2"]
+            mock_sample.assert_called_once_with(["generic"], 2)
+    
+    @pytest.mark.asyncio
+    async def test_sample_prompt_no_files_error(self):
+        """Test that sample_prompt raises error when no files available"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = Mock()
+            config.path = temp_dir
+            config.included_extensions = [".py", ".txt"]
+            config.seed_prompts = ["generic"]
+            
+            resource = DirectoryResource(config)
+            await resource.setup()
+            
+            with pytest.raises(ValueError, match="No files found in directory"):
+                await resource.sample_prompt(1)
+    
+    @pytest.mark.asyncio
+    async def test_sample_prompt_with_specific_file(self, temp_dir_with_files):
+        """Test that sample_prompt correctly reads specific file content"""
+        temp_dir, test_files = temp_dir_with_files
+        
+        config = Mock()
+        config.path = temp_dir
+        config.included_extensions = [".json"]
+        config.seed_prompts = ["generic"]
+        
+        resource = DirectoryResource(config)
+        await resource.setup()
+        
+        # Should only have config.json
+        assert resource.files == ["config.json"]
+        
+        with patch('cartridges.data.resources.sample_seed_prompts') as mock_sample:
+            mock_sample.return_value = ["test prompt"]
+            
+            context, _ = await resource.sample_prompt(1)
+            
+            expected_content = test_files["config.json"]
+            assert f"File: config.json\n\n{expected_content}" == context
+    
+    @pytest.mark.asyncio
+    async def test_sample_prompt_encoding_fallback(self):
+        """Test that sample_prompt handles encoding issues gracefully"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create a file with non-UTF-8 encoding
+            binary_file = os.path.join(temp_dir, "binary.txt")
+            with open(binary_file, 'wb') as f:
+                f.write(b'\xff\xfe\x00\x01')  # Invalid UTF-8
+            
+            config = Mock()
+            config.path = temp_dir
+            config.included_extensions = [".txt"]
+            config.seed_prompts = ["generic"]
+            
+            resource = DirectoryResource(config)
+            await resource.setup()
+            
+            with patch('cartridges.data.resources.sample_seed_prompts') as mock_sample:
+                mock_sample.return_value = ["test prompt"]
+                
+                context, _ = await resource.sample_prompt(1)
+                
+                # Should handle encoding gracefully
+                assert "File: binary.txt" in context
+                assert isinstance(context, str)
