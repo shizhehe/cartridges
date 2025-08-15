@@ -12,12 +12,6 @@ from cartridges.utils.wandb import WandBConfig
 from cartridges.utils import short_model_name
 
 
-
-# client = TokasaurusClient.Config(
-#     url="https://hazyresearch--toka-qwen3-4b-1xh100-min0-serve.modal.run",
-#     model_name="Qwen/Qwen3-4b",
-# )
-
 client = TokasaurusClient.Config(
     url="https://hazyresearch--toka-qwen3-4b-1xh100-min0-serve.modal.run",
     model_name="Qwen/Qwen3-4b",
@@ -43,7 +37,6 @@ config = SynthesizeConfig(
         prob_thinking=0.75,
         use_tools_a=False, 
         use_tools_b=False,
-        # max_completion_tokens_b=256,
         tools=[],
         resources=[
             LongHealthResource.Config(
@@ -64,11 +57,9 @@ config = SynthesizeConfig(
     
     max_num_batches_in_parallel=256,
 
-    name=FormatStringVariable(f"{Path(__file__).stem}_{short_model_name(client.model_name)}_{patients_str}_n{{num_samples}}"),
+    name=FormatStringVariable(f"{Path(__file__).stem}_{patients_str}_n{{num_samples}}"),
     run_id=FormatStringVariable("{name}"),
     wandb=WandBConfig(
-        project="cartridges",
-        entity="hazy-research",
         tags=[f"longhealth_synthesis"],
     ),
     upload_to_wandb=False,
