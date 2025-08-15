@@ -70,7 +70,7 @@ class Conversation:
             system_prompt=row["system_prompt"],
             metadata=row["metadata"],
             type=row["type"],
-            
+        )
 
 def write_conversations(conversations: list[Conversation], path: str):
     path_str = str(path)
