@@ -1,30 +1,38 @@
 
-
+import os
+import pickle
 from textwrap import dedent
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, Tuple
 
 from pydrantic import ObjectConfig
 from transformers import PreTrainedTokenizerFast
 
-from capsules.datasets import CapsuleGenerateDataset, CapsuleGenerateDatasetElement, TEMPLATE
-from capsules.tasks.codehop.code_hop_synth import CodeHopFile, CodeHopSynthConfig, make_code_hop
+from cartridges.datasets import GenerateEvalDataset, GenerateEvalDatasetElement
+from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE
+from .synthesize_task import CodeHop
 
-class CodeHopGenerateDataset(CapsuleGenerateDataset):
+class CodeHopGenerateDataset(GenerateEvalDataset):
     class Config(ObjectConfig):
         _pass_as_config = True
-        code_hop_config: CodeHopSynthConfig
+        run_dir: str
 
-        
-        
     def __init__(
         self, 
         config: Config, 
-        tokenizer: PreTrainedTokenizerFast
+        tokenizer: PreTrainedTokenizerFast,
+        seed: int
     ):
         self.config = config
         self.tokenizer = tokenizer
 
-        code_hop = make_code_hop(config.code_hop_config)
+        # Load the code hop dataset from the pickle file
+        dataset_path = os.path.join(config.run_dir, "dataset.pkl")
+        if not os.path.exists(dataset_path):
+            raise FileNotFoundError(f"Dataset pickle file not found at {dataset_path}")
+        
+        with open(dataset_path, "rb") as f:
+            code_hop = pickle.load(f)
+        
         files = code_hop.files
 
         questions = []
@@ -50,21 +58,20 @@ class CodeHopGenerateDataset(CapsuleGenerateDataset):
     
     def __getitem__(
         self, index: int
-    ) -> CodeHopFile:
+    ) -> GenerateEvalDatasetElement:
         question, answer = self.questions[index]
         input_ids = self.tokenizer.apply_chat_template(
             [{"role": "user", "content": question}],
             add_generation_prompt=True,
             return_tensors="pt",
-            chat_template=TEMPLATE,
+            chat_template=MODEL_TO_CHAT_TEMPLATE.get(self.tokenizer.name_or_path, None),
         )
-        return CapsuleGenerateDatasetElement(
+        return GenerateEvalDatasetElement(
             input_ids=input_ids,
             answer=answer,
             convo_id=f"codehop_{index}",
             metadata={"idx": index},
             prompt=question,
-
         )
 
     def __len__(self):
