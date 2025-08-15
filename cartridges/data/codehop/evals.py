@@ -9,12 +9,12 @@ from transformers import PreTrainedTokenizerFast
 
 from cartridges.datasets import GenerateEvalDataset, GenerateEvalDatasetElement
 from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE
-from .synthesize_task import CodeHop
+
 
 class CodeHopGenerateDataset(GenerateEvalDataset):
     class Config(ObjectConfig):
         _pass_as_config = True
-        run_dir: str
+        make_run_dir: str
 
     def __init__(
         self, 
@@ -26,7 +26,7 @@ class CodeHopGenerateDataset(GenerateEvalDataset):
         self.tokenizer = tokenizer
 
         # Load the code hop dataset from the pickle file
-        dataset_path = os.path.join(config.run_dir, "dataset.pkl")
+        dataset_path = os.path.join(config.make_run_dir, "dataset.pkl")
         if not os.path.exists(dataset_path):
             raise FileNotFoundError(f"Dataset pickle file not found at {dataset_path}")
         
