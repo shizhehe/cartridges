@@ -52,6 +52,7 @@ class Conversation:
     def to_html(self) -> str:
         return self._repr_html_()
     
+    @staticmethod
     def from_dict(row: dict) -> Conversation:
         return Conversation(
             messages=[
@@ -69,7 +70,7 @@ class Conversation:
             system_prompt=row["system_prompt"],
             metadata=row["metadata"],
             type=row["type"],
-        )
+            
 
 def write_conversations(conversations: list[Conversation], path: str):
     path_str = str(path)
