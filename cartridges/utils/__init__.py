@@ -3,6 +3,9 @@ import requests
 import yaml
 import logging
 
+def short_model_name(model_name: str) -> str:
+    """Convert a model name to a short name"""
+    return model_name.split("/")[-1].lower()
 
 
 def seed_everything(seed: Optional[int] = None, workers: bool = False) -> int:
