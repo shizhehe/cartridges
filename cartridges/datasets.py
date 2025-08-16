@@ -19,7 +19,7 @@ from cartridges.structs import Conversation, read_conversations
 from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE, MODELS_WITH_THINKING
 from cartridges.utils import get_logger
 from cartridges.utils.hf import read_conversations_from_hf
-from cartridges.utils.wandb import read_conversations_from_wandb
+from cartridges.utils.wandb_utils import read_conversations_from_wandb
 
 # SE(04/02): required to silence tokenizer warnings when using dataloders with
 # multiple worker processes

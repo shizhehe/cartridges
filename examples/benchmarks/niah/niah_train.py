@@ -11,7 +11,7 @@ from cartridges.models.llama.modeling_llama import FlexLlamaForCausalLM
 from cartridges.train import GenerationEvalConfig, TrainConfig
 from cartridges.models.config import HFModelConfig
 from cartridges.datasets import TrainDataset
-from cartridges.utils.wandb import WandBConfig
+from cartridges.utils.wandb_utils import WandBConfig
 
 NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "1024"))
 
