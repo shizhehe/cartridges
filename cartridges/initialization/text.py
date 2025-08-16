@@ -6,13 +6,14 @@ import torch
 from cartridges.cache import AttnConfig, KVCacheFactory, TrainableCache
 from cartridges.initialization.tokenization_utils import MODEL_TO_SYSTEM_PROMPT_TOKENIZER
 
-EOS_TOKEN_ID = 128009
-
+DEFAULT_TEXT_SOURCE = os.path.join(
+    os.environ["CARTRIDGES_DIR"], "cartridges/initialization/data/gradient.txt"
+)
 
 class KVFromRandomText(KVCacheFactory):
     class Config(KVCacheFactory.Config):
         max_tokens: Optional[int]
-        text_source: str = os.path.join(os.environ["CARTRIDGES_DIR"], "gradient.txt")
+        text_source: str = DEFAULT_TEXT_SOURCE
 
     def initialize_kv_cache(
         self,

@@ -537,7 +537,7 @@ class GenerateEvalDataset(Dataset):
     class Config(ObjectConfig):
         _pass_as_config = True
 
-        data_source: str | DataSource
+        data_source: Optional[str | DataSource] = None
         cot: bool = False
     
     def __init__(self, config: Config, tokenizer: PreTrainedTokenizerFast, seed: int):
@@ -545,6 +545,7 @@ class GenerateEvalDataset(Dataset):
         self.tokenizer = tokenizer
         self.seed = seed
 
+        assert self.config.data_source is not None, "data_source is required for GenerateEvalDataset"
         self.data: list[Conversation] = _prepare_data_source(self.config.data_source)
 
     @abstractmethod
