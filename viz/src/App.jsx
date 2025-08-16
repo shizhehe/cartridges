@@ -14,6 +14,7 @@ function App() {
   const [examplesPerPage] = useState(128)
   const [loadingDatasetPath, setLoadingDatasetPath] = useState(null)
   const [datasetError, setDatasetError] = useState(null)
+  const [configData, setConfigData] = useState(null)
 
   // Dataset discovery
   useEffect(() => {
@@ -41,6 +42,7 @@ function App() {
     setCurrentPage(0)
     setLoadingDatasetPath(datasetPath)
     setDatasetError(null)
+    setConfigData(null)
     
     try {
       // First, load dataset metadata quickly
@@ -52,6 +54,24 @@ function App() {
       const dataResponse = await fetch(`/api/dataset/${encodeURIComponent(datasetPath)}?page=0&page_size=${examplesPerPage}`)
       const data = await dataResponse.json()
       setExamples(data.examples)
+      
+      // Also automatically load the config
+      try {
+        const configResponse = await fetch('/api/dataset/config', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            dataset_path: datasetPath
+          })
+        })
+        const configData = await configResponse.json()
+        setConfigData(configData)
+      } catch (configError) {
+        console.error('Failed to load config:', configError)
+        setConfigData({ error: 'Failed to load config', exists: false })
+      }
     } catch (error) {
       console.error('Failed to load dataset:', error)
       // Keep dataset selected but show error state
@@ -62,6 +82,7 @@ function App() {
       setLoadingDatasetPath(null)
     }
   }
+
 
   const loadDatasetPage = async (page) => {
     if (!selectedDataset) return
@@ -314,6 +335,93 @@ function App() {
     )
   }
 
+  // Collapsible JSON Config Component
+  const ConfigViewer = () => {
+    if (!configData) return null
+
+    const [codeExpanded, setCodeExpanded] = useState(false)
+
+    return (
+      <div className="mb-6 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="bg-gradient-to-r from-purple-500 to-purple-600 px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 bg-white rounded-full opacity-80"></div>
+              <div className="font-semibold text-white text-sm font-mono">SynthesizeConfig</div>
+            </div>
+            <button
+              onClick={() => setCodeExpanded(!codeExpanded)}
+              className="text-xs px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-md transition-colors flex items-center gap-1"
+            >
+              <svg 
+                className={`w-3 h-3 transition-transform ${codeExpanded ? 'rotate-180' : ''}`} 
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+              {codeExpanded ? 'Collapse' : 'Expand'}
+            </button>
+          </div>
+        </div>
+        
+        {codeExpanded && (
+          <div className="p-0">
+            {configData.exists && configData.config ? (
+              <div className="bg-gray-950 text-gray-100">
+                {/* Simple header with copy button */}
+                <div className="flex items-center justify-between px-4 py-3 bg-gray-900 border-b border-gray-700">
+                  <div className="text-xs text-gray-400 font-mono break-all">
+                    {configData.path || 'config.yaml'}
+                  </div>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(JSON.stringify(configData.config, null, 2))}
+                    className="text-xs px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors"
+                    title="Copy JSON to clipboard"
+                  >
+                    Copy JSON
+                  </button>
+                </div>
+                
+                {/* JSON content */}
+                <div className="p-4 overflow-auto max-h-96 max-w-full">
+                  <div className="overflow-x-auto">
+                    <pre className="text-sm leading-relaxed whitespace-pre-wrap min-w-0">
+                      <code className="language-json">
+                        {JSON.stringify(configData.config, null, 2)
+                          .split('\n')
+                          .map((line, index) => (
+                            <div key={index} className="flex min-w-0">
+                              <span className="flex-shrink-0 text-right pr-4 text-gray-500 select-none text-xs leading-relaxed w-12">
+                                {index + 1}
+                              </span>
+                              <span className="text-green-300 leading-relaxed break-all min-w-0 flex-1">
+                                {line}
+                              </span>
+                            </div>
+                          ))
+                        }
+                      </code>
+                    </pre>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="p-6 text-center">
+                <div className="text-gray-400 text-4xl mb-3">📄</div>
+                <div className="text-gray-600 font-medium mb-1">No Configuration Found</div>
+                <div className="text-sm text-gray-500">
+                  {configData.error || 'No config.yaml file found for this dataset'}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-screen font-sans">
       <div className="w-80 bg-gray-100 border-r border-gray-300 p-4 overflow-y-auto">
@@ -372,9 +480,9 @@ function App() {
         </div>
       </div>
       
-      <div className="flex-1 p-4 overflow-y-auto">
+      <div className="flex-1 p-4 overflow-y-auto min-w-0">
         {!selectedDataset ? (
-          <div className="flex flex-col items-center justify-center h-full text-center text-gray-600">
+          <div className="flex flex-col items-center justify-center text-center text-gray-600" style={{height: 'calc(100vh - 2rem)'}}>
             <h2 className="text-xl font-semibold mb-2 text-gray-800">Select a dataset to explore</h2>
             <p>Choose a dataset from the sidebar to begin exploring training examples.</p>
           </div>
@@ -402,6 +510,8 @@ function App() {
                 </button>
               </div>
             </div>
+            
+            <ConfigViewer />
             
             {datasetError ? (
               <div className="flex flex-col items-center justify-center py-12 text-center text-red-600">
