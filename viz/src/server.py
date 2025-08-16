@@ -271,8 +271,16 @@ def get_dataset_info(dataset_path: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/dataset/{dataset_path:path}")
-def get_dataset_page(dataset_path: str, page: int = Query(0), page_size: int = Query(12)):
-    """Load and return a specific page of a dataset."""
+def get_dataset_page(
+    dataset_path: str, 
+    page: int = Query(0), 
+    page_size: int = Query(12),
+    search: Optional[str] = Query(None),
+    search_messages: Optional[str] = Query('true'),
+    search_system_prompt: Optional[str] = Query('false'),
+    search_metadata: Optional[str] = Query('false')
+):
+    """Load and return a specific page of a dataset with optional search."""
     try:
         # Decode the path
         import urllib.parse
@@ -281,10 +289,59 @@ def get_dataset_page(dataset_path: str, page: int = Query(0), page_size: int = Q
         if not os.path.exists(dataset_path):
             raise HTTPException(status_code=404, detail="Dataset not found")
         
-        # Load all examples (we'll optimize this further if needed)
+        # Convert search field parameters to booleans
+        search_messages_bool = search_messages and search_messages.lower() == 'true'
+        search_system_prompt_bool = search_system_prompt and search_system_prompt.lower() == 'true'
+        search_metadata_bool = search_metadata and search_metadata.lower() == 'true'
+        print(f"Search fields - messages: {search_messages_bool}, system_prompt: {search_system_prompt_bool}, metadata: {search_metadata_bool}")
+        
+        # Load all examples
         t0 = time.time()
         examples = load_dataset(dataset_path)
         print(f"Loaded dataset in {time.time() - t0} seconds")
+        
+        # Apply search filter if provided
+        if search and search.strip():
+            t0 = time.time()
+            search_query = search.strip().lower()
+            filtered_examples = []
+            
+            for example in examples:
+                matches = []
+                
+                # Search in message contents (if enabled)
+                if search_messages_bool:
+                    message_match = any(
+                        search_query in msg.content.lower() 
+                        for msg in example.messages
+                    )
+                    matches.append(message_match)
+                
+                # Search in system prompt (if enabled)
+                if search_system_prompt_bool:
+                    system_prompt_match = (
+                        example.system_prompt and 
+                        search_query in example.system_prompt.lower()
+                    )
+                    matches.append(system_prompt_match)
+                
+                # Search in metadata (if enabled)
+                if search_metadata_bool:
+                    metadata_match = False
+                    if example.metadata:
+                        metadata_match = any(
+                            search_query in str(value).lower() 
+                            for value in example.metadata.values()
+                        )
+                    matches.append(metadata_match)
+                
+                # Include example if any enabled field matches
+                if any(matches):
+                    filtered_examples.append(example)
+            
+            examples = filtered_examples
+            print(f"Filtered {len(examples)} examples in {time.time() - t0} seconds")
+        
         total_count = len(examples)
         
         # Calculate pagination
@@ -298,13 +355,20 @@ def get_dataset_page(dataset_path: str, page: int = Query(0), page_size: int = Q
         for example in page_examples:
             serialized_examples.append(serialize_training_example(example))
         print(f"Serialized examples in {time.time() - t0} seconds")
+        
         return {
             'examples': serialized_examples,
             'total_count': total_count,
             'page': page,
             'page_size': page_size,
             'total_pages': (total_count + page_size - 1) // page_size,
-            'path': dataset_path
+            'path': dataset_path,
+            'search': search,
+            'search_fields': {
+                'messages': search_messages_bool,
+                'system_prompt': search_system_prompt_bool,
+                'metadata': search_metadata_bool
+            }
         }
     
     except Exception as e:
