@@ -82,7 +82,7 @@ def serialize_training_example(example) -> Dict[str, Any]:
     try:
         messages = []
         for msg in example.messages:
-            token_ids = msg.token_ids if isinstance(msg.token_ids, list) else msg.token_ids.tolist()
+            token_ids = msg.token_ids.tolist() if hasattr(msg.token_ids, "tolist") else msg.token_ids
             message_data = {
                 'content': msg.content,
                 'role': msg.role,
@@ -91,12 +91,12 @@ def serialize_training_example(example) -> Dict[str, Any]:
             }
             
             # Handle logprobs if they exist
-            if hasattr(msg, 'top_logprobs') and msg.top_logprobs is not None:
-                top_logprobs = msg.top_logprobs.reconstruct()
-                message_data['top_logprobs'] = {
-                    'logprobs': top_logprobs.logprobs.tolist() if hasattr(top_logprobs.logprobs, 'tolist') else top_logprobs.logprobs,
-                    'token_ids': top_logprobs.token_ids.tolist() if hasattr(top_logprobs.token_ids, 'tolist') else top_logprobs.token_ids
-                }
+            # if hasattr(msg, 'top_logprobs') and msg.top_logprobs is not None:
+            #     top_logprobs = msg.top_logprobs.reconstruct()
+            #     message_data['top_logprobs'] = {
+            #         'logprobs': top_logprobs.logprobs.tolist() if hasattr(top_logprobs.logprobs, 'tolist') else top_logprobs.logprobs,
+            #         'token_ids': top_logprobs.token_ids.tolist() if hasattr(top_logprobs.token_ids, 'tolist') else top_logprobs.token_ids
+            #     }
             
             messages.append(message_data)
         
