@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Interactive CLI for chatting with a trained cache model.
-Usage: python -m cartridges.utils.chat <wandb_run_id>
-Example: python -m cartridges.utils.chat hazy-research/cartridges/ehij7vlt
+Usage: python examples/cartridge_chat.py <wandb_run_id>
+Example: python examples/cartridge_chat.py hazy-research/cartridges/ehij7vlt
 """
 
 import argparse
@@ -96,21 +96,18 @@ def main():
     
     print(f"Loading model and cache from {args.wandb_run_id}...")
     
-    try:
-        # Load model and cache
-        cache_and_model = load_model_and_cache_from_wandb(
-            wandb_run_id=args.wandb_run_id,
-        )
-        
-        model = cache_and_model.model.to("cuda").to(torch.bfloat16)
-        cache = cache_and_model.cache.to("cuda").to(torch.bfloat16)
-        tokenizer = AutoTokenizer.from_pretrained(cache_and_model.model.name_or_path)
-        
-        print("Model and cache loaded successfully!\n")
-        
-    except Exception as e:
-        print(f"Error loading model and cache: {e}")
-        sys.exit(1)
+    # Load model and cache
+    cache_and_model = load_model_and_cache_from_wandb(
+        wandb_run_id=args.wandb_run_id,
+    )
+    
+    model = cache_and_model.model.to("cuda").to(torch.bfloat16)
+    cache = cache_and_model.cache.to("cuda").to(torch.bfloat16)
+    tokenizer = AutoTokenizer.from_pretrained(cache_and_model.model.name_or_path)
+    
+    print("Model and cache loaded successfully!\n")
+    
+
     
     # Initialize chat session
     chat = ChatSession(model, tokenizer, cache)

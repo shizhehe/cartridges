@@ -20,7 +20,7 @@ from cartridges.datasets import GenerateEvalDatasetElement, GenerateEvalDataset
 from cartridges.clients.base import ClientConfig, ClientResponse
 
 from cartridges.train import GenerationEvalConfig
-from cartridges.utils.wandb_utils import WandBConfig, prepare_wandb, seed_everything, get_logger
+from cartridges.utils.wandb import WandBConfig, prepare_wandb, seed_everything, get_logger
 
 
 
