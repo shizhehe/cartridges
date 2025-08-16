@@ -9,7 +9,7 @@ from cartridges.data.ruler.resources import NIAHResource
 from cartridges.evaluate import ICLBaseline, EvaluateConfig
 from cartridges.evaluate import GenerationEvalConfig
 
-from cartridges.utils.wandb import WandBConfig
+from cartridges.utils.wandb_utils import WandBConfig
 
 
 client = TokasaurusClient.Config(

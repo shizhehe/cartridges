@@ -8,7 +8,7 @@ from cartridges.clients.tokasaurus import TokasaurusClient
 from cartridges.data.resources import DirectoryResource
 from cartridges.synthesize import SynthesizeConfig
 from cartridges.synthesizers.self_study import SelfStudySynthesizer
-from cartridges.utils.wandb import WandBConfig
+from cartridges.utils.wandb_utils import WandBConfig
 
 
 DATASET_DIR = "/data/sabri/cartridges/2025-08-15-18-03-54-make_codehop/codehop-nf4-nm10-dc2-iv8-ov8-fn36-0"

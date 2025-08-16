@@ -138,7 +138,7 @@ if __name__ == "__main__":
     import argparse
     from transformers import AutoTokenizer
 
-    from cartridges.utils.wandb import load_model_and_cache_from_wandb
+    from cartridges.utils.wandb_utils import load_model_and_cache_from_wandb
 
 
     # Define command line argument parser

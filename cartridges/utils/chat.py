@@ -12,7 +12,7 @@ import readline
 from typing import List, Dict
 from transformers import AutoTokenizer
 
-from cartridges.utils.wandb import load_model_and_cache_from_wandb
+from cartridges.utils.wandb_utils import load_model_and_cache_from_wandb
 from cartridges.generation import flex_generate
 
 
@@ -96,21 +96,18 @@ def main():
     
     print(f"Loading model and cache from {args.wandb_run_id}...")
     
-    try:
-        # Load model and cache
-        cache_and_model = load_model_and_cache_from_wandb(
-            wandb_run_id=args.wandb_run_id,
-        )
-        
-        model = cache_and_model.model.to("cuda").to(torch.bfloat16)
-        cache = cache_and_model.cache.to("cuda").to(torch.bfloat16)
-        tokenizer = AutoTokenizer.from_pretrained(cache_and_model.model.name_or_path)
-        
-        print("Model and cache loaded successfully!\n")
-        
-    except Exception as e:
-        print(f"Error loading model and cache: {e}")
-        sys.exit(1)
+    # Load model and cache
+    cache_and_model = load_model_and_cache_from_wandb(
+        wandb_run_id=args.wandb_run_id,
+    )
+    
+    model = cache_and_model.model.to("cuda").to(torch.bfloat16)
+    cache = cache_and_model.cache.to("cuda").to(torch.bfloat16)
+    tokenizer = AutoTokenizer.from_pretrained(cache_and_model.model.name_or_path)
+    
+    print("Model and cache loaded successfully!\n")
+    
+
     
     # Initialize chat session
     chat = ChatSession(model, tokenizer, cache)
