@@ -37,7 +37,7 @@ from cartridges.datasets import (
 )
 from cartridges.models.config import ModelConfig
 from cartridges.utils import get_logger, seed_everything
-from cartridges.utils.wandb_utils import download_artifacts, WandBConfig, prepare_wandb
+from cartridges.utils.wandb import download_artifacts, WandBConfig, prepare_wandb
 
 
 logger = get_logger(__name__)

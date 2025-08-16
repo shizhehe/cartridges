@@ -12,18 +12,19 @@ from cartridges.train import GenerationEvalConfig, TrainConfig
 from cartridges.models.config import HFModelConfig
 from cartridges.datasets import TrainDataset
 from cartridges.data.codehop.evals import CodeHopGenerateDataset
-from cartridges.utils.wandb_utils import WandBConfig
+from cartridges.utils.wandb import WandBConfig
 
 from cartridges.configs.codehop_synthesize import DATASET_DIR
+dataset_dir = Path(DATASET_DIR).parent
 
 
-NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "2048"))
+NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "512"))
 
 MODEL = os.environ.get("MODEL", "qwen")
 if MODEL == "qwen":
     data_sources = [
-        "/data/sabri/cartridges/2025-08-15-18-06-06-codehop_synthesize/codehop_synthesize_n8192-0/artifact/dataset.parquet",
-        "/data/sabri/cartridges/2025-08-15-18-19-24-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
+        # "/data/sabri/cartridges/2025-08-15-18-19-24-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
+        "/data/sabri/cartridges/2025-08-16-11-06-58-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
     ]
     model=HFModelConfig(
         pretrained_model_name_or_path="Qwen/Qwen3-4b",
@@ -54,7 +55,7 @@ config = TrainConfig(
     generate_eval_every_n_steps=128,
     generate_evals=[
         GenerationEvalConfig(
-            dataset=CodeHopGenerateDataset.Config(make_run_dir=DATASET_DIR),
+            dataset=CodeHopGenerateDataset.Config(make_run_dir=str(dataset_dir)),
             name_for_wandb=f"codehop",
             generate_max_new_tokens=8,
             batch_size=32,

@@ -4,7 +4,7 @@ import abc
 import asyncio
 import os
 import random
-from typing import Any, List, Optional, Literal, Callable
+from typing import Any, Dict, List, Optional, Literal, Callable
 from pydantic import BaseModel
 from pydrantic import ObjectConfig
 
@@ -32,7 +32,7 @@ class Resource(abc.ABC):
 
 SEED_TYPES = Literal[
     "structuring", "summarization", "aggregation", "question", "use_case", "creative", 'generic'
-]
+] | Callable[[Any], str]
 
 
 class TextResource(Resource):
@@ -79,11 +79,15 @@ class DirectoryResource(Resource):
     class Config(Resource.Config):
         path: str
         included_extensions: List[str] = [".py", ".txt", ".json", ".yaml", ".yml", ".toml", ".ini", ".xml"]
+        
+        chunker: Optional[Chunker.Config] = None
+        
         seed_prompts: List[SEED_TYPES]
 
     def __init__(self, config: Config):
         self.config = config
         self.files = []
+        self.file_contents: Dict[str, str | Chunker] = {}
 
     async def setup(self):
         # Get all files in the directory that match the included extensions
@@ -92,6 +96,26 @@ class DirectoryResource(Resource):
             f for f in all_files 
             if any(f.endswith(ext) for ext in self.config.included_extensions)
         ]
+        
+        # Preload all file contents
+        for file_name in self.files:
+            file_path = os.path.join(self.config.path, file_name)
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            except UnicodeDecodeError:
+                # If file can't be decoded as UTF-8, try with latin-1 or skip
+                try:
+                    with open(file_path, 'r', encoding='latin-1') as f:
+                        content = f.read()
+                except Exception:
+                    content = f"[Unable to read file {file_name}]"
+            
+            if self.config.chunker is not None:
+                self.file_contents[file_name] = self.config.chunker.instantiate(text=content)
+            else:
+                self.file_contents[file_name] = content
+        
 
     async def sample_prompt(self, batch_size: int) -> tuple[str, List[str]]:
         if not self.files:
@@ -99,22 +123,18 @@ class DirectoryResource(Resource):
         
         # Select a random file
         selected_file = random.choice(self.files)
-        file_path = os.path.join(self.config.path, selected_file)
         
-        # Read the file content
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-        except UnicodeDecodeError:
-            # If file can't be decoded as UTF-8, try with latin-1 or skip
-            try:
-                with open(file_path, 'r', encoding='latin-1') as f:
-                    content = f.read()
-            except Exception:
-                content = f"[Unable to read file {selected_file}]"
+        # Get preloaded content
+        content = self.file_contents[selected_file]
+
+        if isinstance(content, Chunker):
+            content = content.sample_chunk()
         
         # Create context with file information
-        context = f"File: {selected_file}\n\n{content}"
+        if selected_file.endswith(".py"):
+            context = f"File: {selected_file}\n\n```python\n{content}\n```"
+        else:
+            context = f"File: {selected_file}\n\n{content}"
         
         # Generate seed prompts
         seed_prompts = sample_seed_prompts(self.config.seed_prompts, batch_size)

@@ -7,7 +7,7 @@ from cartridges.clients.tokasaurus import TokasaurusClient
 from cartridges.data.mtob.resources import MTOBResource
 from cartridges.synthesize import SynthesizeConfig
 from cartridges.synthesizers.self_study import SelfStudySynthesizer
-from cartridges.utils.wandb_utils import WandBConfig
+from cartridges.utils.wandb import WandBConfig
 
 
 client = TokasaurusClient.Config(

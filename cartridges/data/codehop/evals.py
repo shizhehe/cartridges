@@ -26,7 +26,13 @@ class CodeHopGenerateDataset(GenerateEvalDataset):
         self.tokenizer = tokenizer
 
         # Load the code hop dataset from the pickle file
-        dataset_path = os.path.join(config.make_run_dir, "dataset.pkl")
+        # Find the dataset file with pattern dataset-{hash}.pkl
+        import glob
+        dataset_pattern = os.path.join(config.make_run_dir, "dataset-*.pkl")
+        dataset_files = glob.glob(dataset_pattern)
+        if not dataset_files:
+            raise FileNotFoundError(f"No dataset pickle file found matching pattern {dataset_pattern}")
+        dataset_path = dataset_files[0]  # Take the first match
         if not os.path.exists(dataset_path):
             raise FileNotFoundError(f"Dataset pickle file not found at {dataset_path}")
         

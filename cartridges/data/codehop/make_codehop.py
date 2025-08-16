@@ -27,19 +27,17 @@ class MakeCodeHopConfig(RunConfig):
 
     def run(self):
         code_hop = make_code_hop(self)
-
+        return code_hop
 
     def hash(self):
-        return hashlib.md5(json.dumps(self.model_dump()).encode()).hexdigest()[:6]
+        
+        data = self.model_dump()
 
+        for key in ["output_dir", "run_id", "run_dir", "launch_id", "script_id"]:
+            data.pop(key, None)
 
-random_alpha_string = lambda length: "".join(
-    random.choices(string.ascii_letters, k=length)
-).lower()
+        return hashlib.md5(json.dumps(data).encode()).hexdigest()[:6]
 
-# random_alpha_string = lambda length: random.choice(
-#     ['apple', 'ball', 'cat', 'dog', 'eat', 'fly', 'good', 'happy', 'ice', 'jump', 'kite', 'lion', 'moon', 'nest', 'open', 'play', 'quiet', 'run', 'sun', 'tree', 'use', 'vase', 'walk', 'xray', 'yes', 'zoo', 'act', 'add', 'ask', 'big', 'boy', 'buy', 'call', 'car', 'city', 'cold', 'come', 'cook', 'cry', 'cut', 'dark', 'day', 'deep', 'draw', 'dream', 'drink', 'dry', 'duck', 'dust', 'each', 'easy', 'egg', 'end', 'eye', 'face', 'fall', 'far', 'fast', 'fat', 'few', 'fill', 'find', 'fine', 'fire', 'fish', 'five', 'flat', 'food', 'foot', 'four', 'free', 'fresh', 'frog', 'full', 'game', 'gate', 'give', 'glad', 'glass', 'gold', 'gray', 'green', 'grow', 'hair', 'half', 'hand', 'hang', 'hard', 'hate', 'have', 'head', 'hear', 'heavy', 'help', 'here', 'high', 'hold', 'home', 'hope', 'hot']
-# )
 
 def make_return_value(
     local_methods: list[Method],
@@ -94,6 +92,15 @@ def make_code_hop(
     import wonderwords
     nouns = wonderwords.random_word._get_words_from_text_file("nounlist.txt")
     adjs = wonderwords.random_word._get_words_from_text_file("adjectivelist.txt")
+
+    def filter_words(word: str) -> bool:
+        return (
+            " " not in word and
+            "-" not in word and
+            "." not in word
+        )
+    nouns = [noun.lower() for noun in nouns if filter_words(noun)]  # remove compound words
+    adjs = [adj.lower() for adj in adjs if filter_words(adj)]  # remove compound words
     words = [f"{adj}_{noun}" for adj in adjs for noun in nouns]
     vocab = sorted(list(set(words)))
 
@@ -169,15 +176,17 @@ def make_code_hop(
         files.append(file)
     code_hop = CodeHop(files=files, input_vocab=input_vocab, output_vocab=output_vocab)
 
-    repo_dir = os.path.join(config.run_dir, "repo")
+    config_hash = config.hash()
+    repo_dir = os.path.join(config.run_dir, f"repo-{config_hash}")
     os.makedirs(repo_dir, exist_ok=True)
     for file in files:
         with open(os.path.join(repo_dir, f"{file.name}.py"), "w") as f:
             f.write(serialize_file(file))
-    pickle.dump(code_hop, open(os.path.join(config.run_dir, "dataset.pkl"), "wb"))
+    dataset_path = os.path.join(config.run_dir, f"dataset-{config_hash}.pkl")
+    pickle.dump(code_hop, open(dataset_path, "wb"))
     print(f"CodeHop dataset generated successfully!")
     print(f"Repository files written to: {repo_dir}")
-    print(f"Dataset pickle saved to: {os.path.join(config.run_dir, 'dataset.pkl')}")
+    print(f"Dataset pickle saved to: {dataset_path}")
     print(f"Generated {len(files)} files with {sum(len(file.methods) for file in files)} total methods")
     return code_hop
 

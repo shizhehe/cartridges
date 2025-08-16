@@ -8,7 +8,7 @@ from cartridges.data.mtob.resources import MTOBResource
 from cartridges.evaluate import ICLBaseline, EvaluateConfig
 from cartridges.evaluate import GenerationEvalConfig
 
-from cartridges.utils.wandb_utils import WandBConfig
+from cartridges.utils.wandb import WandBConfig
 
 
 client = TokasaurusClient.Config(

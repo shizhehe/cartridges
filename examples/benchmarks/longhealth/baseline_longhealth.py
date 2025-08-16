@@ -8,7 +8,7 @@ from cartridges.evaluate import ICLBaseline, EvaluateConfig
 from cartridges.data.longhealth.evals import LongHealthMultipleChoiceGenerateDataset
 from cartridges.evaluate import GenerationEvalConfig
 
-from cartridges.utils.wandb_utils import WandBConfig
+from cartridges.utils.wandb import WandBConfig
 
 client = OpenAIClient.Config(
     base_url="https://hazyresearch--vllm-qwen3-4b-1xh100-serve.modal.run/v1",

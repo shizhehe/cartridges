@@ -19,7 +19,7 @@ import wandb
 from cartridges.synthesizers.base import AsyncConvoSynthesizer
 from cartridges.structs import Conversation, write_conversations
 from cartridges.utils import get_logger
-from cartridges.utils.wandb_utils import prepare_wandb, WandBConfig
+from cartridges.utils.wandb import prepare_wandb, WandBConfig
 from cartridges.utils.hf import upload_run_dir_to_hf
 
 
