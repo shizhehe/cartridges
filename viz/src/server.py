@@ -316,6 +316,44 @@ def health_check():
     print("Health check called!")
     return {'status': 'healthy'}
 
+@app.post("/api/dataset/config")
+def get_dataset_config(request: Dict[str, Any]):
+    """Get the SynthesizeConfig for a dataset if it exists."""
+    try:
+        dataset_path = request.get('dataset_path')
+        if not dataset_path:
+            raise HTTPException(status_code=400, detail="dataset_path is required")
+        
+        if not os.path.exists(dataset_path):
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        
+        # Look for config.yaml in the same directory as the dataset
+        dataset_dir = os.path.dirname(dataset_path)
+        config_path = os.path.join(dataset_dir, 'config.yaml')
+        
+        if not os.path.exists(config_path):
+            # Also try the parent directory (common pattern)
+            parent_config_path = os.path.join(os.path.dirname(dataset_dir), 'config.yaml')
+            if os.path.exists(parent_config_path):
+                config_path = parent_config_path
+            else:
+                return {'config': None, 'path': None}
+        
+        # Load the YAML config
+        import yaml
+        with open(config_path, 'r') as f:
+            config_data = yaml.safe_load(f)
+        
+        return {
+            'config': config_data,
+            'path': config_path,
+            'exists': True
+        }
+    
+    except Exception as e:
+        print(f"Error loading config: {e}")
+        return {'config': None, 'path': None, 'exists': False, 'error': str(e)}
+
 @app.post("/api/decode-tokens")
 def decode_tokens(request: Dict[str, Any]):
     """Decode token IDs to text using the specified tokenizer."""
