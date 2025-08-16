@@ -19,7 +19,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('datasets')
   
   // W&B state
-  const [wandbApiKey, setWandbApiKey] = useState('')
+  const wandbApiKey = process.env.WANDB_API_KEY || ''
   const [wandbEntity, setWandbEntity] = useState('hazy-research')
   const [wandbProject, setWandbProject] = useState('cartridges')
   const [wandbRuns, setWandbRuns] = useState([])
@@ -152,7 +152,7 @@ function App() {
     if (activeTab === 'training' && wandbApiKey && wandbEntity && wandbProject) {
       fetchWandbRuns()
     }
-  }, [activeTab, wandbApiKey, wandbEntity, wandbProject])
+  }, [activeTab, wandbEntity, wandbProject])
 
   // Load dataset with search
   const loadDatasetWithSearch = async (page = 0) => {
@@ -629,11 +629,16 @@ function App() {
                   </label>
                   <input
                     type="password"
-                    placeholder="Enter your W&B API key..."
-                    value={wandbApiKey}
-                    onChange={(e) => setWandbApiKey(e.target.value)}
-                    className="w-full p-2 border border-gray-300 rounded text-sm"
+                    placeholder="Using environment variable..."
+                    value={wandbApiKey ? '••••••••••••••••' : ''}
+                    disabled={true}
+                    className="w-full p-2 border border-gray-300 rounded text-sm bg-gray-100"
                   />
+                  {!wandbApiKey && (
+                    <div className="text-xs text-red-600 mt-1">
+                      WANDB_API_KEY environment variable not set
+                    </div>
+                  )}
                 </div>
                 
                 <div className="grid grid-cols-2 gap-2">
