@@ -5,6 +5,7 @@ import pydrantic
 from pydrantic.variables import FormatStringVariable
 
 from cartridges.clients.tokasaurus import TokasaurusClient
+from cartridges.data.chunkers import TokenChunker
 from cartridges.data.resources import DirectoryResource
 from cartridges.synthesize import SynthesizeConfig
 from cartridges.synthesizers.self_study import SelfStudySynthesizer
@@ -51,6 +52,12 @@ config = SynthesizeConfig(
                     "use_case",
                     "creative",
                 ],
+                chunker=TokenChunker.Config(
+                    tokenizer="Qwen/Qwen3-4b",
+                    min_tokens_per_chunk=64,
+                    max_tokens_per_chunk=256,
+                    wrap_chunk=True,
+                ),
             )
         ],
         system_prompt_template=SYSTEM_PROMPT_TEMPLATE,

@@ -4,12 +4,15 @@ import abc
 import asyncio
 import os
 import random
+import time
 from typing import Any, Dict, List, Optional, Literal, Callable
 from pydantic import BaseModel
 from pydrantic import ObjectConfig
 
 from cartridges.data.chunkers import Chunker
+from cartridges.utils import get_logger
 
+logger = get_logger(__name__)
 
 class Resource(abc.ABC):
 
@@ -90,6 +93,7 @@ class DirectoryResource(Resource):
         self.file_contents: Dict[str, str | Chunker] = {}
 
     async def setup(self):
+        t0 = time.time()
         # Get all files in the directory that match the included extensions
         all_files = [f for f in os.listdir(self.config.path) if os.path.isfile(os.path.join(self.config.path, f))]
         self.files = [
@@ -115,6 +119,7 @@ class DirectoryResource(Resource):
                 self.file_contents[file_name] = self.config.chunker.instantiate(text=content)
             else:
                 self.file_contents[file_name] = content
+        logger.info(f"Loaded {len(self.files)} files from {self.config.path} in {time.time() - t0:.2f} seconds")
         
 
     async def sample_prompt(self, batch_size: int) -> tuple[str, List[str]]:

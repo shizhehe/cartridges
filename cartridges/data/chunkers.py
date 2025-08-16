@@ -27,6 +27,11 @@ class TokenChunker(Chunker):
         min_tokens_per_chunk: Optional[int] = 512
         max_tokens_per_chunk: int = 1024
 
+        # if True, the chunk will be wrapped with special markers indicating 
+        # where the chunk is located in the original text. 
+        # [{start_idx} tokens preceding the chunk]\n{chunk}\n[{end_idx} tokens following the chunk]
+        wrap_chunk: bool = False
+
     def __init__(self, config: Config, text: str):
         super().__init__(text)
         self.config = config
@@ -47,8 +52,12 @@ class TokenChunker(Chunker):
             
         start_idx = random.randint(0, len(self.tokens) - tokens_in_chunk)
         end_idx = start_idx + tokens_in_chunk
-        print(f"tokens_in_chunk: {tokens_in_chunk}, start_idx: {start_idx}, end_idx: {end_idx}")
-        return self.tokenizer.decode(self.tokens[start_idx:end_idx])
+        content = self.tokenizer.decode(self.tokens[start_idx:end_idx])
+
+        if self.config.wrap_chunk:
+            return f"[{start_idx} tokens preceding the chunk]\n{content}\n[{end_idx} tokens following the chunk]"
+        else:
+            return content
 
 
 class CharacterChunker(Chunker):
