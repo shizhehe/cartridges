@@ -6,6 +6,7 @@ from typing import Dict, Optional, Tuple
 
 from transformers import PreTrainedTokenizerFast
 
+from cartridges.data.codehop.structs import LiteralStr
 from cartridges.datasets import GenerateEvalDataset, GenerateEvalDatasetElement
 from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE
 
@@ -58,14 +59,23 @@ class CodeHopGenerateDataset(GenerateEvalDataset):
                     )
             
                     answer = method.call(vocab_word)
-                    questions.append((question, answer))
+                    meta = {
+                        "file_name": file.name,
+                        "method_name": method.name,
+                        "vocab_word": vocab_word,
+                        "cond_eq": method.cond_eq,
+                        "case": vocab_word == method.cond_eq,
+                        "case_true_return_is_str": isinstance(method.case_true_return_value, LiteralStr),
+                        "case_false_return_is_str": isinstance(method.case_false_return_value, LiteralStr),
+                    }
+                    questions.append((question, answer, meta))
         self.questions = questions
 
     
     def __getitem__(
         self, index: int
     ) -> GenerateEvalDatasetElement:
-        question, answer = self.questions[index]
+        question, answer, meta = self.questions[index]
         input_ids = self.tokenizer.apply_chat_template(
             [{"role": "user", "content": question}],
             add_generation_prompt=True,
@@ -77,7 +87,10 @@ class CodeHopGenerateDataset(GenerateEvalDataset):
             input_ids=input_ids,
             answer=answer,
             convo_id=f"codehop_{index}",
-            metadata={"idx": index},
+            metadata={
+                "idx": index,
+                **meta,
+            },
             prompt=question,
         )
 

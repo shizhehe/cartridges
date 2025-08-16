@@ -18,13 +18,14 @@ from cartridges.configs.codehop_synthesize import DATASET_DIR
 dataset_dir = Path(DATASET_DIR).parent
 
 
-NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "512"))
+NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "1024"))
 
 MODEL = os.environ.get("MODEL", "qwen")
 if MODEL == "qwen":
     data_sources = [
         # "/data/sabri/cartridges/2025-08-15-18-19-24-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
-        "/data/sabri/cartridges/2025-08-16-11-06-58-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
+        # "/data/sabri/cartridges/2025-08-16-11-06-58-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
+        "/data/sabri/cartridges/2025-08-16-13-24-57-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
     ]
     model=HFModelConfig(
         pretrained_model_name_or_path="Qwen/Qwen3-4b",

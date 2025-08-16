@@ -50,7 +50,6 @@ config = SynthesizeConfig(
                     "summarization",
                     "question",
                     "use_case",
-                    "creative",
                 ],
                 chunker=TokenChunker.Config(
                     tokenizer="Qwen/Qwen3-4b",
