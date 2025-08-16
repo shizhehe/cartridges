@@ -14,13 +14,16 @@ from cartridges.datasets import TrainDataset
 from cartridges.data.codehop.evals import CodeHopGenerateDataset
 from cartridges.utils.wandb import WandBConfig
 
+from cartridges.configs.codehop_synthesize import DATASET_DIR
+
 
 NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "2048"))
 
 MODEL = os.environ.get("MODEL", "qwen")
 if MODEL == "qwen":
     data_sources = [
-        "/data/sabri/cartridges/2025-08-15-12-52-34-codehop_synthesize/codehop_synthesize_n1024-0/artifact/dataset.parquet"
+        "/data/sabri/cartridges/2025-08-15-18-06-06-codehop_synthesize/codehop_synthesize_n8192-0/artifact/dataset.parquet",
+        "/data/sabri/cartridges/2025-08-15-18-19-24-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
     ]
     model=HFModelConfig(
         pretrained_model_name_or_path="Qwen/Qwen3-4b",
@@ -51,13 +54,11 @@ config = TrainConfig(
     generate_eval_every_n_steps=128,
     generate_evals=[
         GenerationEvalConfig(
-            dataset=CodeHopGenerateDataset.Config(
-                make_run_dir="/data/sabri/cartridges/2025-08-15-15-22-09-make_codehop/codehop-nf10-nm10-mc10-dc10-iv36-ov36-fn36-0/"
-            ),
+            dataset=CodeHopGenerateDataset.Config(make_run_dir=DATASET_DIR),
             name_for_wandb=f"codehop",
-            generate_max_new_tokens=512,
+            generate_max_new_tokens=8,
             batch_size=32,
-            temperature=0.3,
+            temperature=0.0,
         )
     ],
     distributed_backend="gloo",

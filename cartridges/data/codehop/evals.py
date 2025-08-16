@@ -14,6 +14,7 @@ class CodeHopGenerateDataset(GenerateEvalDataset):
     class Config(GenerateEvalDataset.Config):
         _pass_as_config = True
         make_run_dir: str
+        thinking: bool = False
 
     def __init__(
         self, 
@@ -64,6 +65,7 @@ class CodeHopGenerateDataset(GenerateEvalDataset):
             add_generation_prompt=True,
             return_tensors="pt",
             chat_template=MODEL_TO_CHAT_TEMPLATE.get(self.tokenizer.name_or_path, None),
+            enable_thinking=self.config.thinking,
         )
         return GenerateEvalDatasetElement(
             input_ids=input_ids,

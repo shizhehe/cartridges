@@ -11,6 +11,9 @@ from cartridges.synthesizers.self_study import SelfStudySynthesizer
 from cartridges.utils.wandb import WandBConfig
 
 
+DATASET_DIR = "/data/sabri/cartridges/2025-08-15-18-03-54-make_codehop/codehop-nf4-nm10-dc2-iv8-ov8-fn36-0"
+
+
 
 client = TokasaurusClient.Config(
     url="https://hazyresearch--toka-qwen3-4b-1xh100-min0-serve.modal.run",
@@ -22,14 +25,14 @@ config = SynthesizeConfig(
     synthesizer=SelfStudySynthesizer.Config(
         client=client,
         max_rounds=1,
-        prob_thinking=0.75,
+        prob_thinking=0.3,
         use_tools_a=False, 
         use_tools_b=False,
         # max_completion_tokens_b=256,
         tools=[],
         resources=[
             DirectoryResource.Config(
-                path="/data/sabri/cartridges/2025-08-15-15-22-09-make_codehop/codehop-nf10-nm10-mc10-dc10-iv36-ov36-fn36-0/repo",
+                path=os.path.join(DATASET_DIR, "repo"),
                 seed_prompts=[
                     "structuring",
                     "summarization",
@@ -41,7 +44,7 @@ config = SynthesizeConfig(
         ],
     ),
     output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),
-    num_samples=1024, 
+    num_samples=65768, 
     batch_size=32,    # Smaller batches 
     
     max_num_batches_in_parallel=256,
@@ -51,7 +54,7 @@ config = SynthesizeConfig(
     wandb=WandBConfig(
         project="cartridges",
         entity="hazy-research",
-        tags=[f"longhealth_synthesis"],
+        tags=[f"codehop_synthesize"],
     ),
     upload_to_wandb=False,
     save_wandb_preview=False,

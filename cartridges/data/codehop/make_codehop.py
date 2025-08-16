@@ -19,7 +19,6 @@ class MakeCodeHopConfig(RunConfig):
 
     num_files: int=2
     num_methods_per_file: int=8
-    method_name_length: int=8
     deepest_call_chain: int=8
 
     input_vocab_size: int=128
@@ -28,7 +27,6 @@ class MakeCodeHopConfig(RunConfig):
 
     def run(self):
         code_hop = make_code_hop(self)
-        breakpoint()
 
 
     def hash(self):
@@ -42,112 +40,6 @@ random_alpha_string = lambda length: "".join(
 # random_alpha_string = lambda length: random.choice(
 #     ['apple', 'ball', 'cat', 'dog', 'eat', 'fly', 'good', 'happy', 'ice', 'jump', 'kite', 'lion', 'moon', 'nest', 'open', 'play', 'quiet', 'run', 'sun', 'tree', 'use', 'vase', 'walk', 'xray', 'yes', 'zoo', 'act', 'add', 'ask', 'big', 'boy', 'buy', 'call', 'car', 'city', 'cold', 'come', 'cook', 'cry', 'cut', 'dark', 'day', 'deep', 'draw', 'dream', 'drink', 'dry', 'duck', 'dust', 'each', 'easy', 'egg', 'end', 'eye', 'face', 'fall', 'far', 'fast', 'fat', 'few', 'fill', 'find', 'fine', 'fire', 'fish', 'five', 'flat', 'food', 'foot', 'four', 'free', 'fresh', 'frog', 'full', 'game', 'gate', 'give', 'glad', 'glass', 'gold', 'gray', 'green', 'grow', 'hair', 'half', 'hand', 'hang', 'hard', 'hate', 'have', 'head', 'hear', 'heavy', 'help', 'here', 'high', 'hold', 'home', 'hope', 'hot']
 # )
-
-vocab = [
-    "apple",
-    "ball",
-    "cat",
-    "dog",
-    "eat",
-    "fly",
-    "good",
-    "happy",
-    "ice",
-    "jump",
-    "kite",
-    "lion",
-    "moon",
-    "nest",
-    "open",
-    "play",
-    "quiet",
-    "run",
-    "sun",
-    "tree",
-    "use",
-    "vase",
-    "walk",
-    "xray",
-    "yes",
-    "zoo",
-    "act",
-    "add",
-    "ask",
-    "big",
-    "boy",
-    "buy",
-    "call",
-    "car",
-    "city",
-    "cold",
-    "come",
-    "cook",
-    "cry",
-    "cut",
-    "dark",
-    "day",
-    "deep",
-    "draw",
-    "dream",
-    "drink",
-    "dry",
-    "duck",
-    "dust",
-    "each",
-    "easy",
-    "egg",
-    "end",
-    "eye",
-    "face",
-    "fall",
-    "far",
-    "fast",
-    "fat",
-    "few",
-    "fill",
-    "find",
-    "fine",
-    "fire",
-    "fish",
-    "five",
-    "flat",
-    "food",
-    "foot",
-    "four",
-    "free",
-    "fresh",
-    "frog",
-    "full",
-    "game",
-    "gate",
-    "give",
-    "glad",
-    "glass",
-    "gold",
-    "gray",
-    "green",
-    "grow",
-    "hair",
-    "half",
-    "hand",
-    "hang",
-    "hard",
-    "hate",
-    "have",
-    "head",
-    "hear",
-    "heavy",
-    "help",
-    "here",
-    "high",
-    "hold",
-    "home",
-    "hope",
-    "hot",
-]
-
-
-
 
 def make_return_value(
     local_methods: list[Method],
@@ -199,6 +91,11 @@ def make_code_hop(
     config: MakeCodeHopConfig,
 ) -> CodeHop:
     random.seed(config.seed)
+    import wonderwords
+    nouns = wonderwords.random_word._get_words_from_text_file("nounlist.txt")
+    adjs = wonderwords.random_word._get_words_from_text_file("adjectivelist.txt")
+    words = [f"{adj}_{noun}" for adj in adjs for noun in nouns]
+    vocab = sorted(list(set(words)))
 
     output_vocab = random.sample(vocab, config.output_vocab_size)
     input_vocab = random.sample(vocab, config.input_vocab_size)
@@ -258,8 +155,8 @@ def make_code_hop(
             )
 
         for _ in range(100):
-            file_name = random_alpha_string(8)
-            if file_name not in file_names:
+            file_name = random.choice(vocab)
+            if file_name not in file_names and file_name not in method_names:
                 break
         else:
             raise ValueError("Could not find a unique file name after 100 tries")
@@ -345,15 +242,14 @@ def serialize_file(file: CodeHopFile):
 if __name__ == "__main__":
     import pydrantic
     config = MakeCodeHopConfig(
-        num_files=10,
+        num_files=4,
         num_methods_per_file=10,
-        method_name_length=10,
-        deepest_call_chain=10,
-        input_vocab_size=36,
-        output_vocab_size=36,
+        deepest_call_chain=2,
+        input_vocab_size=8,
+        output_vocab_size=8,
         function_name_vocab_size=36,
         run_id=FormatStringVariable(
-            "codehop-nf{num_files}-nm{num_methods_per_file}-mc{method_name_length}-dc{deepest_call_chain}-iv{input_vocab_size}-ov{output_vocab_size}-fn{function_name_vocab_size}"
+            "codehop-nf{num_files}-nm{num_methods_per_file}-dc{deepest_call_chain}-iv{input_vocab_size}-ov{output_vocab_size}-fn{function_name_vocab_size}"
         )
     )
     pydrantic.main([config])
