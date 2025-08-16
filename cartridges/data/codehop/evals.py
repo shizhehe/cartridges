@@ -4,7 +4,6 @@ import pickle
 from textwrap import dedent
 from typing import Dict, Optional, Tuple
 
-from pydrantic import ObjectConfig
 from transformers import PreTrainedTokenizerFast
 
 from cartridges.datasets import GenerateEvalDataset, GenerateEvalDatasetElement
@@ -12,7 +11,7 @@ from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE
 
 
 class CodeHopGenerateDataset(GenerateEvalDataset):
-    class Config(ObjectConfig):
+    class Config(GenerateEvalDataset.Config):
         _pass_as_config = True
         make_run_dir: str
 

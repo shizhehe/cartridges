@@ -11,7 +11,7 @@ from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
 from cartridges.train import GenerationEvalConfig, TrainConfig
 from cartridges.models.config import HFModelConfig
 from cartridges.datasets import TrainDataset
-from cartridges.data.codehop.evals import CodeHopMultipleChoiceGenerateDataset
+from cartridges.data.codehop.evals import CodeHopGenerateDataset
 from cartridges.utils.wandb import WandBConfig
 
 
@@ -51,8 +51,8 @@ config = TrainConfig(
     generate_eval_every_n_steps=128,
     generate_evals=[
         GenerationEvalConfig(
-            dataset=CodeHopMultipleChoiceGenerateDataset.Config(
-                make_run_dir="/data/sabri/cartridges/2025-08-15-12-20-31-synthesize_task/codehop-nf10-nm10-mc10-dc10-iv36-ov36-fn36-0",
+            dataset=CodeHopGenerateDataset.Config(
+                make_run_dir="/data/sabri/cartridges/2025-08-15-15-22-09-make_codehop/codehop-nf10-nm10-mc10-dc10-iv36-ov36-fn36-0/"
             ),
             name_for_wandb=f"codehop",
             generate_max_new_tokens=512,

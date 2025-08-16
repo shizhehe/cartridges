@@ -29,7 +29,7 @@ config = SynthesizeConfig(
         tools=[],
         resources=[
             DirectoryResource.Config(
-                path="/data/sabri/cartridges/2025-08-15-12-20-31-synthesize_task/codehop-nf10-nm10-mc10-dc10-iv36-ov36-fn36-0/repo",
+                path="/data/sabri/cartridges/2025-08-15-15-22-09-make_codehop/codehop-nf10-nm10-mc10-dc10-iv36-ov36-fn36-0/repo",
                 seed_prompts=[
                     "structuring",
                     "summarization",
