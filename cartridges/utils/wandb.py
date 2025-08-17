@@ -316,6 +316,7 @@ def fetch_wandb_table(
         api = wandb.Api()
 
         # List all versions of this artifact
+        print(artifact_id)
         version_ids = list(api.artifact_versions("run_table", artifact_id))
 
         if versions == "latest":
