@@ -19,7 +19,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('datasets')
   
   // W&B state
-  const wandbApiKey = process.env.WANDB_API_KEY || ''
+  const wandbApiKey = import.meta.env.VITE_WANDB_API_KEY || ''
   const [wandbEntity, setWandbEntity] = useState('hazy-research')
   const [wandbProject, setWandbProject] = useState('cartridges')
   const [wandbRuns, setWandbRuns] = useState([])
@@ -113,6 +113,8 @@ function App() {
     setWandbError(null)
     
     try {
+      console.log('API Key length:', wandbApiKey.length)
+      console.log('Making request to:', `https://api.wandb.ai/api/v1/runs/${wandbEntity}/${wandbProject}`)
       // Use W&B REST API directly
       const response = await fetch(`https://api.wandb.ai/api/v1/runs/${wandbEntity}/${wandbProject}`, {
         headers: {

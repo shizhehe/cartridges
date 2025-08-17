@@ -13,7 +13,7 @@ from cartridges.data.resources import TextFileResource
 from cartridges.clients.tokasaurus import TokasaurusClient
 
 client = TokasaurusClient.Config(
-    url="https://hazyresearch--toka-qwen3-4b-1xh100-min0-serve.modal.run",
+    url=os.environ.get("CARTRIDGES_TOKASAURUS_QWEN3_4B_URL", "http://localhost:8000"),
     model_name="Qwen/Qwen3-4b",
 )
 

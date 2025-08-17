@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pydrantic
@@ -10,20 +11,14 @@ from cartridges.evaluate import GenerationEvalConfig
 
 from cartridges.utils.wandb import WandBConfig
 
+
+base_url = os.environ.get("CARTRIDGES_VLLM_QWEN3_4B_URL", "http://localhost:8000")
+
 client = OpenAIClient.Config(
-    base_url="https://hazyresearch--vllm-qwen3-4b-1xh100-serve.modal.run/v1",
+    base_url=os.path.join(base_url, "v1"),
     model_name="Qwen/Qwen3-4b",
 )
 
-client = OpenAIClient.Config(
-    base_url="http://localhost:10210/v1/cartridge",
-    model_name="Qwen/Qwen3-8b",
-    cartridges=[CartridgeConfig(
-        id="1wqgicqv",
-        source="wandb",
-        force_redownload=False
-    )]
-)
 
 SYSTEM_PROMPT_TEMPLATE = f"""Please reference the patient medical records included below to answer the user's questions.
 
