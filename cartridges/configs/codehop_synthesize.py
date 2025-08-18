@@ -15,11 +15,19 @@ from cartridges.utils.wandb import WandBConfig
 DATASET_DIR = "/data/sabri/cartridges/2025-08-16-10-52-34-make_codehop/codehop-nf4-nm10-dc2-iv8-ov8-fn36-0/repo-9ca4f1"
 
 
-
-client = TokasaurusClient.Config(
-    url="https://hazyresearch--toka-qwen3-4b-1xh100-min0-serve.modal.run",
-    model_name="Qwen/Qwen3-4b",
-)
+MODEL = os.environ.get("MODEL", "qwen")
+if MODEL == "qwen":
+    client = TokasaurusClient.Config(
+        url="https://hazyresearch--toka-qwen3-4b-1xh100-min0-serve.modal.run",
+        model_name="Qwen/Qwen3-4b",
+    )
+elif MODEL == "llama":
+    client = TokasaurusClient.Config(
+        url="https://hazyresearch--toka-llama-3-2-3b-1xh100-batch-serve.modal.run",
+        model_name="meta-llama/Llama-3.2-3B-Instruct",
+    )
+else:
+    raise ValueError(f"Invalid model: {MODEL}")
 
 SYSTEM_PROMPT_TEMPLATE = """Below is a Python file that is part of a larger repository.
 It contains a number of methods. Note, that some of the methods may make calls to other
@@ -27,6 +35,7 @@ methods which are defined in other files.
 
 Other files may define methods with the same name, so when discussing the methods in 
 this file, make sure you reference them with the module name (e.g. `file_name.method_name`). 
+Also, make sure you consider different inputs to the methods and edge cases.
 
 <code>
 {subcorpus}
@@ -37,7 +46,9 @@ config = SynthesizeConfig(
     synthesizer=SelfStudySynthesizer.Config(
         client=client,
         max_rounds=1,
-        prob_thinking=0.3,
+        prob_thinking=0.1,
+        temperature_a=0.6,
+        temperature_b=0.0,
         use_tools_a=False, 
         use_tools_b=False,
         # max_completion_tokens_b=256,
@@ -46,13 +57,13 @@ config = SynthesizeConfig(
             DirectoryResource.Config(
                 path=DATASET_DIR,
                 seed_prompts=[
-                    "structuring",
-                    "summarization",
+                    # "structuring",
+                    # "summarization",
                     "question",
                     "use_case",
                 ],
                 chunker=TokenChunker.Config(
-                    tokenizer="Qwen/Qwen3-4b",
+                    tokenizer=client.model_name,
                     min_tokens_per_chunk=64,
                     max_tokens_per_chunk=256,
                     wrap_chunk=True,

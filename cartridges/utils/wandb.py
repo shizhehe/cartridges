@@ -285,8 +285,9 @@ def read_conversations_from_wandb(
     return conversations
 
 def fetch_wandb_table(
-    artifact_id: str,
-    versions: Literal["latest", "all"] = "latest",
+    run_id: str,
+    artifact_collection: Optional[str] = None,
+    versions: Literal["latest", "all"] | List[str] = "latest",
     project_name: str = "cartridges",
     entity: str = "hazy-research",
 ) -> pd.DataFrame:
@@ -309,33 +310,29 @@ def fetch_wandb_table(
     """
 
     # Define the artifact ID
-    artifact_id = f"{entity}/{project_name}/{artifact_id}"
-
-    if ":" not in artifact_id:
-        # If no version is specified, list available versions
-        api = wandb.Api()
-
-        # List all versions of this artifact
-        print(artifact_id)
-        version_ids = list(api.artifact_versions("run_table", artifact_id))
-
-        if versions == "latest":
-            artifact_ids = [f"{artifact_id}:{version_ids[0].version}"]
-        elif versions == "all":
-            artifact_ids = [
-                f"{artifact_id}:{version.version}" for version in version_ids
-            ]
-        else:
-            raise ValueError(f"Invalid versions: {versions}")
-    else:
-        artifact_ids = [artifact_id]
-
-    # Initialize wandb
     api = wandb.Api()
+    run_id = f"{entity}/{project_name}/{run_id}" if "/" not in run_id else run_id
+    run = api.run(run_id)
+    artifacts = list(run.logged_artifacts())
 
-    def process_artifact(artifact_id, api):
+    artifacts = [a for a in artifacts if a.type == "run_table"]
+
+    if artifact_collection is not None:
+        artifacts = [a for a in artifacts if a.name.split(":")[0].endswith(artifact_collection)]
+    
+    # If no version is specified, list available versions
+    if versions == "latest":
+        artifact = max(artifacts, key=lambda x: int(x.version.strip("v")))
+        artifacts = [artifact]
+    elif versions == "all":
+        pass
+    elif isinstance(versions, list):
+        artifacts = [a for a in artifacts if a.version in versions]
+    else:
+        raise ValueError(f"Invalid versions: {versions}")
+
+    def process_artifact(artifact):
         # Download the artifact
-        artifact = api.artifact(artifact_id)
         artifact_dir = artifact.download(root=tempfile.mkdtemp())
 
         # Search recursively for the table.table.json file in the artifact directory
@@ -350,7 +347,7 @@ def fetch_wandb_table(
 
         if table_path is None:
             raise ValueError(
-                f"Table not found in the artifact directory for {artifact_id}"
+                f"Table not found in the artifact directory for {artifact.name}"
             )
 
         with open(table_path) as f:
@@ -360,16 +357,14 @@ def fetch_wandb_table(
             data["data"],
             columns=data["columns"],
         )
-        curr_df["artifact_id"] = artifact_id
+        curr_df["artifact_id"] = artifact.name
         return curr_df
 
     # Use ThreadPoolExecutor to process artifacts in parallel
     all_dfs = []
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        # Create a partial function with the api already set
-        process_func = partial(process_artifact, api=api)
+    with concurrent.futures.ThreadPoolExecutor() as executor:        
         # Map the function to all artifact IDs and collect results
-        results = list(executor.map(process_func, artifact_ids))
+        results = list(executor.map(process_artifact, artifacts))
         all_dfs.extend(results)
 
     df = pd.concat(all_dfs)

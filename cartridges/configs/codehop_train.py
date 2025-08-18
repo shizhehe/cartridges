@@ -25,11 +25,23 @@ if MODEL == "qwen":
     data_sources = [
         # "/data/sabri/cartridges/2025-08-15-18-19-24-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
         # "/data/sabri/cartridges/2025-08-16-11-06-58-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
-        "/data/sabri/cartridges/2025-08-16-13-24-57-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
+        # "/data/sabri/cartridges/2025-08-16-13-24-57-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
+        "/data/sabri/cartridges/2025-08-18-10-03-08-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
+
     ]
     model=HFModelConfig(
         pretrained_model_name_or_path="Qwen/Qwen3-4b",
         model_cls=FlexQwen3ForCausalLM,
+    )
+elif MODEL == "llama":
+    data_sources = [
+        # "/data/sabri/cartridges/2025-08-18-10-25-20-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
+        # "/data/sabri/cartridges/2025-08-18-10-50-58-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
+        "/data/sabri/cartridges/2025-08-18-10-58-55-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
+    ]
+    model=HFModelConfig(
+        pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
+        model_cls=FlexLlamaForCausalLM,
     )
 else:
     raise ValueError(f"Invalid model: {MODEL}")
