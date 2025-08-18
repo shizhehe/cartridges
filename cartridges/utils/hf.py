@@ -73,7 +73,8 @@ def upload_run_dir_to_hf(
     repo_id: str,
     token: Optional[str] = None,
     private: bool = False,
-    commit_message: Optional[str] = None
+    commit_message: Optional[str] = None,
+    collection_slug: Optional[str] = None
 ) -> str:
     """Upload a run directory containing artifacts and config to HuggingFace Hub.
     
@@ -83,6 +84,7 @@ def upload_run_dir_to_hf(
         token: HuggingFace token for authentication (if None, uses HF_TOKEN env var)
         private: Whether to create a private repository
         commit_message: Commit message for the upload
+        collection_slug: Optional collection slug to add the dataset to (e.g., "username/collection-name")
         
     Returns:
         URL of the uploaded dataset
@@ -163,6 +165,20 @@ def upload_run_dir_to_hf(
         commit_message=commit_message or f"Upload config from {run_dir}"
     )
     
+    # Add to collection if specified
+    if collection_slug:
+        logger.info(f"Adding dataset to collection: {collection_slug}")
+        try:
+            api.add_collection_item(
+                collection_slug=collection_slug,
+                item_id=repo_id,
+                item_type="dataset",
+                token=token
+            )
+            logger.info(f"Successfully added dataset to collection: {collection_slug}")
+        except Exception as e:
+            logger.warning(f"Failed to add dataset to collection {collection_slug}: {e}")
+    
     dataset_url = f"https://huggingface.co/datasets/{repo_id}"
     logger.info(f"Run directory uploaded successfully: {dataset_url}")
     return dataset_url
@@ -177,6 +193,7 @@ if __name__ == "__main__":
     parser.add_argument("--token", help="HuggingFace token (defaults to HF_TOKEN env var)")
     parser.add_argument("--private", action="store_true", help="Create private repository")
     parser.add_argument("--commit-message", help="Custom commit message")
+    parser.add_argument("--collection", help="Collection slug to add the dataset to (e.g., 'username/collection-name')")
     
     args = parser.parse_args()
     
@@ -194,7 +211,8 @@ if __name__ == "__main__":
             repo_id=args.repo_id,
             token=args.token,
             private=args.private,
-            commit_message=args.commit_message
+            commit_message=args.commit_message,
+            collection_slug=args.collection
         )
     else:
         logger.error(f"Unsupported path: {args.path}. Must be a run directory.")
