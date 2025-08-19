@@ -20,7 +20,6 @@ The code is based on our paper *[Cartridges: Lightweight and general-purpose lon
 
 
 **Table of contents**
-- [Quick Start](#quick-start)
 - [Setup](#setup)
 - [Running Self-Study](#running-self-study)
   - [Step 1: Synthesize training data](#step-1-synthesize-training-data)
@@ -30,7 +29,7 @@ The code is based on our paper *[Cartridges: Lightweight and general-purpose lon
   - [Step 2: Run context-distillation (i.e. training) on the synthesized data](#step-2-run-context-distillation-ie-training-on-the-synthesized-data)
     - [Step 2.1: Evaluation](#step-21-evaluation)
 - [Serving Cartridges](#serving-cartridges)
-- [Troubleshooting](#troubleshooting)
+- [TODOs and known issues](#todos-and-known-issues)
 - [Acknowledgments and Citation](#acknowledgments-and-citation)
 
 
@@ -46,7 +45,7 @@ uv pip install -e .
 
 **Step 2:** Set some environment variables
 
-The codebase relies on your setting the following variables. We recommend adding them to your `~/.bashrc`, `~/.zshrc`, `DockerFile`, etc.
+The codebase relies on your setting the following variables. Make sure to include them in your environment (**i.e.** Add them to your `.env`, `DockerFile`, or `.bashrc`). 
 
 ```bash
 # path to your the directory where you cloned this repo
@@ -57,8 +56,8 @@ export CARTRIDGES_OUTPUT_DIR=/path/to/cartridges/outputs
 
 # the code in this repository is tightly integrated with wandb
 # set your wandb project and entity here
-export CARTRIDGES_WANDB_PROJECT=cartridges
-export CARTRIDGES_WANDB_ENTITY=
+export CARTRIDGES_WANDB_PROJECT=your-wandb-project
+export CARTRIDGES_WANDB_ENTITY=your-wandb-username-or-team
 ```
 
 
@@ -66,7 +65,7 @@ export CARTRIDGES_WANDB_ENTITY=
 
 **What is self-study?** Self-study is an approach for training a model to understand a corpus of text. It works by generating synthetic conversations about a corpus of text and then training the model on those conversations with a context-distillation objective. The process consists of two AI agents in conversation with one another: one asks questions or makes requests about the content, and another responds using the provided context. 
 
-**Quickstart**: Take a look at the scripts at `examples/arxiv/arxiv_synthesize.py` and `examples/arxiv/arxiv_train.py` for a basic example of how to synthesize training data and run context-distillation on the synthesized data. To run the synthesis script, you will need to spin up an inference server (either [Tokasaurus](https://github.com/ScalingIntelligence/tokasaurus) or [SGLang](https://github.com/sgl-project/sglang)) and set the `client` variable to point to it. [See below for more details on how to do this.](#step-3-prepare-an-inference-server)
+**Quickstart**: Take a look at the scripts at `examples/arxiv/arxiv_synthesize.py` and `examples/arxiv/arxiv_train.py` for a basic example of how to synthesize training data and run context-distillation on the synthesized data. To run the synthesis script, you will need to spin up an inference server (either [Tokasaurus](https://github.com/ScalingIntelligence/tokasaurus) or [SGLang](https://github.com/sgl-project/sglang)) and set the `client` variable to point to it. [See below for more details on how to do this.](#step-1-2-prepare-an-inference-server)
 
 Below we walk through the process of generating synthetic training data for a corpus of text. As a running example, we'll be training a cartridge on our [paper on Cartridges](https://arxiv.org/abs/2506.06266). How meta!
 <!-- Here are the steps:
@@ -83,10 +82,10 @@ Below we walk through the process of generating synthetic training data for a co
 ### Step 1: Synthesize training data
 *Note: See `examples/arxiv/arxiv_synthesize.py` for the full example developed in this section.*
 
-Below is the outline of a script for running the synthesis. It simply instantiates a [`SynthesizeConfig`](./cartridges/synthesize.py#L10) object and runs it with `pydrantic.main([config])`. *Note: Using `pydrantic.main` allow us to override the config on the command line like `python your_synthesis_script.py num_samples=1024`.*
+Below is the outline of a script for running the synthesis. It simply instantiates a [`SynthesizeConfig`](./cartridges/synthesize.py#L10) object and runs it with `pydrantic.main([config])`. *Note: Using `pydrantic.main` is simply a utility that calls the configs `.run` method, but in a way that allows us to override the config on the command line like so: `python your_synthesis_script.py num_samples=1024`.*
 
-The config has a couple of key fields missing: the resource, which controls what data is used , and a client of an inference server (*e.g.* SGLang or Tokasaurus). We'll cover those two below. 
-There are many other configuration options we're not covering here, so refer to the [`SynthesizeConfig`](./cartridges/synthesize.py#L10) and [`SelfStudySynthesizer`](./cartridges/synthesizers/self_study.py#L10) for the full list.
+The config has a couple of key fields missing: the resource, which controls what raw text data we're training on, and a client of an inference server (*e.g.* SGLang or Tokasaurus). We'll cover those two below. 
+There are many other configuration options we're not covering here, so refer to the [`SynthesizeConfig`](./cartridges/synthesize.py#L10) and [`SelfStudySynthesizer`](./cartridges/synthesizers/self_study.py#L10) for the full list and documentation.
 
 ```python
 from cartridges.synthesize import SynthesizeConfig
@@ -438,6 +437,12 @@ response = requests.post("http://localhost:10210/v1/cartridge/chat/completions",
 ```
 
 Tokasaurus can also pull Cartridges from HuggingFace and local files. You can also compose multiple cartridges in a single request. See the [Tokasaurus documentation](https://github.com/ScalingIntelligence/tokasaurus/tree/geoff/cartridges?tab=readme-ov-file#cartridges) for the full instructions.
+
+## TODOs and known Issues
+The following are TODOs on our roadmap and known issues. Feel free to submit a pull-request or reach out if you'd like to see any of these prioritized. 
+- [ ] We're occassionally seeing a NCCL collective operation timeout when running data parallel training. If you encounter this error, you can set `distributed_backend="gloo"` while we debug the issue.
+- [ ] Upload trained Cartridges to HuggingFace
+- [x] Upload synthetic datasets Huggingface. (Update: https://huggingface.co/collections/hazyresearch/cartridges-689f93fa4fecdee6cf77c11e)
 
 
 ## Acknowledgments and Citation
