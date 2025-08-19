@@ -3,11 +3,7 @@
 
 We (heavily-assisted by Claude Code) implemented a handy-dandy tool for visualizing the synthesized dataset. We've found this very useful for debugging and improving the self-study process. It provides a simple dashboard where you can select a dataset and inspect each synthesized conversation.
 
-<img src="../assets/examples-overview.png" alt="Visualization" width="400"/>
-<img src="../assets/example-focus.png" alt="Visualization" width="400"/>
-
-We highly recommend adapting the interface to your needs, we've found Claude Code to be very helpful in this process.
-
+We encourage you to adapt the interface to your needs, we've found Claude Code to be very helpful in this process.
 
 ## Setup
 
@@ -32,6 +28,13 @@ Make sure to set the `VITE_API_TARGET` to the port of the server.
 ```bash
 VITE_API_TARGET=http://localhost:8001 npm run dev
 ```
+
+---
+
+
+
+<img src="../assets/examples-overview.png" alt="Visualization" width="1000"/>
+<img src="../assets/example-focus.png" alt="Visualization" width="1000"/>
 
 
 

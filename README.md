@@ -270,7 +270,7 @@ Copy this path to your clipboard. See [`TrainingExample`](./cartridges/structs.p
 We (read: Claude Code) implemented a nice visualization tool for exploring the synthesized dataset.
 To run it, follow the instruction in [`viz/README.md`](./viz/README.md).
 
-<img src="assets/examples-overview.png" alt="Visualization" width="400"/>
+<img src="assets/examples-overview.png" alt="Visualization" width="1000"/>
 
 </details>
 
