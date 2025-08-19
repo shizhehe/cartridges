@@ -183,7 +183,7 @@ If you have access to GPUs, you can run also run a local Tokasaurus server:
 ```bash
 git clone https://github.com/ScalingIntelligence/tokasaurus
 cd tokasaurus
-git checkout sabri/batch  # temporary fix, this will soon be merged into main
+git checkout --track origin/sabri/batch  # temporary fix, this will soon be merged into main
 uv pip install -e .
 ```
 

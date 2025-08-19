@@ -13,7 +13,7 @@ from cartridges.datasets import DataSource, TrainDataset
 from cartridges.utils.wandb import WandBConfig
 
 
-NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "8192"))
+NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "4096"))
 
 MODEL = os.environ.get("MODEL", "llama")
 if MODEL == "qwen":
@@ -34,7 +34,7 @@ elif MODEL == "llama":
         "hazyresearch/m07d28_mtob_synthesize_llama-3.2-3b_n65536-1"
     ]
     model = HFModelConfig(
-        pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
+        pretrained_model_name_or_path="meta-llama/Llama-3.1-8B-Instruct",
         model_cls=FlexLlamaForCausalLM,
     )
 else:

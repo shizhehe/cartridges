@@ -56,13 +56,13 @@ def read_conversations_from_hf(repo_id: str, token: Optional[str] = None) -> lis
             logger.info(f"Loaded {len(conversations)} conversations from {parquet_file}")
         
         conversations = all_conversations
+        print(len(conversations), "HERREEEEE")
         
     except ImportError:
         # Fallback to single file if huggingface_hub is not available
         logger.warning("huggingface_hub not available, falling back to single shard")
         url = f"https://huggingface.co/datasets/{repo_id}/resolve/main/data/train-00000-of-00001.parquet"
         conversations = read_conversations(url)
-    conversations = read_conversations(url)
     
     logger.info(f"Loaded {len(conversations)} conversations from {repo_id}")
     return conversations
