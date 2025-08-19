@@ -76,6 +76,8 @@ Below we walk through the process of generating synthetic training data for a co
 4. Put it all together in one script and run it!
 5. Run context-distillation (i.e. training) on the synthesized data -->
 
+> **Note:** We used [Modal](https://modal.com/) to run our inference workloads when developing self-study. Since containers on Modal start up quite quickly, it's practical to scale out horizontally to several dozen GPUs for very short bursts (<5 mins). This is ideal for experimentation with different self-study data synthesis approaches because it makes things more interactive, reducing the time between making a change to the approach and getting feedback during training. In `infra/`, we provide scripts for deploying inference servers on Modal.  
+
 > **Note:** For configuration, we use [Pydantic](https://docs.pydantic.dev/latest/) models. Pydantic models are useful for defining the schema of the config and quickly ensuring that the config is valid at the beginning of a run. We also rely on [`pydrantic`](https://github.com/seyuboglu/pydrantic), which provides a few utilities for working with configs.
 
 
