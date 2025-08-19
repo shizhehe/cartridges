@@ -32,25 +32,28 @@ function App() {
     metadata: false
   })
   const [isScrolled, setIsScrolled] = useState(false)
+  const [copySuccess, setCopySuccess] = useState(false)
+
+  // Dataset discovery function
+  const discoverDatasets = async () => {
+    try {
+      setLoadingDatasets(true)
+      console.log('Fetching datasets...')
+      const response = await fetch('/api/datasets')
+      const data = await response.json()
+      console.log('Datasets received:', data)
+      // Ensure datasets are sorted by relative path (reverse alphabetical)
+      const sortedData = data.sort((a, b) => b.relative_path.localeCompare(a.relative_path))
+      setDatasets(sortedData)
+    } catch (error) {
+      console.error('Failed to discover datasets:', error)
+    } finally {
+      setLoadingDatasets(false)
+    }
+  }
 
   // Dataset discovery
   useEffect(() => {
-    const discoverDatasets = async () => {
-      try {
-        setLoadingDatasets(true)
-        console.log('Fetching datasets...')
-        const response = await fetch('/api/datasets')
-        const data = await response.json()
-        console.log('Datasets received:', data)
-        // Ensure datasets are sorted by relative path (reverse alphabetical)
-        const sortedData = data.sort((a, b) => b.relative_path.localeCompare(a.relative_path))
-        setDatasets(sortedData)
-      } catch (error) {
-        console.error('Failed to discover datasets:', error)
-      } finally {
-        setLoadingDatasets(false)
-      }
-    }
     discoverDatasets()
   }, [outputDir])
 
@@ -63,7 +66,6 @@ function App() {
     setLoadingDatasetPath(datasetPath)
     setDatasetError(null)
     setConfigData(null)
-    setSearchQuery('') // Reset search when switching datasets
     
     try {
       // First, load dataset metadata quickly
@@ -71,7 +73,8 @@ function App() {
       const info = await infoResponse.json()
       setTotalExamples(info.total_count)
       
-      // Then load the first page of examples (will be updated by useEffect)
+      // Reset search and load the first page of examples
+      setSearchQuery('')
       await loadDatasetWithSearch(0)
       
       // Also automatically load the config
@@ -194,7 +197,7 @@ function App() {
 
   // Reload data when search query or search fields change
   useEffect(() => {
-    if (selectedDataset) {
+    if (selectedDataset && !loadingDatasetPath) {
       loadDatasetWithSearch(0) // Reset to first page when search changes
     }
   }, [searchQuery, searchFields])
@@ -580,6 +583,25 @@ function App() {
                   className="w-full p-2 border border-gray-300 rounded text-sm"
                 />
               </div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-medium text-gray-700">Datasets</h3>
+                <button
+                  onClick={discoverDatasets}
+                  disabled={loadingDatasets}
+                  className="px-3 py-1.5 bg-blue-100 hover:bg-blue-200 disabled:bg-gray-100 text-blue-700 disabled:text-gray-500 text-xs rounded border border-blue-300 disabled:border-gray-300 transition-colors flex items-center gap-1"
+                  title="Refresh datasets list"
+                >
+                  <svg 
+                    className={`w-3 h-3 ${loadingDatasets ? 'animate-spin' : ''}`} 
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  Refresh
+                </button>
+              </div>
               <div className="flex flex-col gap-2">
                 {loadingDatasets ? (
                   <div className="flex flex-col items-center justify-center py-8 text-center">
@@ -792,10 +814,31 @@ function App() {
                     <div className="text-sm font-mono text-gray-700 break-all">{selectedDataset}</div>
                   </div>
                   <button
-                    onClick={() => navigator.clipboard.writeText(selectedDataset)}
-                    className="px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border border-blue-300 whitespace-nowrap"
-                    title="Copy path to clipboard"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(selectedDataset)
+                        setCopySuccess(true)
+                        setTimeout(() => setCopySuccess(false), 2000)
+                      } catch (error) {
+                        console.error('Failed to copy:', error)
+                      }
+                    }}
+                    className={`px-3 py-1 text-xs rounded border whitespace-nowrap transition-all duration-200 flex items-center justify-center gap-1 ${
+                      copySuccess 
+                        ? 'bg-green-100 hover:bg-green-200 text-green-700 border-green-300' 
+                        : 'bg-blue-100 hover:bg-blue-200 text-blue-700 border-blue-300'
+                    }`}
+                    title={copySuccess ? "Copied!" : "Copy path to clipboard"}
                   >
+                    {copySuccess ? (
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    )}
                     Copy
                   </button>
                 </div>
