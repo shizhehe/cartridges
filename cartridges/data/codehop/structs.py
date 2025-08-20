@@ -36,9 +36,19 @@ class Method:
         return_val = self.mapping[x]
 
         if isinstance(return_val, MethodCall):
-            return return_val.method_obj.call(x)
+            return return_val.method_obj.call(x, )
         elif isinstance(return_val, LiteralStr):
             return return_val.content
+        else:
+            raise ValueError(f"Invalid type for return value: {type(return_val)}")
+        
+    def call_with_depth(self, x) -> tuple[str, int]:
+        return_val = self.mapping[x]
+        if isinstance(return_val, MethodCall):
+            val, depth = return_val.method_obj.call_with_depth(x) 
+            return val, depth + 1
+        elif isinstance(return_val, LiteralStr):
+            return return_val.content, 1
         else:
             raise ValueError(f"Invalid type for return value: {type(return_val)}")
 

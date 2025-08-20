@@ -108,10 +108,14 @@ def make_code_hop(
         f"apply_{adj}_random_map"
         for adj in random.sample(adjs, config.function_name_vocab_size)
     ]
+    all_file_names = [
+        f"{adj}_random_maps"
+        for adj in random.sample(adjs, config.num_files)
+    ]
     files: list[CodeHopFile] = []
     file_names = set()
 
-    for _ in range(config.num_files):
+    for file_name in all_file_names:
         method_names = random.sample(all_method_names, config.num_methods_per_file)
         methods: list[Method] = []
 
@@ -146,19 +150,10 @@ def make_code_hop(
                     call_chain_depth=max(call_chain_depth for _, call_chain_depth in mapping.values()),
                 )
             )
-
-        for _ in range(100):
-            file_name = random.choice(vocab)
-            if file_name not in file_names and file_name not in method_names:
-                break
-        else:
-            raise ValueError("Could not find a unique file name after 100 tries")
-
         file = CodeHopFile(
             name=file_name,
             methods=methods,
         )
-        file_names.add(file_name)
         files.append(file)
     code_hop = CodeHop(files=files, vocab=vocab)
 
@@ -192,8 +187,9 @@ def serialize_output(output: MethodCall | LiteralStr) -> str:
 def serialize_method(method: Method):
     out = f"def {method.name}(x):\n"
     for input_str, return_val in method.mapping.items():
-        out += f"    if x == {input_str}:\n"
+        out += f"    if x == \"{input_str}\":\n"
         out += f"        return {serialize_output(return_val)}\n"
+    out += f"    raise ValueError(f\"Unexpected input: {{x}}\")\n"
     return out + "\n"
 
 def serialize_file(file: CodeHopFile):
@@ -209,16 +205,17 @@ def serialize_file(file: CodeHopFile):
     for method in file.methods:
         method_strings.append(serialize_method(method))
 
-    return f"""{"\n".join([f'import {mod}' for mod in imports])}
-{"\n\n".join(method_strings)}
-"""
+    imports = "\n".join([f'import {mod}' for mod in imports])
+    methods = "\n\n".join(method_strings)
+
+    return f"{imports}\n\n{methods}"
 
 
 if __name__ == "__main__":
     import pydrantic
     config = MakeCodeHopConfig(
         num_files=4,
-        num_methods_per_file=10,
+        num_methods_per_file=3,
         deepest_call_chain=2,
         vocab_size=4,
         function_name_vocab_size=36,

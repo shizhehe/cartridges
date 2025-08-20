@@ -45,7 +45,7 @@ class CodeHopGenerateDataset(GenerateEvalDataset):
         questions = []
         for file in files:
             for method in file.methods:
-                for vocab_word in code_hop.input_vocab:
+                for vocab_word in code_hop.vocab:
                     question = dedent(f"""\
                         Please tell me the string output of running the following python code.
                         Respond with just a literal string in quotes.
@@ -53,20 +53,18 @@ class CodeHopGenerateDataset(GenerateEvalDataset):
                         
                         ```
                         import {file.name}
-
                         print({file.name}.{method.name}("{vocab_word}"))
                         ```"""
                     )
             
-                    answer = method.call(vocab_word)
+                    answer, depth = method.call_with_depth(vocab_word)
+                    value = method.mapping[vocab_word]
                     meta = {
                         "file_name": file.name,
                         "method_name": method.name,
-                        "vocab_word": vocab_word,
-                        "cond_eq": method.cond_eq,
-                        "case": vocab_word == method.cond_eq,
-                        "case_true_return_is_str": isinstance(method.case_true_return_value, LiteralStr),
-                        "case_false_return_is_str": isinstance(method.case_false_return_value, LiteralStr),
+                        "input_word": vocab_word,
+                        "is_literal": isinstance(value, LiteralStr),
+                        "depth": depth,
                     }
                     questions.append((question, answer, meta))
         self.questions = questions

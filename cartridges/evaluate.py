@@ -172,6 +172,7 @@ async def _process_batch(
                 "prompt_messages": response.prompt_messages,
                 "convo_id": element.convo_id,
                 "sample_idx": sample_idx,
+                "system_prompt": response.system_prompt,
                 **metrics,
                 **element.metadata,
                 **extras,
@@ -186,6 +187,7 @@ class GenerateBaselineResponse:
     num_system_and_user_tokens: int
     num_assistant_tokens: int
     text: str
+    system_prompt: Optional[str] = None
 
 
 class BaselineGenerator(ABC):
@@ -321,6 +323,7 @@ class ICLBaseline(BaselineGenerator):
                     num_system_and_user_tokens=num_prompt_tokens,
                     num_assistant_tokens=num_assistant_tokens,
                     text=sample.text,
+                    system_prompt=self.system_prompt,
                 )
             )
         return results
