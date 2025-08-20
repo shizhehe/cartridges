@@ -27,20 +27,27 @@ class InputStr: ...
 class Method:
     name: str
 
+    cond_eq: str
 
-    mapping: dict[str, MethodCall | LiteralStr]
+    case_true_return_value: MethodCall | LiteralStr
+    case_false_return_value: MethodCall | LiteralStr
 
     call_chain_depth: int = 0
 
     def call(self, x):
-        return_val = self.mapping[x]
+        # return_val = self.case_true_return_value if x[:1] == self.cond_input_prefix else self.case_false_return_value
+        return_val = self.case_true_return_value
+        if x == self.cond_eq:
+            return_val = self.case_true_return_value
+        else:
+            return_val = self.case_false_return_value
 
         if isinstance(return_val, MethodCall):
             return return_val.method_obj.call(x)
         elif isinstance(return_val, LiteralStr):
             return return_val.content
-        else:
-            raise ValueError(f"Invalid type for return value: {type(return_val)}")
+
+        assert False
 
 @dataclass
 class CodeHopFile:
@@ -51,5 +58,6 @@ class CodeHopFile:
 @dataclass
 class CodeHop:
     files: list[CodeHopFile]
-    vocab: list[str]
+    input_vocab: set[str]
+    output_vocab: set[str]
 

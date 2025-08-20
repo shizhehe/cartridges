@@ -35,7 +35,7 @@ methods which are defined in other files.
 
 Other files may define methods with the same name, so when discussing the methods in 
 this file, make sure you reference them with the module name (e.g. `file_name.method_name`). 
-Also, make sure you consider different inputs to the methods and edge cases.
+Also, make sure you consider different inputs to the methods and test both the else case in the if statements.
 
 <code>
 {subcorpus}

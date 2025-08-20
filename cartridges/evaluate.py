@@ -20,7 +20,8 @@ from cartridges.datasets import GenerateEvalDatasetElement, GenerateEvalDataset
 from cartridges.clients.base import ClientConfig, ClientResponse
 
 from cartridges.train import GenerationEvalConfig
-from cartridges.utils.wandb import WandBConfig, prepare_wandb, seed_everything, get_logger
+from cartridges.utils import seed_everything, get_logger
+from cartridges.utils.wandb import WandBConfig, prepare_wandb
 
 
 
@@ -60,6 +61,7 @@ async def evaluate_generation(config: EvaluateConfig):
     
     dataset=config.eval.dataset.instantiate(tokenizer=tokenizer, seed=config.seed)
     generator = config.generator.instantiate()
+    await generator.setup()
 
     if config.wandb is not None:
         config.wandb.name = config.name
@@ -193,6 +195,9 @@ class BaselineGenerator(ABC):
 
     def __init__(self, config: Config):
         self.config = config
+    
+    async def setup(self):
+        pass
 
     async def generate(
         self, elements: List[GenerateEvalDatasetElement]
@@ -227,16 +232,21 @@ class ICLBaseline(BaselineGenerator):
         self.client = config.client.instantiate()
 
         self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer)
+       
+        self.metadata = {}
 
-
+    def post_process_system_prompt(self, system_prompt: str) -> str:
+        return system_prompt
+    
+    async def setup(self):
         if isinstance(self.config.context, str):
             ctx_text = self.config.context
         else:
             resource = self.config.context.instantiate()
-            # TODO (SE): Need to properly call the resource setup!
+            await resource.setup()
             ctx_text = resource.to_string()
 
-
+        
         if self.config.max_context_tokens is not None:
             ctx_text = self.tokenizer.decode(
                 self.tokenizer.encode(ctx_text)[: self.config.max_context_tokens],
@@ -245,11 +255,10 @@ class ICLBaseline(BaselineGenerator):
                 # suppresses the truncation error 
                 max_length=999_999_999, 
                 truncation=True
-                
             )
 
-        if config.system_prompt_template is not None:
-            system_prompt = config.system_prompt_template.format(
+        if self.config.system_prompt_template is not None:
+            system_prompt = self.config.system_prompt_template.format(
                 content=ctx_text,
             )
 
@@ -258,12 +267,6 @@ class ICLBaseline(BaselineGenerator):
             )
         else:
             self.system_prompt = None
-
-       
-        self.metadata = {}
-
-    def post_process_system_prompt(self, system_prompt: str) -> str:
-        return system_prompt
 
     async def generate(
         self, elements: List[GenerateEvalDatasetElement]

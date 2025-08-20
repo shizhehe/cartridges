@@ -67,6 +67,8 @@ class OpenAIClient(Client):
         # if we max out the context length, retry truncating the messages to fit in the 
         # max length
         truncate_messages_and_retry: bool = True  
+    
+    REASONING_OPENAI_MODELS = ["gpt-5", "o1", "o2", "o3"]
 
 
     def __init__(self, config: Config):
@@ -149,7 +151,14 @@ class OpenAIClient(Client):
                 "chat_template_kwargs": {"enable_thinking": enable_thinking}
             }
         elif self.type == "openai":
-            kwargs["reasoning_effort"] = "high" if enable_thinking else "low"
+            is_reasoning_model = False
+            for model in self.REASONING_OPENAI_MODELS:
+                if model in self.config.model_name:
+                    is_reasoning_model = True
+                    break
+
+            if is_reasoning_model:
+                kwargs["reasoning_effort"] = "high" if enable_thinking else "low"
         
         if cartridges is not None:
             extra_body["cartridges"] = cartridges

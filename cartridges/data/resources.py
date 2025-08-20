@@ -89,7 +89,7 @@ class DirectoryResource(Resource):
 
     def __init__(self, config: Config):
         self.config = config
-        self.files = []
+        self.files = None
         self.file_contents: Dict[str, str | Chunker] = {}
 
     async def setup(self):
@@ -102,6 +102,7 @@ class DirectoryResource(Resource):
         ]
         
         # Preload all file contents
+        self.file_contents = {}
         for file_name in self.files:
             file_path = os.path.join(self.config.path, file_name)
             try:
@@ -123,9 +124,12 @@ class DirectoryResource(Resource):
         
 
     async def sample_prompt(self, batch_size: int) -> tuple[str, List[str]]:
-        if not self.files:
+        if self.files is None:
             raise ValueError("No files found in directory. Make sure to call setup() first and check that the directory contains files with the specified extensions.")
         
+        if len(self.files) == 0:
+            raise ValueError("No files found in directory.")
+
         # Select a random file
         selected_file = random.choice(self.files)
         
@@ -136,15 +140,30 @@ class DirectoryResource(Resource):
             content = content.sample_chunk()
         
         # Create context with file information
-        if selected_file.endswith(".py"):
-            context = f"File: {selected_file}\n\n```python\n{content}\n```"
-        else:
-            context = f"File: {selected_file}\n\n{content}"
+        context = self._format_file(selected_file, content)
         
         # Generate seed prompts
         seed_prompts = sample_seed_prompts(self.config.seed_prompts, batch_size)
         
         return context, seed_prompts
+    
+    def _format_file(self, file_name: str, content: str) -> str:
+        if file_name.endswith(".py"):
+            return f"File: {file_name}\n\n```python\n{content}\n```"
+        else:
+            return f"File: {file_name}\n\n{content}"
+    
+    def to_string(self) -> str:
+        if self.files is None:
+            raise ValueError("Make sure to call setup() first and check that the directory contains files with the specified extensions.")
+        
+        if len(self.files) == 0:
+            raise ValueError("No files found in directory.")
+        
+        return "\n---end of file---\n".join([
+            self._format_file(file_name, content)
+            for file_name, content in self.file_contents.items()
+        ])
 
 class BaseStructuredResource(Resource, ABC):
     """This base class is to be used for resources that can be structured as a nested 
