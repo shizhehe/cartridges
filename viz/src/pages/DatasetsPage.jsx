@@ -1,0 +1,644 @@
+import { useState, useEffect, useRef } from 'react'
+import ReactMarkdown from 'react-markdown'
+
+function DatasetsPage() {
+  const [datasets, setDatasets] = useState([])
+  const [selectedDataset, setSelectedDataset] = useState(null)
+  const [examples, setExamples] = useState([])
+  const [totalExamples, setTotalExamples] = useState(0)
+  const [selectedExample, setSelectedExample] = useState(null)
+  const [outputDir, setOutputDir] = useState('')
+  const [tokenizerName, setTokenizerName] = useState('meta-llama/Llama-3.2-3B-Instruct')
+  const [systemPromptExpanded, setSystemPromptExpanded] = useState(false)
+  const [currentPage, setCurrentPage] = useState(0)
+  const [examplesPerPage] = useState(128)
+  const [loadingDatasetPath, setLoadingDatasetPath] = useState(null)
+  const [datasetError, setDatasetError] = useState(null)
+  const [configData, setConfigData] = useState(null)
+  const [loadingDatasets, setLoadingDatasets] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchFields, setSearchFields] = useState({
+    messages: true,
+    system_prompt: false,
+    metadata: false
+  })
+  const [isScrolled, setIsScrolled] = useState(false)
+  const [copySuccess, setCopySuccess] = useState(false)
+
+  // Navigate examples (similar to table navigation)
+  const navigateExample = (direction) => {
+    if (!selectedExample || examples.length === 0) return
+    
+    const currentIndex = examples.findIndex(ex => ex === selectedExample)
+    let newIndex
+    
+    if (direction === 'next') {
+      newIndex = (currentIndex + 1) % examples.length
+    } else {
+      newIndex = (currentIndex - 1 + examples.length) % examples.length
+    }
+    
+    setSelectedExample(examples[newIndex])
+  }
+
+  // Keyboard navigation
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (!selectedExample) return
+      
+      if (event.key === 'ArrowRight') {
+        event.preventDefault()
+        navigateExample('next')
+      } else if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        navigateExample('prev')
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [selectedExample, examples])
+
+  // Dataset discovery function
+  const discoverDatasets = async () => {
+    try {
+      setLoadingDatasets(true)
+      console.log('Fetching datasets...')
+      const response = await fetch('/api/datasets')
+      const data = await response.json()
+      console.log('Datasets received:', data)
+      // Ensure datasets are sorted by relative path (reverse alphabetical)
+      const sortedData = data.sort((a, b) => b.relative_path.localeCompare(a.relative_path))
+      setDatasets(sortedData)
+    } catch (error) {
+      console.error('Failed to discover datasets:', error)
+    } finally {
+      setLoadingDatasets(false)
+    }
+  }
+
+  // Dataset discovery
+  useEffect(() => {
+    discoverDatasets()
+  }, [outputDir])
+
+  const selectDataset = async (datasetPath) => {
+    // Immediately set the selected dataset and show the path
+    setSelectedDataset(datasetPath)
+    setExamples([])
+    setSelectedExample(null)
+    setCurrentPage(0)
+    setLoadingDatasetPath(datasetPath)
+    setDatasetError(null)
+    setConfigData(null)
+    
+    try {
+      // First, load dataset metadata quickly
+      const infoResponse = await fetch(`/api/dataset/${encodeURIComponent(datasetPath)}/info`)
+      const info = await infoResponse.json()
+      setTotalExamples(info.total_count)
+      
+      // Reset search and load the first page of examples
+      setSearchQuery('')
+      await loadDatasetWithSearch(0)
+      
+      // Also automatically load the config
+      try {
+        const configResponse = await fetch('/api/dataset/config', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            dataset_path: datasetPath
+          })
+        })
+        const configData = await configResponse.json()
+        if (configData.config) {
+          setConfigData(configData.config)
+        }
+      } catch (configError) {
+        console.log('No config found for dataset:', configError)
+      }
+    } catch (error) {
+      console.error('Failed to load dataset:', error)
+      setDatasetError(`Failed to load dataset: ${error.message}`)
+      setExamples([])
+      setTotalExamples(0)
+    } finally {
+      setLoadingDatasetPath(null)
+    }
+  }
+
+  const loadDatasetWithSearch = async (page = currentPage) => {
+    if (!selectedDataset) return
+
+    setLoadingDatasetPath(selectedDataset)
+    setDatasetError(null)
+    
+    try {
+      const searchParams = new URLSearchParams({
+        page: page.toString(),
+        page_size: examplesPerPage.toString(),
+        search: searchQuery || '',
+        search_messages: searchFields.messages.toString(),
+        search_system_prompt: searchFields.system_prompt.toString(),
+        search_metadata: searchFields.metadata.toString()
+      })
+
+      const response = await fetch(`/api/dataset/${encodeURIComponent(selectedDataset)}?${searchParams}`)
+      const data = await response.json()
+      
+      setExamples(data.examples)
+      setTotalExamples(data.total_count)
+      setCurrentPage(page)
+    } catch (error) {
+      console.error('Failed to load dataset with search:', error)
+      setDatasetError(`Failed to load dataset: ${error.message}`)
+    } finally {
+      setLoadingDatasetPath(null)
+    }
+  }
+
+  const handleSearch = () => {
+    setCurrentPage(0)
+    loadDatasetWithSearch(0)
+  }
+
+  const handleCopyContent = (content) => {
+    navigator.clipboard.writeText(content).then(() => {
+      setCopySuccess(true)
+      setTimeout(() => setCopySuccess(false), 2000)
+    })
+  }
+
+  // Token decoding function
+  const decodeTokens = async (tokenIds) => {
+    try {
+      const response = await fetch('/api/decode-tokens', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          token_ids: tokenIds,
+          tokenizer_name: tokenizerName
+        })
+      })
+      
+      const data = await response.json()
+      
+      if (data.error) {
+        console.error('Token decoding error:', data.error)
+        return tokenIds.map((id, idx) => ({ id, token: `[${id}]`, prob: 0 }))
+      }
+      
+      // Combine token IDs with decoded tokens and dummy probabilities
+      return tokenIds.map((id, idx) => ({
+        id,
+        token: data.decoded_tokens[idx] || `[${id}]`,
+        prob: 0.8 // Dummy probability since we don't have actual probabilities
+      }))
+    } catch (error) {
+      console.error('Failed to decode tokens:', error)
+      return tokenIds.map((id, idx) => ({ id, token: `[${id}]`, prob: 0 }))
+    }
+  }
+
+  const getColorForProbability = (prob) => {
+    // Convert probability to hue (green = high prob, red = low prob)
+    const hue = prob * 120 // 0 to 120 degrees
+    const saturation = 70
+    const lightness = 85
+    return {
+      backgroundColor: `hsl(${hue}, ${saturation}%, ${lightness}%)`,
+      borderColor: `hsl(${hue}, ${saturation}%, ${lightness - 20}%)`
+    }
+  }
+
+  const TokenVisualization = ({ tokenIds, message }) => {
+    const [tokens, setTokens] = useState([])
+    const [loading, setLoading] = useState(true)
+
+    useEffect(() => {
+      const loadTokens = async () => {
+        if (!tokenIds || tokenIds.length === 0) {
+          setTokens([])
+          setLoading(false)
+          return
+        }
+        
+        setLoading(true)
+        const decodedTokens = await decodeTokens(tokenIds)
+        setTokens(decodedTokens)
+        setLoading(false)
+      }
+
+      loadTokens()
+    }, [tokenIds])
+
+    if (loading) {
+      return <div className="text-sm text-gray-500">Loading tokens...</div>
+    }
+
+    if (!tokens || tokens.length === 0) {
+      return <div className="text-sm text-gray-500">No tokens available</div>
+    }
+
+    return (
+      <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+        <h4 className="font-semibold mb-2 text-gray-800">Token Probabilities (hover for details)</h4>
+        <div className="relative token-container">
+          <div className="font-mono text-sm leading-relaxed">
+            {tokens.map((token, idx) => {
+              const colors = getColorForProbability(token.prob)
+              return (
+                <span
+                  key={idx}
+                  className="inline-block mr-1 mb-1 px-1 py-0.5 rounded border cursor-help transition-all hover:scale-105 hover:z-10 relative"
+                  style={colors}
+                  title={`Token: "${token.token}"\nID: ${token.id}\nProbability: ${(token.prob * 100).toFixed(1)}%`}
+                >
+                  {token.token.replace(/\n/g, '\\n').replace(/\t/g, '\\t')}
+                </span>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Filter examples based on search
+  const filteredExamples = examples.filter(example => {
+    if (!searchQuery.trim()) return true
+    
+    const query = searchQuery.toLowerCase()
+    return example.messages.some(msg => 
+      msg.content.toLowerCase().includes(query)
+    )
+  })
+
+  console.log('Rendering datasets:', datasets.length)
+
+  return (
+    <div className="flex h-full w-full font-sans overflow-hidden">
+      <div className="w-96 bg-gray-100 border-r border-gray-300 flex flex-col flex-shrink-0 overflow-hidden">
+        {/* Header */}
+        <div className="p-4 border-b border-gray-300">
+          <h1 className="text-xl font-bold text-gray-800">Dataset Explorer</h1>
+        </div>
+
+        {/* Refresh Button */}
+        <div className="p-4 border-b border-gray-300">
+          <button
+            onClick={discoverDatasets}
+            disabled={loadingDatasets}
+            className={`w-full px-4 py-2 rounded text-sm font-medium transition-all duration-200 ${
+              loadingDatasets
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                : 'bg-blue-600 hover:bg-blue-700 text-white'
+            }`}
+          >
+            {loadingDatasets ? 'Refreshing...' : 'Refresh Datasets'}
+          </button>
+        </div>
+
+        {/* Dataset List */}
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="flex flex-col gap-2">
+            {loadingDatasets ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mb-3"></div>
+                <div className="text-sm text-gray-600">Loading datasets...</div>
+              </div>
+            ) : (
+              <>
+                <h2 className="text-sm font-medium text-gray-700 mb-2">
+                  Available Datasets ({datasets.length})
+                </h2>
+                {datasets.map((dataset, index) => (
+                  <div
+                    key={index}
+                    className={`p-3 rounded-lg cursor-pointer transition-all duration-200 border ${
+                      selectedDataset === dataset.path
+                        ? 'bg-purple-100 border-purple-300 shadow-sm'
+                        : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300'
+                    }`}
+                    onClick={() => selectDataset(dataset.path)}
+                  >
+                    <div className="font-medium text-sm text-gray-800 mb-1 break-words">
+                      {dataset.name}
+                    </div>
+                    <div className="text-xs text-gray-500 break-words mb-1">
+                      {dataset.relative_path}
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      {dataset.size.toFixed(2)} GB
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+      
+      <div className="flex-1 flex flex-col min-w-0 w-full overflow-hidden">
+        {!selectedDataset ? (
+          <div className="flex flex-col items-center justify-center text-center text-gray-600 flex-1 p-4">
+            <h2 className="text-xl font-semibold mb-2 text-gray-800">Select a dataset to explore</h2>
+            <p>Choose a dataset from the sidebar to begin exploring training examples.</p>
+          </div>
+        ) : !selectedExample ? (
+          <>
+            {/* Search and Filter Controls */}
+            <div className="bg-white p-4 border-b border-gray-200">
+              <div className="flex flex-col gap-4">
+                {/* Search Input */}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Search examples..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="flex-1 p-2 border border-gray-300 rounded text-sm"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        handleSearch()
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={handleSearch}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded transition-colors"
+                  >
+                    Search
+                  </button>
+                </div>
+
+                {/* Search Field Checkboxes */}
+                <div className="flex gap-4 text-sm">
+                  <label className="flex items-center gap-1">
+                    <input
+                      type="checkbox"
+                      checked={searchFields.messages}
+                      onChange={(e) => setSearchFields({...searchFields, messages: e.target.checked})}
+                    />
+                    Messages
+                  </label>
+                  <label className="flex items-center gap-1">
+                    <input
+                      type="checkbox"
+                      checked={searchFields.system_prompt}
+                      onChange={(e) => setSearchFields({...searchFields, system_prompt: e.target.checked})}
+                    />
+                    System Prompt
+                  </label>
+                  <label className="flex items-center gap-1">
+                    <input
+                      type="checkbox"
+                      checked={searchFields.metadata}
+                      onChange={(e) => setSearchFields({...searchFields, metadata: e.target.checked})}
+                    />
+                    Metadata
+                  </label>
+                </div>
+
+                {/* Dataset Info */}
+                <div className="text-sm text-gray-600">
+                  <strong>{selectedDataset.split('/').pop()}</strong>
+                  {searchQuery && (
+                    <span> - Showing {totalExamples} results for "{searchQuery}"</span>
+                  )}
+                  {!searchQuery && (
+                    <span> - {totalExamples} total examples</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Examples Grid */}
+            <div 
+              className="flex-1 overflow-y-auto p-4"
+              onScroll={(e) => {
+                const scrolled = e.target.scrollTop > 50
+                if (scrolled !== isScrolled) {
+                  setIsScrolled(scrolled)
+                }
+              }}
+            >
+              {datasetError ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center text-red-600">
+                  <div className="text-red-500 mb-4">⚠️</div>
+                  <h3 className="font-semibold mb-2">Error loading dataset</h3>
+                  <p className="text-sm text-gray-600">{datasetError}</p>
+                  <button 
+                    onClick={() => selectDataset(selectedDataset)}
+                    className="mt-4 px-4 py-2 bg-red-100 hover:bg-red-200 text-red-800 rounded text-sm"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : loadingDatasetPath && examples.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center text-gray-600">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
+                  <p>Loading examples...</p>
+                </div>
+              ) : filteredExamples.length > 0 ? (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 w-full">
+                    {filteredExamples.map((example, index) => (
+                      <div
+                        key={index}
+                        className="border border-gray-300 rounded-lg p-4 cursor-pointer transition-all hover:-translate-y-1 hover:shadow-lg"
+                        onClick={() => setSelectedExample(example)}
+                      >
+                        <div className="text-sm text-gray-600 mb-2">
+                          Example {(currentPage * examplesPerPage) + index + 1}
+                        </div>
+                        <div className="text-xs text-gray-500 leading-relaxed space-y-1">
+                          {example.system_prompt && (
+                            <div>
+                              <span className="font-semibold text-yellow-600">System:</span>{' '}
+                              {example.system_prompt.substring(0, 60)}...
+                            </div>
+                          )}
+                          {example.messages.slice(0, 2).map((message, msgIndex) => (
+                            <div key={msgIndex}>
+                              <span className={`font-semibold ${
+                                message.role === 'user' ? 'text-blue-600' : 'text-green-600'
+                              }`}>
+                                {message.role === 'user' ? 'User:' : 'Assistant:'}
+                              </span>{' '}
+                              {message.content.substring(0, 80)}...
+                            </div>
+                          ))}
+                          {example.messages.length > 2 && (
+                            <div className="text-gray-400 text-xs">
+                              +{example.messages.length - 2} more messages
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {/* Pagination Controls */}
+                  {totalExamples > examplesPerPage && (
+                    <div className="flex justify-center items-center mt-6 gap-2">
+                      <button 
+                        onClick={() => loadDatasetWithSearch(Math.max(0, currentPage - 1))}
+                        disabled={currentPage === 0}
+                        className="px-3 py-1 bg-gray-100 border border-gray-300 rounded text-sm hover:bg-gray-200 disabled:opacity-50"
+                      >
+                        Previous
+                      </button>
+                      <span className="px-3 py-1 text-sm text-gray-600">
+                        Page {currentPage + 1} of {Math.ceil(totalExamples / examplesPerPage)}
+                      </span>
+                      <button 
+                        onClick={() => loadDatasetWithSearch(currentPage + 1)}
+                        disabled={(currentPage + 1) * examplesPerPage >= totalExamples}
+                        className="px-3 py-1 bg-gray-100 border border-gray-300 rounded text-sm hover:bg-gray-200 disabled:opacity-50"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="text-center text-gray-500 py-12">
+                  {searchQuery ? `No examples found for "${searchQuery}"` : 'No examples found in this dataset.'}
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="h-full flex flex-col">
+            <div className="flex items-center justify-between mb-4 pb-4 pt-6 border-b border-gray-300 px-6">
+              <div className="flex items-center gap-4">
+                <button 
+                  onClick={() => setSelectedExample(null)}
+                  className="px-4 py-2 bg-gray-100 border border-gray-300 rounded cursor-pointer text-sm hover:bg-gray-200"
+                >
+                  ← Back to Examples
+                </button>
+                <div className="text-sm text-gray-600">
+                  <strong>{selectedDataset.split('/').pop()}</strong> - Example {examples.findIndex(ex => ex === selectedExample) + 1 + (currentPage * examplesPerPage)} of {totalExamples}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => navigateExample('prev')}
+                  className="px-3 py-1 bg-gray-100 border border-gray-300 rounded text-sm hover:bg-gray-200"
+                  title="Previous (←)"
+                >←</button>
+                <span className="text-sm text-gray-600">
+                  {examples.findIndex(ex => ex === selectedExample) + 1} of {examples.length}
+                </span>
+                <button 
+                  onClick={() => navigateExample('next')}
+                  className="px-3 py-1 bg-gray-100 border border-gray-300 rounded text-sm hover:bg-gray-200"
+                  title="Next (→)"
+                >→</button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6">
+              <div className="flex flex-col gap-4">
+              {selectedExample.system_prompt && (
+                <div className="p-4 rounded-lg bg-yellow-50 border border-yellow-200">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="font-bold text-sm text-yellow-800">System Prompt</div>
+                    {selectedExample.system_prompt.length > 300 && (
+                      <button
+                        onClick={() => setSystemPromptExpanded(!systemPromptExpanded)}
+                        className="text-xs px-2 py-1 bg-yellow-200 hover:bg-yellow-300 text-yellow-800 rounded"
+                      >
+                        {systemPromptExpanded ? 'Collapse' : 'Expand'}
+                      </button>
+                    )}
+                  </div>
+                  <div className="break-words leading-relaxed text-yellow-900 prose prose-sm max-w-none">
+                    <ReactMarkdown>
+                      {systemPromptExpanded 
+                        ? selectedExample.system_prompt 
+                        : selectedExample.system_prompt.length > 300 
+                          ? selectedExample.system_prompt.substring(0, 300) + '...'
+                          : selectedExample.system_prompt
+                      }
+                    </ReactMarkdown>
+                  </div>
+                </div>
+              )}
+
+              {selectedExample.messages.map((message, messageIndex) => (
+                <div key={messageIndex} className={`p-4 rounded-lg border ${
+                  message.role === 'user' 
+                    ? 'bg-blue-50 border-blue-200' 
+                    : 'bg-green-50 border-green-200'
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className={`font-bold text-sm ${
+                      message.role === 'user' ? 'text-blue-800' : 'text-green-800'
+                    }`}>
+                      {message.role === 'user' ? 'User' : 'Assistant'}
+                    </div>
+                    <button
+                      onClick={() => handleCopyContent(message.content)}
+                      className={`text-xs px-2 py-1 rounded transition-all ${
+                        copySuccess 
+                          ? 'bg-green-200 text-green-800' 
+                          : message.role === 'user' 
+                            ? 'bg-blue-200 hover:bg-blue-300 text-blue-800' 
+                            : 'bg-green-200 hover:bg-green-300 text-green-800'
+                      }`}
+                    >
+                      {copySuccess ? '✓ Copied' : 'Copy'}
+                    </button>
+                  </div>
+                  <div className={`break-words leading-relaxed prose prose-sm max-w-none ${
+                    message.role === 'user' ? 'text-blue-900' : 'text-green-900'
+                  }`}>
+                    <ReactMarkdown>{message.content}</ReactMarkdown>
+                  </div>
+                  
+                  {/* Token visualization */}
+                  {message.token_ids && message.token_ids.length > 0 && (
+                    <TokenVisualization tokenIds={message.token_ids} message={message} />
+                  )}
+                </div>
+              ))}
+
+              {/* Metadata */}
+              {selectedExample.metadata && Object.keys(selectedExample.metadata).length > 0 && (
+                <div className="p-4 rounded-lg bg-gray-50 border border-gray-200">
+                  <div className="font-bold text-sm text-gray-800 mb-2">Metadata</div>
+                  <div className="text-sm text-gray-700">
+                    <pre className="whitespace-pre-wrap font-mono text-xs bg-gray-100 p-2 rounded">
+                      {JSON.stringify(selectedExample.metadata, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              )}
+              
+              {/* Config Display */}
+              {configData && (
+                <div className="p-4 rounded-lg bg-purple-50 border border-purple-200">
+                  <div className="font-bold text-sm text-purple-800 mb-2">Dataset Configuration</div>
+                  <div className="text-sm text-purple-700">
+                    <pre className="whitespace-pre-wrap font-mono text-xs bg-purple-100 p-2 rounded">
+                      {JSON.stringify(configData, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+export default DatasetsPage

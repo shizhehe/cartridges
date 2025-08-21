@@ -14,8 +14,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from cartridges.structs import read_conversations
+
 
 app = FastAPI(title="Dataset Visualization API", version="1.0.0")
 
@@ -450,6 +450,402 @@ def decode_tokens(request: Dict[str, Any]):
     except Exception as e:
         return {'error': str(e)}
 
+@app.get("/api/dashboards")
+def get_dashboards():
+    """Get available dashboards from the registry."""
+    try:
+        # Import dashboard registry with proper error handling
+        import importlib
+        import os
+        
+        # Get absolute path to dashboards directory
+        dashboards_dir = os.path.join(os.path.dirname(__file__), 'dashboards')
+        dashboards_dir = os.path.abspath(dashboards_dir)
+        
+        print(f"Looking for dashboards in: {dashboards_dir}")
+        print(f"Dashboard directory exists: {os.path.exists(dashboards_dir)}")
+        print(f"Files in directory: {os.listdir(dashboards_dir) if os.path.exists(dashboards_dir) else 'None'}")
+        
+        # Import base registry first
+        try:
+            print(f"Python sys.path: {sys.path}")
+            print(f"Current working directory: {os.getcwd()}")
+            print(f"__file__ directory: {os.path.dirname(__file__)}")
+            print(f"Absolute path to dashboards: {os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'dashboards'))}")
+            
+            from dashboards.base import registry
+            print(f"Successfully imported registry, has {len(registry.dashboards)} dashboards")
+        except ImportError as e:
+            print(f"Failed to import base: {e}")
+            return {'error': f'Failed to import base: {str(e)}'}
+        
+        # Dynamically import all dashboard modules in the directory
+        if os.path.exists(dashboards_dir):
+            for filename in os.listdir(dashboards_dir):
+                if filename.endswith('.py') and filename not in ['__init__.py', 'base.py']:
+                    module_name = filename[:-3]  # Remove .py extension
+                    print(f"Attempting to import dashboard module: {module_name}")
+                    
+                    try:
+                        # Import the module - this should register any dashboards it contains
+                        importlib.import_module(f"dashboards.{module_name}")
+                        print(f"Successfully imported {module_name}, registry now has {len(registry.dashboards)} dashboards")
+                    except ImportError as e:
+                        print(f"Failed to import {module_name}: {e}")
+                        # Continue with other modules even if one fails
+                        continue
+                    except Exception as e:
+                        print(f"Error importing {module_name}: {e}")
+                        continue
+        else:
+            print(f"Dashboard directory does not exist: {dashboards_dir}")
+            return {'error': f'Dashboard directory not found: {dashboards_dir}'}
+        
+        dashboards = []
+        for name, dashboard in registry.dashboards.items():
+            dashboards.append({
+                'name': name,
+                'filters': dashboard.filters,
+                'table': dashboard.table,
+                'score_metric': dashboard.score_metric,
+                'step': dashboard.step
+            })
+        
+        print(f"Returning {len(dashboards)} dashboards: {[d['name'] for d in dashboards]}")
+        return {'dashboards': dashboards}
+    
+    except Exception as e:
+        import traceback
+        error_msg = f"Error in get_dashboards: {str(e)}\n{traceback.format_exc()}"
+        print(error_msg)
+        return {'error': error_msg}
+
+@app.post("/api/dashboard/analyze")
+def analyze_run_with_dashboard(request: Dict[str, Any]):
+    print(f"Analyzing run with dashboard: {request}")
+    """Analyze a W&B run using a specific dashboard."""
+    try:
+        run_id = request.get('run_id')
+        dashboard_name = request.get('dashboard_name')
+        
+        # Get entity and project from environment variables
+        entity = os.getenv('WANDB_ENTITY', 'hazy-research')
+        project = os.getenv('WANDB_PROJECT', 'cartridges')
+        
+        if not all([run_id, dashboard_name]):
+            raise HTTPException(status_code=400, detail="run_id and dashboard_name are required")
+        
+        # Import wandb and dashboard registry
+        import wandb
+        try:
+            from dashboards.base import registry
+            
+            # Dynamically import all dashboard modules to ensure they're registered
+            dashboards_dir = os.path.join(os.path.dirname(__file__), '..', 'dashboards')
+            dashboards_dir = os.path.abspath(dashboards_dir)
+            
+            if os.path.exists(dashboards_dir):
+                for filename in os.listdir(dashboards_dir):
+                    if filename.endswith('.py') and filename not in ['__init__.py', 'base.py']:
+                        module_name = filename[:-3]  # Remove .py extension
+                        try:
+                            importlib.import_module(module_name)
+                        except Exception:
+                            # Ignore import errors for individual modules
+                            pass
+        except ImportError as e:
+            print(f"Failed to import dashboard registry: {str(e)}") 
+            return {'error': f'Failed to import dashboard registry: {str(e)}'}
+        
+        # Get the dashboard
+        if dashboard_name not in registry.dashboards:
+            raise HTTPException(status_code=404, detail=f"Dashboard '{dashboard_name}' not found")
+        
+        dashboard = registry.dashboards[dashboard_name]
+        
+        # Initialize wandb API
+        try:
+            api = wandb.Api()
+        except Exception as e:
+            print(f"Failed to initialize W&B API: {str(e)}")
+            return {'error': f'Failed to initialize W&B API. Make sure WANDB_API_KEY is set: {str(e)}'}
+        
+        # Get the run
+        run = api.run(f"{entity}/{project}/{run_id}")
+        
+        # Get table specs from dashboard (plots will be loaded separately)
+        table_specs = dashboard.tables(run)
+        
+        # Just get plot metadata, not the actual data
+        plot_specs_meta = []
+        try:
+            # Get plot specs but don't materialize the data yet
+            plots_specs = dashboard.plots(run)
+            for plot_spec in plots_specs:
+                plot_specs_meta.append({
+                    'id': plot_spec.id,
+                    'plot_name': plot_spec.plot_name,
+                    'x_col': plot_spec.x_col,
+                    'y_col': plot_spec.y_col,
+                    # 'data' will be loaded asynchronously
+                })
+        except Exception as e:
+            print(f"Error getting plot specs: {e}")
+            plot_specs_meta = []
+        
+        # Serialize table specs (metadata only, no data)
+        tables = []
+        for table_spec in table_specs:
+            tables.append({
+                'step': table_spec.step,
+                'score_col': table_spec.score_col,
+                'answer_col': table_spec.answer_col,
+                'prompt_col': table_spec.prompt_col,
+                'pred_col': table_spec.pred_col,
+                'path': table_spec.path,  # Include path for later data loading
+                # 'data' will be loaded on-demand via separate endpoint
+            })
+        
+        return {
+            'plots': plot_specs_meta,
+            'tables': tables,
+            'dashboard_name': dashboard_name,
+            'run_id': run_id
+        }
+        
+    except Exception as e:
+        print(f"Error in analyze_run_with_dashboard: {str(e)}")
+        return {'error': str(e)}
+
+@app.post("/api/dashboard/table")
+def get_table_data(request: Dict[str, Any]):
+    """Load specific table data on demand."""
+    try:
+        run_id = request.get('run_id')
+        table_path = request.get('table_path')
+        table_step = request.get('table_step')
+        
+        # Get entity and project from environment variables
+        entity = os.getenv('WANDB_ENTITY', 'hazy-research')
+        project = os.getenv('WANDB_PROJECT', 'cartridges')
+        
+        if not all([run_id, table_path]):
+            raise HTTPException(status_code=400, detail="run_id and table_path are required")
+        
+        # Import wandb and get the run
+        import wandb
+        try:
+            api = wandb.Api()
+        except Exception as e:
+            print(f"Failed to initialize W&B API: {str(e)}")
+            return {'error': f'Failed to initialize W&B API. Make sure WANDB_API_KEY is set: {str(e)}'}
+        
+        # Get the run
+        run = api.run(f"{entity}/{project}/{run_id}")
+        
+        # Create a TableSpec and materialize it
+        from dashboards.base import TableSpec
+        table_spec = TableSpec(
+            run=run,
+            path=table_path,
+            step=table_step
+        )
+        
+        # Materialize the table data
+        df = table_spec.materialize()
+        
+        # Handle NaN values that can't be JSON serialized
+        df = df.fillna('')  # Replace NaN with empty strings
+        
+        return {
+            'data': df.to_dict('records'),
+            'step': table_step,
+            'path': table_path
+        }
+        
+    except Exception as e:
+        print(f"Error in get_table_data: {str(e)}")
+        return {'error': str(e)}
+
+@app.post("/api/dashboard/plots")
+def get_plot_data(request: Dict[str, Any]):
+    """Load plot data for a dashboard and run."""
+    try:
+        run_id = request.get('run_id')
+        dashboard_name = request.get('dashboard_name')
+        
+        # Get entity and project from environment variables
+        entity = os.getenv('WANDB_ENTITY', 'hazy-research')
+        project = os.getenv('WANDB_PROJECT', 'cartridges')
+        
+        if not all([run_id, dashboard_name]):
+            raise HTTPException(status_code=400, detail="run_id and dashboard_name are required")
+        
+        # Import wandb and dashboard registry
+        import wandb
+        try:
+            from dashboards.base import registry
+            
+            # Dynamically import all dashboard modules to ensure they're registered
+            dashboards_dir = os.path.join(os.path.dirname(__file__), 'dashboards')
+            dashboards_dir = os.path.abspath(dashboards_dir)
+            
+            if os.path.exists(dashboards_dir):
+                for filename in os.listdir(dashboards_dir):
+                    if filename.endswith('.py') and filename not in ['__init__.py', 'base.py']:
+                        module_name = filename[:-3]  # Remove .py extension
+                        try:
+                            importlib.import_module(f"dashboards.{module_name}")
+                        except Exception:
+                            # Ignore import errors for individual modules
+                            pass
+        except ImportError as e:
+            print(f"Failed to import dashboard registry: {str(e)}") 
+            return {'error': f'Failed to import dashboard registry: {str(e)}'}
+        
+        # Get the dashboard
+        if dashboard_name not in registry.dashboards:
+            raise HTTPException(status_code=404, detail=f"Dashboard '{dashboard_name}' not found")
+        
+        dashboard = registry.dashboards[dashboard_name]
+        
+        # Initialize wandb API
+        try:
+            api = wandb.Api()
+        except Exception as e:
+            print(f"Failed to initialize W&B API: {str(e)}")
+            return {'error': f'Failed to initialize W&B API. Make sure WANDB_API_KEY is set: {str(e)}'}
+        
+        # Get the run
+        run = api.run(f"{entity}/{project}/{run_id}")
+        
+        # Get and serialize plot specs with data
+        plots_specs = dashboard.plots(run)
+        plots = []
+        for plot_spec in plots_specs:
+            # Handle NaN values in plot data
+            plot_df = plot_spec.df.fillna('')  # Replace NaN with empty strings
+            
+            plots.append({
+                'id': plot_spec.id,
+                'plot_name': plot_spec.plot_name,
+                'x_col': plot_spec.x_col,
+                'y_col': plot_spec.y_col,
+                'data': plot_df.to_dict('records')  # Convert DataFrame to JSON
+            })
+        
+        return {
+            'plots': plots,
+            'dashboard_name': dashboard_name,
+            'run_id': run_id
+        }
+        
+    except Exception as e:
+        print(f"Error in get_plot_data: {str(e)}")
+        return {'error': str(e)}
+
+@app.post("/api/wandb/runs")
+def get_wandb_runs(request: Dict[str, Any]):
+    """Fetch W&B runs using the Python API."""
+    print("Fetching W&B runs...")
+    try:
+        # Get entity and project from environment variables
+        entity = os.getenv('WANDB_ENTITY', 'hazy-research')
+        project = os.getenv('WANDB_PROJECT', 'cartridges')
+        filters = request.get('filters', {})
+        tag_filter = filters.get('tag', '').strip()
+        run_id_filter = filters.get('run_id', '').strip()
+        dashboard_filters = request.get('dashboard_filters', {})
+        
+        # Try to import wandb
+        try:
+            import wandb
+        except ImportError:
+            return {'error': 'wandb package not installed. Please install with: pip install wandb'}
+        
+        # Initialize wandb API (uses WANDB_API_KEY environment variable)
+        try:
+            api = wandb.Api()
+        except Exception as e:
+            return {'error': f'Failed to initialize W&B API. Make sure WANDB_API_KEY is set: {str(e)}'}
+        
+        # Fetch runs from the project
+        try:
+            page_size = 5
+            
+            # Build filters dictionary for W&B API
+            wandb_filters = {}
+            
+            # Apply user-specified filters
+            if tag_filter:
+                wandb_filters["tags"] = {"$in": [tag_filter]}
+            if run_id_filter:
+                wandb_filters["name"] = {"$regex": run_id_filter}
+            
+            # Apply dashboard-specific filters (dict format)
+            if isinstance(dashboard_filters, dict):
+                for key, value in dashboard_filters.items():
+                    if key and value:
+                        # Apply dashboard filters directly - they should already be in W&B filter format
+                        wandb_filters[key] = value
+            
+            print(f"Applying filters: {wandb_filters}")
+            runs = api.runs(f"{entity}/{project}", per_page=page_size, filters=wandb_filters)
+            
+            
+            # Convert runs to JSON-serializable format
+            runs_data = []
+            for idx, run in enumerate(runs):
+                if idx == page_size:
+                    break
+                print(f"Processing run {run.id}")
+                try:
+                    # Safely serialize config and summary to handle complex objects
+                    def serialize_dict(d):
+                        """Recursively serialize dictionary to handle complex objects."""
+                        if not isinstance(d, dict):
+                            return str(d) if d is not None else None
+                        
+                        result = {}
+                        for key, value in d.items():
+                            if isinstance(value, dict):
+                                result[key] = serialize_dict(value)
+                            elif isinstance(value, (list, tuple)):
+                                result[key] = [serialize_dict(item) if isinstance(item, dict) else str(item) for item in value]
+                            elif hasattr(value, '__dict__'):
+                                # Convert objects to string representation
+                                result[key] = str(value)
+                            else:
+                                result[key] = value
+                        return result
+                    
+                    run_data = {
+                        'id': run.id,
+                        'name': run.name or run.id,
+                        'state': run.state,
+                        'createdAt': run.created_at,
+                        'config': serialize_dict(dict(run.config)) if run.config else {},
+                        'summary': serialize_dict(dict(run.summary)) if run.summary else {},
+                        'tags': list(run.tags) if run.tags else [],
+                        'url': run.url
+                    }
+                    runs_data.append(run_data)
+                except Exception as e:
+                    print(f"Error processing run {run.id}: {e}")
+                    continue
+            
+            print(f"Fetched {len(runs_data)} runs")
+            return {
+                'runs': runs_data,
+                'total': len(runs_data)
+            }
+            
+        except Exception as e:
+            return {'error': f'Failed to fetch runs from {entity}/{project}: {str(e)}'}
+    
+    except Exception as e:
+        return {'error': str(e)}
+
 if __name__ == '__main__':
     import argparse
     
@@ -482,4 +878,6 @@ if __name__ == '__main__':
     if cors_enabled:
         print(f"CORS origins: {cors_origins}")
     
+    print(f"Start the frontend with: VITE_API_TARGET=http://localhost:{args.port} npm run dev")
+    print("If you are on a remote machine, you need to forward the port to your local machine and run the frontend on your local machine.")
     uvicorn.run("server:app", host=args.host, port=args.port, reload=args.reload)
