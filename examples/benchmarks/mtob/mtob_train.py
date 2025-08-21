@@ -29,12 +29,16 @@ if MODEL == "qwen":
     )
 elif MODEL == "llama":
     from cartridges.models.llama.modeling_llama import FlexLlamaForCausalLM
+    # TODO: Note in the paper we also ran this on Llama-3.1-8B-Instruct. It is currently
+    # on our backlog to run this experiment with Llama-3.1-8B-Instruct on the public, 
+    # refactored repository. Leave an issue if you'd like to see the 8B datasets
+    # and we will try to prioritize it.
     data_sources = [
         "hazyresearch/m07d28_mtob_synthesize_llama-3.2-3b_n65536-0",
         "hazyresearch/m07d28_mtob_synthesize_llama-3.2-3b_n65536-1"
     ]
     model = HFModelConfig(
-        pretrained_model_name_or_path="meta-llama/Llama-3.1-8B-Instruct",
+        pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
         model_cls=FlexLlamaForCausalLM,
     )
 else:
