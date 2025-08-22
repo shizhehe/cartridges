@@ -214,8 +214,8 @@ def serialize_file(file: CodeHopFile):
 if __name__ == "__main__":
     import pydrantic
     config = MakeCodeHopConfig(
-        num_files=4,
-        num_methods_per_file=3,
+        num_files=10,
+        num_methods_per_file=2,
         deepest_call_chain=2,
         vocab_size=4,
         function_name_vocab_size=36,

@@ -61,7 +61,7 @@ for lr in [2e-2]:
         ),
 
         save_every_n_steps=512,
-        generate_eval_every_n_steps=128,
+        generate_eval_every_n_steps=16,
         generate_evals=[
             GenerationEvalConfig(
                 name_for_wandb=f"mtob-ke-test",

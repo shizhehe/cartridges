@@ -12,10 +12,11 @@ from cartridges.synthesizers.self_study import SelfStudySynthesizer
 from cartridges.utils.wandb import WandBConfig
 
 
-DATASET_DIR = "/data/sabri/cartridges/2025-08-16-10-52-34-make_codehop/codehop-nf4-nm10-dc2-iv8-ov8-fn36-0/repo-9ca4f1"
+# DATASET_DIR = "/data/sabri/cartridges/2025-08-20-10-12-26-make_codehop/codehop-nf4-nm3-dc2-v4-fn36-0/repo-e2c17c"
+DATASET_DIR = "/data/sabri/cartridges/2025-08-20-10-26-45-make_codehop/codehop-nf14-nm1-dc2-v4-fn36-0/repo-df0b47"
 
 
-MODEL = os.environ.get("MODEL", "qwen")
+MODEL = os.environ.get("MODEL", "llama")
 if MODEL == "qwen":
     client = TokasaurusClient.Config(
         url="https://hazyresearch--toka-qwen3-4b-1xh100-min0-serve.modal.run",
@@ -23,7 +24,8 @@ if MODEL == "qwen":
     )
 elif MODEL == "llama":
     client = TokasaurusClient.Config(
-        url="https://hazyresearch--toka-llama-3-2-3b-1xh100-batch-serve.modal.run",
+        # url="https://hazyresearch--toka-llama-3-2-3b-1xh100-batch-serve.modal.run",
+        url="https://hazyresearch--toka-llama-3-2-3b-1xh100-cartridges-serve.modal.run",
         model_name="meta-llama/Llama-3.2-3B-Instruct",
     )
 else:
@@ -46,8 +48,8 @@ config = SynthesizeConfig(
     synthesizer=SelfStudySynthesizer.Config(
         client=client,
         max_rounds=1,
-        prob_thinking=0.1,
-        temperature_a=0.6,
+        prob_thinking=0.0,
+        temperature_a=1.0,
         temperature_b=0.0,
         use_tools_a=False, 
         use_tools_b=False,
@@ -57,17 +59,19 @@ config = SynthesizeConfig(
             DirectoryResource.Config(
                 path=DATASET_DIR,
                 seed_prompts=[
-                    # "structuring",
-                    # "summarization",
+                    "generic",
+                    "creative",
+                    "structuring",
+                    "summarization",
                     "question",
                     "use_case",
                 ],
-                chunker=TokenChunker.Config(
-                    tokenizer=client.model_name,
-                    min_tokens_per_chunk=64,
-                    max_tokens_per_chunk=256,
-                    wrap_chunk=True,
-                ),
+                # chunker=TokenChunker.Config(
+                #     tokenizer=client.model_name,
+                #     min_tokens_per_chunk=64,
+                #     max_tokens_per_chunk=256,
+                #     wrap_chunk=True,
+                # ),
             )
         ],
         system_prompt_template=SYSTEM_PROMPT_TEMPLATE,

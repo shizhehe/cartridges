@@ -11,16 +11,16 @@ from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
 from cartridges.train import GenerationEvalConfig, TrainConfig
 from cartridges.models.config import HFModelConfig
 from cartridges.datasets import TrainDataset
-from cartridges.data.codehop.evals import CodeHopGenerateDataset
+from cartridges.data.codehopv2.evals import CodeHopGenerateDataset
 from cartridges.utils.wandb import WandBConfig
 
 from cartridges.configs.codehop_synthesize import DATASET_DIR
 dataset_dir = Path(DATASET_DIR).parent
 
 
-NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "1024"))
+NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "2048"))
 
-MODEL = os.environ.get("MODEL", "qwen")
+MODEL = os.environ.get("MODEL", "llama")
 if MODEL == "qwen":
     data_sources = [
         # "/data/sabri/cartridges/2025-08-15-18-19-24-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
@@ -38,7 +38,11 @@ elif MODEL == "llama":
         # "/data/sabri/cartridges/2025-08-18-10-25-20-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
         # "/data/sabri/cartridges/2025-08-18-10-50-58-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
         # "/data/sabri/cartridges/2025-08-18-10-58-55-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
-        "/data/sabri/cartridges/2025-08-19-16-31-35-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
+        # "/data/sabri/cartridges/2025-08-19-16-31-35-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
+        # "/data/sabri/cartridges/2025-08-20-10-33-32-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
+        # "/data/sabri/cartridges/2025-08-20-17-24-04-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
+        "/data/sabri/cartridges/2025-08-20-17-27-57-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
+
     ]
     model=HFModelConfig(
         pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",

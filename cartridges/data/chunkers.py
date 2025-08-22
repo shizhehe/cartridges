@@ -59,7 +59,6 @@ class TokenChunker(Chunker):
         else:
             return content
 
-
 class CharacterChunker(Chunker):
 
     class Config(Chunker.Config):

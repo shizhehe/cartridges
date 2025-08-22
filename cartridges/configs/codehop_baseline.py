@@ -17,11 +17,11 @@ dataset_dir = Path(DATASET_DIR).parent
 
 DATASET_DIR = "/data/sabri/cartridges/2025-08-20-10-12-26-make_codehop/codehop-nf4-nm3-dc2-v4-fn36-0/repo-e2c17c"
 
-# client = TokasaurusClient.Config(
-#     url="https://hazyresearch--toka-llama-3-2-3b-1xh100-batch-serve.modal.run",
-#     model_name="meta-llama/Llama-3.2-3B-Instruct",
-# )
-# TEMPERATURE = 0.0
+client = TokasaurusClient.Config(
+    url="https://hazyresearch--toka-llama-3-2-3b-1xh100-batch-serve.modal.run",
+    model_name="meta-llama/Llama-3.2-3B-Instruct",
+)
+TEMPERATURE = 0.0
 
 # client = TokasaurusClient.Config(
 #     url="https://hazyresearch--toka-llama-3-1-8b-1xh100-batch-serve.modal.run",
@@ -33,10 +33,10 @@ DATASET_DIR = "/data/sabri/cartridges/2025-08-20-10-12-26-make_codehop/codehop-n
 #     model_name="Qwen/Qwen3-4b",
 # )
 
-client = OpenAIClient.Config(
-    model_name="gpt-4o",
-)
-TEMPERATURE = 1.0
+# client = OpenAIClient.Config(
+#     model_name="gpt-4o",
+# )
+# TEMPERATURE = 1.0
 
 SYSTEM_PROMPT_TEMPLATE = """Below is a list of Python files.
 Each file contains a number of methods. Note, that some of the methods may make calls to other

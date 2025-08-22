@@ -34,7 +34,7 @@ class Resource(abc.ABC):
         raise NotImplementedError("This resource does not implement a string representation.")
 
 SEED_TYPES = Literal[
-    "structuring", "summarization", "aggregation", "question", "use_case", "creative", 'generic'
+    "structuring", "summarization", "question", "use_case", "creative", 'generic'
 ] | Callable[[Any], str]
 
 
