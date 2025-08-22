@@ -5,6 +5,7 @@ import pydrantic
 from pydrantic.variables import FormatStringVariable
 
 from cartridges.clients.tokasaurus import TokasaurusClient
+from cartridges.clients.base import CartridgeConfig
 from cartridges.data.chunkers import TokenChunker
 from cartridges.data.resources import DirectoryResource
 from cartridges.synthesize import SynthesizeConfig
@@ -26,7 +27,14 @@ elif MODEL == "llama":
     client = TokasaurusClient.Config(
         # url="https://hazyresearch--toka-llama-3-2-3b-1xh100-batch-serve.modal.run",
         url="https://hazyresearch--toka-llama-3-2-3b-1xh100-cartridges-serve.modal.run",
+        # url="https://hazyresearch--toka-llama-3-2-3b-1xh100-main-serve.modal.run",
         model_name="meta-llama/Llama-3.2-3B-Instruct",
+        cartridges=[
+            CartridgeConfig(
+                id="hazy-research/cartridges/85axrvk4",
+                source="wandb"
+            )
+        ]
     )
 else:
     raise ValueError(f"Invalid model: {MODEL}")

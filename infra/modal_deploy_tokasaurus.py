@@ -22,7 +22,7 @@ MAX_TOPK_LOGPROBS = int(os.environ.get("MAX_TOPK_LOGPROBS", 20))
 GPU_TYPE: Literal["H100", "H200", "B200", "A100-80GB"] = os.environ.get("GPU_TYPE", "H100")
 MIN_CONTAINERS = int(os.environ.get("MIN_CONTAINERS", 0))
 MAX_CONTAINERS = int(os.environ.get("MAX_CONTAINERS", 32))
-ALLOW_CONCURRENT_INPUTS = int(os.environ.get("ALLOW_CONCURRENT_INPUTS", 32))
+ALLOW_CONCURRENT_INPUTS = int(os.environ.get("ALLOW_CONCURRENT_INPUTS", 4))
 SECRETS = os.environ.get("SECRETS", "sabri-api-keys")
 # --- END ARGS ---
 
@@ -58,8 +58,7 @@ branch_short = BRANCH.split("/")[-1]
 name = f"toka-{model_short}-{gpu_count}x{GPU_TYPE}"
 if MIN_CONTAINERS > 0:
     name += f"-min{MIN_CONTAINERS}"
-if BRANCH != "main":
-    name += f"-{branch_short}"
+name += f"-{branch_short}"
 app = modal.App(name)
 
 
