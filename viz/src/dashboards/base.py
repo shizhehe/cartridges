@@ -1,9 +1,9 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import os
 import tempfile
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 import pandas as pd
 
 
@@ -52,9 +52,13 @@ class TableSpec:
         return df
 
 
+@dataclass
+class Slice:
+    name: str
+    metrics: dict[str, float]
+    df: pd.DataFrame
 
-    
-
+SliceFn = Callable[[pd.DataFrame], list[Slice]]
 @dataclass
 class Dashboard:
     name: str
@@ -67,6 +71,14 @@ class Dashboard:
 
     score_metric: str = "generate_codehop/score"
     step: str = "train/optimizer_step"
+
+    slice_fns: list[SliceFn] = field(default_factory=list)
+
+    def slices(self, df: pd.DataFrame) -> list[Slice]:
+        slices = []
+        for slice_fn in self.slice_fns:
+            slices.extend(slice_fn(df))
+        return slices
 
     def tables(
         self,

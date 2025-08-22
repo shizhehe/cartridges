@@ -7,6 +7,12 @@ function DatasetsPage() {
   const [examples, setExamples] = useState([])
   const [totalExamples, setTotalExamples] = useState(0)
   const [selectedExample, setSelectedExample] = useState(null)
+  const [selectedExampleWithLogprobs, setSelectedExampleWithLogprobs] = useState(null)
+  const [loadingLogprobs, setLoadingLogprobs] = useState(false)
+  const [showTokenPanel, setShowTokenPanel] = useState(false)
+  const [selectedTokens, setSelectedTokens] = useState(null)
+  const [hoveredTokenIndex, setHoveredTokenIndex] = useState(null)
+  const [panelPosition, setPanelPosition] = useState({ x: 0, y: 0 })
   const [outputDir, setOutputDir] = useState('')
   const [tokenizerName, setTokenizerName] = useState('meta-llama/Llama-3.2-3B-Instruct')
   const [systemPromptExpanded, setSystemPromptExpanded] = useState(false)
@@ -26,7 +32,7 @@ function DatasetsPage() {
   const [copySuccess, setCopySuccess] = useState(false)
 
   // Navigate examples (similar to table navigation)
-  const navigateExample = (direction) => {
+  const navigateExample = async (direction) => {
     if (!selectedExample || examples.length === 0) return
     
     const currentIndex = examples.findIndex(ex => ex === selectedExample)
@@ -38,7 +44,17 @@ function DatasetsPage() {
       newIndex = (currentIndex - 1 + examples.length) % examples.length
     }
     
+    // Immediately show the new example
     setSelectedExample(examples[newIndex])
+    setSelectedExampleWithLogprobs(null) // Clear previous detailed data
+    
+    // Then fetch detailed example with logprobs in background
+    const globalIndex = (currentPage * examplesPerPage) + newIndex
+    console.log('Navigating to example at global index:', globalIndex)
+    const detailedExample = await fetchExampleWithLogprobs(globalIndex)
+    if (detailedExample) {
+      setSelectedExampleWithLogprobs(detailedExample)
+    }
   }
 
   // Keyboard navigation
@@ -62,10 +78,8 @@ function DatasetsPage() {
   const discoverDatasets = async () => {
     try {
       setLoadingDatasets(true)
-      console.log('Fetching datasets...')
       const response = await fetch('/api/datasets')
       const data = await response.json()
-      console.log('Datasets received:', data)
       // Ensure datasets are sorted by relative path (reverse alphabetical)
       const sortedData = data.sort((a, b) => b.relative_path.localeCompare(a.relative_path))
       setDatasets(sortedData)
@@ -171,9 +185,60 @@ function DatasetsPage() {
     })
   }
 
-  // Token decoding function
-  const decodeTokens = async (tokenIds) => {
+  // Fetch detailed example with logprobs
+  const fetchExampleWithLogprobs = async (exampleIndex) => {
+    if (!selectedDataset) return null
+
+    setLoadingLogprobs(true)
     try {
+      console.log('Fetching example with logprobs, index:', exampleIndex, 'dataset:', selectedDataset)
+      const response = await fetch('/api/dataset/example', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          dataset_path: selectedDataset,
+          example_index: exampleIndex
+        })
+      })
+      const data = await response.json()
+      
+      console.log('Received detailed example data:', data)
+      
+      if (data.error) {
+        console.error('Error fetching example with logprobs:', data.error)
+        return null
+      }
+      
+      if (data.example && data.example.messages) {
+        console.log('Example messages with logprobs:', data.example.messages.map(m => ({
+          role: m.role,
+          has_token_ids: !!m.token_ids,
+          token_ids_length: m.token_ids?.length,
+          has_top_logprobs: !!m.top_logprobs,
+          top_logprobs_structure: m.top_logprobs
+        })))
+      }
+      
+      return data.example
+    } catch (error) {
+      console.error('Failed to fetch example with logprobs:', error)
+      return null
+    } finally {
+      setLoadingLogprobs(false)
+    }
+  }
+
+  // Token decoding function
+  const decodeTokens = async (tokenIds, topLogprobs = null) => {
+    try {
+      
+      if (!selectedDataset) {
+        console.error('No selectedDataset available for token decoding')
+        return tokenIds.map((id, idx) => ({ id, token: `[${id}]`, prob: 0 }))
+      }
+      
       const response = await fetch('/api/decode-tokens', {
         method: 'POST',
         headers: {
@@ -181,23 +246,50 @@ function DatasetsPage() {
         },
         body: JSON.stringify({
           token_ids: tokenIds,
-          tokenizer_name: tokenizerName
+          dataset_path: selectedDataset
         })
       })
+      
       
       const data = await response.json()
       
       if (data.error) {
-        console.error('Token decoding error:', data.error)
         return tokenIds.map((id, idx) => ({ id, token: `[${id}]`, prob: 0 }))
       }
       
-      // Combine token IDs with decoded tokens and dummy probabilities
-      return tokenIds.map((id, idx) => ({
-        id,
-        token: data.decoded_tokens[idx] || `[${id}]`,
-        prob: 0.8 // Dummy probability since we don't have actual probabilities
-      }))
+      // Combine token IDs with decoded tokens and probabilities
+      return tokenIds.map((id, idx) => {
+        let token = data.decoded_tokens[idx] || `[${id}]`
+        // Handle empty or problematic tokens
+        if (!token || token.trim() === '' || token === '�') {
+          token = `[${id}]`
+        }
+        
+        // Try to get probability from top_logprobs if available
+        let prob = null // No default probability
+        console.log('topLogprobs for token', idx, ':', topLogprobs)
+        
+        if (topLogprobs && Array.isArray(topLogprobs) && topLogprobs[idx]) {
+          // topLogprobs is now a list of lists where each index corresponds to token position
+          const tokenLogprobEntries = topLogprobs[idx]
+          
+          if (Array.isArray(tokenLogprobEntries) && tokenLogprobEntries.length > 0) {
+            // Find the entry that matches this token_id, or use the first one
+            const matchingEntry = tokenLogprobEntries.find(entry => entry.token_id === id) || tokenLogprobEntries[0]
+            
+            if (matchingEntry && typeof matchingEntry.logprob === 'number') {
+              prob = Math.exp(matchingEntry.logprob) // Convert log prob to probability
+              console.log(`Token ${id} at pos ${idx} logprob: ${matchingEntry.logprob} -> prob: ${prob}`)
+            }
+          }
+        }
+        
+        return {
+          id,
+          token,
+          prob: prob ? Math.min(Math.max(prob, 0.1), 1.0) : null // Clamp between 0.1 and 1.0, or null
+        }
+      })
     } catch (error) {
       console.error('Failed to decode tokens:', error)
       return tokenIds.map((id, idx) => ({ id, token: `[${id}]`, prob: 0 }))
@@ -215,50 +307,151 @@ function DatasetsPage() {
     }
   }
 
+  // Token Hover Panel Component - shows top-k alternatives for a single token
+  const TokenHoverPanel = ({ tokenAlternatives, position, show, tokenIndex }) => {
+    if (!tokenAlternatives || !show) return null
+
+    return (
+      <div 
+        className="fixed bg-white border border-gray-200 rounded-lg shadow-xl p-4 z-50 max-w-sm"
+        style={{
+          left: `${position.x}px`,
+          top: `${position.y}px`,
+          transform: 'translate(-50%, -100%)',
+          marginTop: '-8px'
+        }}
+      >
+        <div className="text-sm font-medium text-gray-800 mb-3">
+          Token #{tokenIndex} Alternatives
+        </div>
+        <div className="space-y-3 max-h-64 overflow-y-auto">
+          {tokenAlternatives.map((alternative, idx) => {
+            const prob = Math.exp(alternative.logprob)
+            return (
+              <div key={idx} className="border-b border-gray-100 last:border-b-0 pb-2 last:pb-0">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-mono text-sm bg-gray-100 px-1 rounded">
+                    {(() => {
+                      // Use the token_str from the backend if available
+                      let displayToken = alternative.token_str || `[${alternative.token_id}]`
+                      if (displayToken === ' ') return '␣'
+                      if (displayToken === '\n') return '⏎'
+                      if (displayToken === '\t') return '⭾'
+                      return displayToken
+                    })()}
+                  </span>
+                  <span className="text-xs font-medium text-gray-600">
+                    {(prob * 100).toFixed(1)}%
+                  </span>
+                </div>
+                
+                {/* Mini probability bar */}
+                <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className="h-full transition-all duration-300 ease-out rounded-full"
+                    style={{
+                      width: `${prob * 100}%`,
+                      backgroundColor: `hsl(${prob * 120}, 70%, 55%)`
+                    }}
+                  />
+                </div>
+                
+                <div className="text-xs text-gray-400 mt-1">
+                  logprob: {alternative.logprob.toFixed(3)}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
   const TokenVisualization = ({ tokenIds, message }) => {
-    const [tokens, setTokens] = useState([])
-    const [loading, setLoading] = useState(true)
-
-    useEffect(() => {
-      const loadTokens = async () => {
-        if (!tokenIds || tokenIds.length === 0) {
-          setTokens([])
-          setLoading(false)
-          return
-        }
-        
-        setLoading(true)
-        const decodedTokens = await decodeTokens(tokenIds)
-        setTokens(decodedTokens)
-        setLoading(false)
-      }
-
-      loadTokens()
-    }, [tokenIds])
-
-    if (loading) {
-      return <div className="text-sm text-gray-500">Loading tokens...</div>
-    }
-
-    if (!tokens || tokens.length === 0) {
+    // Don't do any async loading - just use the token data directly
+    if (!tokenIds || tokenIds.length === 0) {
       return <div className="text-sm text-gray-500">No tokens available</div>
     }
 
+    // Create token display data directly from the message data
+    const tokens = tokenIds.map((id, idx) => {
+      // Try to get probability from top_logprobs if available
+      let prob = null
+      
+      if (message.top_logprobs && Array.isArray(message.top_logprobs) && message.top_logprobs[idx]) {
+        const tokenLogprobEntries = message.top_logprobs[idx]
+        
+        if (Array.isArray(tokenLogprobEntries) && tokenLogprobEntries.length > 0) {
+          // Find the entry that matches this token_id, or use the first one
+          const matchingEntry = tokenLogprobEntries.find(entry => entry.token_id === id) || tokenLogprobEntries[0]
+          
+          if (matchingEntry && typeof matchingEntry.logprob === 'number') {
+            prob = Math.exp(matchingEntry.logprob) // Convert log prob to probability
+          }
+        }
+      }
+      
+      // Get the actual token string from the backend data
+      const tokenStr = message.token_strs && message.token_strs[idx] ? message.token_strs[idx] : `[${id}]`
+      
+      return {
+        id,
+        token: tokenStr,
+        prob: prob ? Math.min(Math.max(prob, 0.1), 1.0) : null
+      }
+    })
+
     return (
       <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-        <h4 className="font-semibold mb-2 text-gray-800">Token Probabilities (hover for details)</h4>
+        <h4 className="font-semibold mb-2 text-gray-800">Tokens</h4>
         <div className="relative token-container">
           <div className="font-mono text-sm leading-relaxed">
             {tokens.map((token, idx) => {
-              const colors = getColorForProbability(token.prob)
+              const colors = token.prob !== null 
+                ? getColorForProbability(token.prob)
+                : { backgroundColor: '#e5e7eb', borderColor: '#9ca3af' } // Grey for no probability
+              
+              // Get alternatives for this token position from top_logprobs
+              const tokenAlternatives = message.top_logprobs && message.top_logprobs[idx] ? message.top_logprobs[idx] : []
+              
               return (
                 <span
                   key={idx}
-                  className="inline-block mr-1 mb-1 px-1 py-0.5 rounded border cursor-help transition-all hover:scale-105 hover:z-10 relative"
+                  className="inline-block mr-1 mb-1 px-1 py-0.5 rounded border transition-all hover:scale-105 relative cursor-pointer"
                   style={colors}
-                  title={`Token: "${token.token}"\nID: ${token.id}\nProbability: ${(token.prob * 100).toFixed(1)}%`}
+                  onMouseEnter={(e) => {
+                    if (tokenAlternatives.length > 0) {
+                      setSelectedTokens(tokenAlternatives)
+                      setHoveredTokenIndex(idx)
+                      setShowTokenPanel(true)
+                      const rect = e.currentTarget.getBoundingClientRect()
+                      setPanelPosition({
+                        x: rect.left + rect.width / 2,
+                        y: rect.top
+                      })
+                    }
+                  }}
+                  onMouseLeave={() => {
+                    setShowTokenPanel(false)
+                    setSelectedTokens(null)
+                    setHoveredTokenIndex(null)
+                  }}
                 >
-                  {token.token.replace(/\n/g, '\\n').replace(/\t/g, '\\t')}
+                  {(() => {
+                    let displayToken = token.token
+                    // Handle special characters and whitespace
+                    if (displayToken === ' ') {
+                      return '␣' // Visible space character
+                    } else if (displayToken === '\n') {
+                      return '⏎' // Visible newline
+                    } else if (displayToken === '\t') {
+                      return '⭾' // Visible tab
+                    } else if (displayToken.trim() === '' && displayToken.length > 0) {
+                      return '·'.repeat(displayToken.length) // Visible whitespace
+                    } else {
+                      return displayToken.replace(/\n/g, '\\n').replace(/\t/g, '\\t')
+                    }
+                  })()}
                 </span>
               )
             })}
@@ -278,14 +471,32 @@ function DatasetsPage() {
     )
   })
 
-  console.log('Rendering datasets:', datasets.length)
 
   return (
-    <div className="flex h-full w-full font-sans overflow-hidden">
+    <>
+      {/* Token Hover Panel */}
+      <TokenHoverPanel 
+        tokenAlternatives={selectedTokens} 
+        position={panelPosition} 
+        show={showTokenPanel}
+        tokenIndex={hoveredTokenIndex}
+      />
+      
+      <div className="flex h-full w-full font-sans overflow-hidden">
       <div className="w-96 bg-gray-100 border-r border-gray-300 flex flex-col flex-shrink-0 overflow-hidden">
-        {/* Header */}
+        {/* Navigation Tabs */}
         <div className="p-4 border-b border-gray-300">
-          <h1 className="text-xl font-bold text-gray-800">Dataset Explorer</h1>
+          <div className="flex space-x-1">
+            <div className="px-3 py-2 text-sm font-medium text-blue-600 bg-blue-100 rounded">
+              Datasets
+            </div>
+            <a
+              href="/training"
+              className="px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-200 rounded transition-colors"
+            >
+              Training
+            </a>
+          </div>
         </div>
 
         {/* Refresh Button */}
@@ -451,7 +662,19 @@ function DatasetsPage() {
                       <div
                         key={index}
                         className="border border-gray-300 rounded-lg p-4 cursor-pointer transition-all hover:-translate-y-1 hover:shadow-lg"
-                        onClick={() => setSelectedExample(example)}
+                        onClick={async () => {
+                          // Immediately show the basic example
+                          setSelectedExample(example)
+                          setSelectedExampleWithLogprobs(null) // Clear previous detailed data
+                          
+                          // Then fetch detailed data with logprobs in the background
+                          const globalIndex = (currentPage * examplesPerPage) + index
+                          console.log('Fetching detailed example at global index:', globalIndex)
+                          const detailedExample = await fetchExampleWithLogprobs(globalIndex)
+                          if (detailedExample) {
+                            setSelectedExampleWithLogprobs(detailedExample)
+                          }
+                        }}
                       >
                         <div className="text-sm text-gray-600 mb-2">
                           Example {(currentPage * examplesPerPage) + index + 1}
@@ -518,7 +741,10 @@ function DatasetsPage() {
             <div className="flex items-center justify-between mb-4 pb-4 pt-6 border-b border-gray-300 px-6">
               <div className="flex items-center gap-4">
                 <button 
-                  onClick={() => setSelectedExample(null)}
+                  onClick={() => {
+                    setSelectedExample(null)
+                    setSelectedExampleWithLogprobs(null)
+                  }}
                   className="px-4 py-2 bg-gray-100 border border-gray-300 rounded cursor-pointer text-sm hover:bg-gray-200"
                 >
                   ← Back to Examples
@@ -571,7 +797,7 @@ function DatasetsPage() {
                 </div>
               )}
 
-              {selectedExample.messages.map((message, messageIndex) => (
+              {(selectedExampleWithLogprobs || selectedExample).messages.map((message, messageIndex) => (
                 <div key={messageIndex} className={`p-4 rounded-lg border ${
                   message.role === 'user' 
                     ? 'bg-blue-50 border-blue-200' 
@@ -604,7 +830,21 @@ function DatasetsPage() {
                   
                   {/* Token visualization */}
                   {message.token_ids && message.token_ids.length > 0 && (
-                    <TokenVisualization tokenIds={message.token_ids} message={message} />
+                    <div>
+                      {/* Show loading state when we have basic message but waiting for logprobs */}
+                      {/* Always show tokens, with loading state if waiting for probabilities */}
+                      {!message.top_logprobs && loadingLogprobs ? (
+                        <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                          <h4 className="font-semibold mb-2 text-gray-800">Tokens</h4>
+                          <div className="text-sm text-gray-500 flex items-center">
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                            Loading probabilities...
+                          </div>
+                        </div>
+                      ) : (
+                        <TokenVisualization tokenIds={message.token_ids} message={message} />
+                      )}
+                    </div>
                   )}
                 </div>
               ))}
@@ -638,6 +878,7 @@ function DatasetsPage() {
         )}
       </div>
     </div>
+    </>
   )
 }
 
