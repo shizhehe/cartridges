@@ -26,6 +26,9 @@ function TrainingPage() {
   const [wandbRuns, setWandbRuns] = useState(() => loadFromStorage('wandbRuns', []))
   const [loadingWandb, setLoadingWandb] = useState(false)
   const [wandbError, setWandbError] = useState(null)
+  const [wandbPage, setWandbPage] = useState(0)
+  const [wandbHasMore, setWandbHasMore] = useState(true)
+  const [wandbTotalCount, setWandbTotalCount] = useState(0)
   const [wandbFilters, setWandbFilters] = useState(() => loadFromStorage('wandbFilters', {
     tag: '',
     run_id: ''
@@ -43,6 +46,12 @@ function TrainingPage() {
   const [selectedTableData, setSelectedTableData] = useState(null)
   const [loadingTableData, setLoadingTableData] = useState(false)
   const [selectedTableExample, setSelectedTableExample] = useState(null)
+  const [tableSlices, setTableSlices] = useState([])
+  const [activeSlices, setActiveSlices] = useState(new Set())
+  const [loadingSlices, setLoadingSlices] = useState(false)
+  const [sliceMetricsOverTime, setSliceMetricsOverTime] = useState([])
+  const [loadingSliceMetrics, setLoadingSliceMetrics] = useState(false)
+  const [selectedSlicesForPlot, setSelectedSlicesForPlot] = useState(new Set())
 
   // Save state to localStorage whenever it changes
 
@@ -70,16 +79,19 @@ function TrainingPage() {
   const navigateTableExample = (direction) => {
     if (!selectedTableExample || !selectedTableData || selectedTableData.length === 0) return
     
-    const currentIndex = selectedTableData.findIndex(ex => ex === selectedTableExample)
+    const filteredData = getFilteredTableData()
+    if (!filteredData || filteredData.length === 0) return
+    
+    const currentIndex = filteredData.findIndex(ex => JSON.stringify(ex) === JSON.stringify(selectedTableExample))
     let newIndex
     
     if (direction === 'next') {
-      newIndex = (currentIndex + 1) % selectedTableData.length
+      newIndex = (currentIndex + 1) % filteredData.length
     } else {
-      newIndex = (currentIndex - 1 + selectedTableData.length) % selectedTableData.length
+      newIndex = (currentIndex - 1 + filteredData.length) % filteredData.length
     }
     
-    setSelectedTableExample(selectedTableData[newIndex])
+    setSelectedTableExample(filteredData[newIndex])
   }
 
   // Keyboard navigation for table examples
@@ -99,8 +111,38 @@ function TrainingPage() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [selectedTableExample, selectedTableData])
 
+  // Get filtered table data based on active slices
+  const getFilteredTableData = () => {
+    if (!selectedTableData || activeSlices.size === 0) {
+      return selectedTableData
+    }
+    
+    // Combine data from all active slices
+    const activeSliceData = []
+    tableSlices.forEach(slice => {
+      if (activeSlices.has(slice.name)) {
+        activeSliceData.push(...slice.data)
+      }
+    })
+    
+    // Remove duplicates based on a unique identifier (assuming there's an id field or use index)
+    // For now, we'll use JSON.stringify to compare objects (not ideal for performance but works)
+    const uniqueData = []
+    const seenData = new Set()
+    
+    activeSliceData.forEach(item => {
+      const key = JSON.stringify(item)
+      if (!seenData.has(key)) {
+        seenData.add(key)
+        uniqueData.push(item)
+      }
+    })
+    
+    return uniqueData
+  }
+
   // W&B functionality using backend API
-  const fetchWandbRuns = async () => {
+  const fetchWandbRuns = async (page = 0, append = false) => {
     setLoadingWandb(true)
     setWandbError(null)
     
@@ -109,7 +151,7 @@ function TrainingPage() {
       const selectedDashboardData = dashboards.find(d => d.name === selectedDashboard)
       const dashboardFilters = selectedDashboardData ? selectedDashboardData.filters : {}
       
-      console.log('Fetching W&B runs with:', { selectedDashboard, dashboardFilters, dashboards: dashboards.length })
+      console.log('Fetching W&B runs with:', { selectedDashboard, dashboardFilters, dashboards: dashboards.length, page })
       
       const response = await fetch('/api/wandb/runs', {
         method: 'POST',
@@ -118,7 +160,9 @@ function TrainingPage() {
         },
         body: JSON.stringify({
           filters: wandbFilters,
-          dashboard_filters: dashboardFilters
+          dashboard_filters: dashboardFilters,
+          page: page,
+          per_page: 8
         })
       })
       
@@ -128,13 +172,28 @@ function TrainingPage() {
         throw new Error(data.error)
       }
       
-      setWandbRuns(data.runs)
+      if (append) {
+        setWandbRuns(prevRuns => [...prevRuns, ...data.runs])
+      } else {
+        setWandbRuns(data.runs)
+        setWandbPage(0)
+      }
+      
+      setWandbHasMore(data.has_more || false)
+      setWandbTotalCount(data.total || 0)
+      setWandbPage(page)
     } catch (error) {
       console.error('Failed to fetch W&B runs:', error)
       setWandbError(`Failed to fetch runs: ${error.message}`)
     } finally {
       setLoadingWandb(false)
     }
+  }
+
+  // Load more runs
+  const loadMoreRuns = async () => {
+    const nextPage = wandbPage + 1
+    await fetchWandbRuns(nextPage, true)
   }
 
   // Fetch runs when dashboard selection changes OR when dashboards are first loaded
@@ -167,12 +226,10 @@ function TrainingPage() {
     }
   }
 
-  // Auto-fetch dashboards when component mounts
+  // Auto-fetch dashboards when component mounts (always refresh)
   useEffect(() => {
-    // Only fetch dashboards if we don't have them persisted already
-    if (dashboards.length === 0) {
-      fetchDashboards()
-    }
+    // Always fetch fresh dashboards on mount to get latest specs
+    fetchDashboards()
   }, [])
 
   // Debug log on mount to see restored state
@@ -240,12 +297,17 @@ function TrainingPage() {
       console.log('Starting async plot loading...')
       loadPlotData(run, selectedDashboard)
       
+      // Start loading slice metrics over time in background (don't await)
+      console.log('Starting async slice metrics loading...')
+      loadSliceMetricsOverTime(run, selectedDashboard)
+      
       if (data.tables.length > 0) {
         // Select the last table (highest step) by default since that's usually the final results
         const lastTable = data.tables[data.tables.length - 1]
         console.log('Loading last table by default:', lastTable)
         setSelectedTable(lastTable)
         loadTableData(lastTable, run)  // Load the last table's data, passing run directly
+        loadTableSlices(lastTable, run, selectedDashboard)  // Load slices for the table
       } else {
         console.log('No tables found in dashboard data')
       }
@@ -297,6 +359,87 @@ function TrainingPage() {
     }
   }
 
+  // Load slice metrics over time for all table steps
+  const loadSliceMetricsOverTime = async (run = selectedRun, dashboard = selectedDashboard) => {
+    console.log('loadSliceMetricsOverTime called with:', { run: run?.id, dashboard })
+    if (!run || !dashboard) {
+      console.log('Missing run or dashboard, skipping slice metrics loading')
+      return
+    }
+
+    setLoadingSliceMetrics(true)
+    console.log('Loading slice metrics over time for all steps...')
+    
+    try {
+      const response = await fetch('/api/dashboard/slice-metrics', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          run_id: run.id,
+          dashboard_name: dashboard
+        })
+      })
+      
+      const data = await response.json()
+      
+      if (data.error) {
+        throw new Error(data.error)
+      }
+      
+      console.log('Slice metrics over time loaded successfully:', data.slice_metrics.length, 'slices across', data.step_count, 'steps')
+      setSliceMetricsOverTime(data.slice_metrics)
+    } catch (error) {
+      console.error('Failed to load slice metrics over time:', error)
+      setWandbError(`Failed to load slice metrics over time: ${error.message}`)
+    } finally {
+      setLoadingSliceMetrics(false)
+    }
+  }
+
+  // Load slices for a table
+  const loadTableSlices = async (table, run = selectedRun, dashboard = selectedDashboard) => {
+    console.log('loadTableSlices called with:', { run: run?.id, table, dashboard })
+    if (!run || !table || !dashboard) {
+      console.log('Missing run, table, or dashboard, skipping slice loading')
+      return
+    }
+
+    setLoadingSlices(true)
+    console.log('Loading slices for step:', table.step)
+    
+    try {
+      const response = await fetch('/api/dashboard/slices', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          run_id: run.id,
+          dashboard_name: dashboard,
+          table_path: table.path,
+          table_step: table.step
+        })
+      })
+      
+      const data = await response.json()
+      
+      if (data.error) {
+        throw new Error(data.error)
+      }
+      
+      console.log('Slices loaded successfully:', data.slices.length, 'slices')
+      setTableSlices(data.slices)
+      setActiveSlices(new Set()) // Reset active slices when loading new data
+    } catch (error) {
+      console.error('Failed to load table slices:', error)
+      setWandbError(`Failed to load table slices: ${error.message}`)
+    } finally {
+      setLoadingSlices(false)
+    }
+  }
+
   // Load table data on demand
   const loadTableData = async (table, run = selectedRun) => {
     console.log('loadTableData called with:', { run: run?.id, table })
@@ -338,20 +481,55 @@ function TrainingPage() {
   }
 
   // Plot visualization component
-  const PlotVisualization = ({ plot }) => {
+  const PlotVisualization = ({ plot, sliceMetrics, selectedSlices }) => {
     const plotRef = useRef(null)
     
     useEffect(() => {
       if (!plotRef.current || !plot) return
       
-      const trace = {
+      const traces = []
+      
+      // Main plot trace
+      const mainTrace = {
         x: plot.data.map(d => d[plot.x_col]),
         y: plot.data.map(d => d[plot.y_col]),
         type: 'scatter',
         mode: 'lines+markers',
         name: plot.plot_name,
-        line: { color: '#3b82f6' },
+        line: { color: '#3b82f6', width: 2 },
         marker: { color: '#3b82f6', size: 6 }
+      }
+      traces.push(mainTrace)
+      
+      // Add slice traces if available and selected
+      if (sliceMetrics && selectedSlices && selectedSlices.size > 0) {
+        const colors = ['#ef4444', '#f59e0b', '#10b981', '#8b5cf6', '#f97316', '#06b6d4']
+        let colorIndex = 0
+        
+        sliceMetrics.forEach(slice => {
+          if (selectedSlices.has(slice.name)) {
+            // Find the metric that matches the plot's y-axis
+            const metricKey = Object.keys(slice.data[0] || {}).find(key => 
+              key !== 'step' && key.includes(plot.y_col.split('/')[1] || plot.y_col)
+            )
+            
+            if (metricKey && slice.data.length > 0) {
+              const color = colors[colorIndex % colors.length]
+              colorIndex++
+              
+              const sliceTrace = {
+                x: slice.data.map(d => d.step),
+                y: slice.data.map(d => d[metricKey]),
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: slice.name,
+                line: { color: color, width: 2, dash: 'dot' },
+                marker: { color: color, size: 4 }
+              }
+              traces.push(sliceTrace)
+            }
+          }
+        })
       }
       
       const layout = {
@@ -369,7 +547,14 @@ function TrainingPage() {
         },
         margin: { l: 50, r: 30, t: 40, b: 40 },
         plot_bgcolor: '#fafafa',
-        paper_bgcolor: 'white'
+        paper_bgcolor: 'white',
+        legend: {
+          orientation: 'h',
+          x: 0.5,
+          xanchor: 'center',
+          y: 1.02,
+          yanchor: 'bottom'
+        }
       }
       
       const config = {
@@ -377,8 +562,8 @@ function TrainingPage() {
         responsive: true
       }
       
-      Plot.newPlot(plotRef.current, [trace], layout, config)
-    }, [plot])
+      Plot.newPlot(plotRef.current, traces, layout, config)
+    }, [plot, sliceMetrics, selectedSlices])
     
     if (!plot) return null
     
@@ -388,9 +573,19 @@ function TrainingPage() {
   return (
     <div className="flex h-full font-sans overflow-hidden" style={{ width: '100vw', minWidth: '100vw' }}>
       <div className="w-96 bg-gray-100 border-r border-gray-300 flex flex-col flex-shrink-0 overflow-hidden">
-        {/* Header */}
+        {/* Navigation Tabs */}
         <div className="p-4 border-b border-gray-300">
-          <h1 className="text-xl font-bold text-gray-800">Training Dashboard</h1>
+          <div className="flex space-x-1">
+            <a
+              href="/datasets"
+              className="px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-200 rounded transition-colors"
+            >
+              Datasets
+            </a>
+            <div className="px-3 py-2 text-sm font-medium text-blue-600 bg-blue-100 rounded">
+              Training
+            </div>
+          </div>
         </div>
 
         {/* Dashboard Selection */}
@@ -477,7 +672,7 @@ function TrainingPage() {
           <div className="flex-1 flex flex-col min-h-0">
             <div className="flex items-center justify-between mb-3 px-4">
               <h3 className="text-sm font-medium text-gray-700">
-                Recent Runs ({wandbRuns.length})
+                Recent Runs ({wandbRuns.length}{wandbTotalCount > 0 ? ` of ${wandbTotalCount}` : ''})
               </h3>
               <button
                 onClick={fetchWandbRuns}
@@ -548,6 +743,23 @@ function TrainingPage() {
                 </div>
               )}
             </div>
+            
+            {/* Load More Button */}
+            {wandbRuns.length > 0 && wandbHasMore && (
+              <div className="px-4 pb-4">
+                <button
+                  onClick={loadMoreRuns}
+                  disabled={loadingWandb}
+                  className={`w-full px-3 py-2 text-sm rounded border transition-colors ${
+                    loadingWandb 
+                      ? 'bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed'
+                      : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50 hover:border-gray-400'
+                  }`}
+                >
+                  {loadingWandb ? 'Loading...' : 'Load More'}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -562,22 +774,53 @@ function TrainingPage() {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden" style={{ width: 'calc(100vw - 24rem)' }}>
         {selectedRun && dashboardData ? (
           <div className="flex flex-col h-full w-full overflow-hidden">
-            {/* Dashboard Header */}
-            <div className="bg-white p-4 border-b border-gray-200">
-              <div className="flex items-center justify-between mb-2">
-                <h2 className="text-xl font-semibold text-gray-800">
-                  {selectedRun.name} - {selectedDashboard}
-                </h2>
-                <span className="text-sm text-gray-500">
-                  Run ID: {selectedRun.id}
-                </span>
-              </div>
-            </div>
 
             {/* Plots Section */}
             {(dashboardData?.plots?.length > 0 || plotData.length > 0 || loadingPlots) && (
               <div className="bg-white p-4 border-b border-gray-200 w-full flex-shrink-0">
-                <h3 className="text-lg font-semibold mb-4 text-gray-800">Metrics</h3>
+                {loadingSliceMetrics && (
+                  <div className="text-sm text-gray-500 mb-4">Loading slice metrics...</div>
+                )}
+                
+                {/* Slice Selection for Plots */}
+                {sliceMetricsOverTime.length > 0 && (
+                  <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded">
+                    <div className="text-sm font-medium text-gray-700 mb-2">
+                      Show slice metrics in plot:
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {sliceMetricsOverTime.map((slice, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => {
+                            const newSelected = new Set(selectedSlicesForPlot)
+                            if (selectedSlicesForPlot.has(slice.name)) {
+                              newSelected.delete(slice.name)
+                            } else {
+                              newSelected.add(slice.name)
+                            }
+                            setSelectedSlicesForPlot(newSelected)
+                          }}
+                          className={`px-3 py-1 text-xs rounded-full border transition-colors ${
+                            selectedSlicesForPlot.has(slice.name)
+                              ? 'bg-blue-100 border-blue-300 text-blue-800'
+                              : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          {slice.name}
+                        </button>
+                      ))}
+                      {selectedSlicesForPlot.size > 0 && (
+                        <button
+                          onClick={() => setSelectedSlicesForPlot(new Set())}
+                          className="px-3 py-1 text-xs rounded-full border border-red-300 text-red-700 bg-red-50 hover:bg-red-100 transition-colors ml-2"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {loadingPlots && plotData.length === 0 ? (
                   <div className="flex items-center justify-center p-8 w-full">
                     <div className="text-gray-500">Loading plots...</div>
@@ -587,7 +830,11 @@ function TrainingPage() {
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 w-full">
                       {plotData.map((plot, idx) => (
                         <div key={idx} className="border border-gray-200 rounded-lg p-4 w-full min-w-0">
-                          <PlotVisualization plot={plot} />
+                          <PlotVisualization 
+                            plot={plot} 
+                            sliceMetrics={sliceMetricsOverTime}
+                            selectedSlices={selectedSlicesForPlot}
+                          />
                         </div>
                       ))}
                     </div>
@@ -599,27 +846,102 @@ function TrainingPage() {
             {/* Tables Section */}
             {dashboardData.tables && dashboardData.tables.length > 0 && (
               <div className="flex-1 flex flex-col min-h-0 w-full overflow-hidden">
+                {/* Step Selector and Slices Section */}
                 <div className="bg-white p-4 border-b border-gray-200 w-full flex-shrink-0">
-                  <div className="flex items-center justify-between w-full">
-                    <h3 className="text-lg font-semibold text-gray-800">Tables</h3>
-                    <select
-                      value={selectedTable ? dashboardData.tables.indexOf(selectedTable) : 0}
-                      onChange={(e) => {
-                        const newTable = dashboardData.tables[parseInt(e.target.value)]
-                        setSelectedTable(newTable)
-                        setSelectedTableData(null)  // Clear previous data
-                        setSelectedTableExample(null)  // Clear selected example
-                        loadTableData(newTable)  // Load new table data
-                      }}
-                      className="p-2 border border-gray-300 rounded text-sm flex-shrink-0"
-                    >
-                      {dashboardData.tables.map((table, idx) => (
-                        <option key={idx} value={idx}>
-                          Step {table.step}
-                        </option>
-                      ))}
-                    </select>
+                  <div className="flex items-center gap-4 mb-3">
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm font-medium text-gray-700">Step:</label>
+                      <select
+                        value={selectedTable ? dashboardData.tables.indexOf(selectedTable) : 0}
+                        onChange={(e) => {
+                          const newTable = dashboardData.tables[parseInt(e.target.value)]
+                          setSelectedTable(newTable)
+                          setSelectedTableData(null)  // Clear previous data
+                          setSelectedTableExample(null)  // Clear selected example
+                          setTableSlices([])  // Clear previous slices
+                          setActiveSlices(new Set())  // Clear active slices
+                          loadTableData(newTable)  // Load new table data
+                          loadTableSlices(newTable)  // Load slices for new table
+                        }}
+                        className="p-2 border border-gray-300 rounded text-sm"
+                      >
+                        {dashboardData.tables.map((table, idx) => (
+                          <option key={idx} value={idx}>
+                            {table.step}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {loadingSlices && (
+                      <div className="text-sm text-gray-500">Loading slices...</div>
+                    )}
                   </div>
+                  
+                  {/* Slices */}
+                  {tableSlices.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {tableSlices.map((slice, idx) => (
+                        <div
+                          key={idx}
+                          className={`border rounded-lg p-3 transition-colors cursor-pointer ${
+                            activeSlices.has(slice.name)
+                              ? 'bg-blue-50 border-blue-300'
+                              : 'bg-gray-50 border-gray-300 hover:bg-gray-100'
+                          }`}
+                          onClick={() => {
+                            const newActiveSlices = new Set(activeSlices)
+                            if (activeSlices.has(slice.name)) {
+                              newActiveSlices.delete(slice.name)
+                            } else {
+                              newActiveSlices.add(slice.name)
+                            }
+                            setActiveSlices(newActiveSlices)
+                          }}
+                        >
+                          <div className={`font-medium text-sm ${
+                            activeSlices.has(slice.name) ? 'text-blue-800' : 'text-gray-800'
+                          }`}>
+                            {slice.name}
+                          </div>
+                          <div className={`text-xs mt-1 ${
+                            activeSlices.has(slice.name) ? 'text-blue-600' : 'text-gray-600'
+                          }`}>
+                            {slice.count} examples
+                          </div>
+                          {slice.metrics && Object.keys(slice.metrics).length > 0 && (
+                            <div className={`text-xs mt-2 space-y-1 ${
+                              activeSlices.has(slice.name) ? 'text-blue-700' : 'text-gray-700'
+                            }`}>
+                              {Object.entries(slice.metrics).map(([key, value]) => (
+                                <div key={key} className="flex justify-between">
+                                  <span className="font-medium">{key}:</span>
+                                  <span>
+                                    {value !== null ? 
+                                      (typeof value === 'number' ? value.toFixed(3) : value) : 
+                                      'N/A'
+                                    }
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      {activeSlices.size > 0 && (
+                        <div
+                          onClick={() => setActiveSlices(new Set())}
+                          className="border rounded-lg p-3 transition-colors cursor-pointer bg-red-50 border-red-300 hover:bg-red-100"
+                        >
+                          <div className="font-medium text-sm text-red-800">
+                            Clear All
+                          </div>
+                          <div className="text-xs mt-1 text-red-600">
+                            Reset filters
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {!selectedTableExample ? (
@@ -632,33 +954,114 @@ function TrainingPage() {
                       </div>
                     ) : selectedTableData && selectedTableData.length > 0 ? (
                       <div className="w-full">
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full">
-                          {selectedTableData.map((example, idx) => (
+                        {activeSlices.size > 0 && (
+                          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded">
+                            <div className="text-sm text-blue-800">
+                              Showing {getFilteredTableData().length} examples from {activeSlices.size} active slice{activeSlices.size !== 1 ? 's' : ''}: {Array.from(activeSlices).join(', ')}
+                            </div>
+                          </div>
+                        )}
+                        {getFilteredTableData().length > 0 ? (
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full">
+                            {getFilteredTableData().map((example, idx) => (
                             <div
                               key={idx}
                               className="border border-gray-300 rounded-lg p-4 cursor-pointer transition-all hover:-translate-y-1 hover:shadow-lg w-full min-h-[200px]"
                               onClick={() => setSelectedTableExample(example)}
                             >
-                              <div className="text-sm text-gray-600 mb-2">
-                                Score: {example[selectedTable.score_col] || 'N/A'}
+                              <div className="mb-2">
+                                {(() => {
+                                  const score = example[selectedTable.score_col]
+                                  if (score === null || score === undefined || score === '') {
+                                    return (
+                                      <span className="px-2 py-1 text-xs rounded-full bg-gray-200 text-gray-600">
+                                        N/A
+                                      </span>
+                                    )
+                                  }
+                                  
+                                  // Handle boolean values
+                                  if (typeof score === 'boolean' || score === 'true' || score === 'false') {
+                                    const isTrue = score === true || score === 'true'
+                                    return (
+                                      <span className={`px-2 py-1 text-xs rounded-full font-medium text-white ${
+                                        isTrue ? 'bg-green-500' : 'bg-red-500'
+                                      }`}>
+                                        {isTrue ? 'CORRECT' : 'INCORRECT'}
+                                      </span>
+                                    )
+                                  }
+                                  
+                                  const numScore = parseFloat(score)
+                                  if (isNaN(numScore)) {
+                                    return (
+                                      <span className="px-2 py-1 text-xs rounded-full bg-gray-200 text-gray-600">
+                                        N/A
+                                      </span>
+                                    )
+                                  }
+                                  
+                                  // Create gradient from red (0) to yellow (0.5) to green (1)
+                                  let bgColor, textColor
+                                  if (numScore < 0.5) {
+                                    // Red to yellow gradient
+                                    const intensity = numScore * 2 // 0 to 1
+                                    bgColor = `rgb(${255}, ${Math.round(165 + (255 - 165) * intensity)}, 0)`
+                                    textColor = 'text-white'
+                                  } else {
+                                    // Yellow to green gradient
+                                    const intensity = (numScore - 0.5) * 2 // 0 to 1
+                                    bgColor = `rgb(${Math.round(255 - 255 * intensity)}, 255, 0)`
+                                    textColor = intensity > 0.3 ? 'text-white' : 'text-black'
+                                  }
+                                  
+                                  return (
+                                    <span 
+                                      className={`px-2 py-1 text-xs rounded-full font-medium ${textColor}`}
+                                      style={{ backgroundColor: bgColor }}
+                                    >
+                                      {numScore.toFixed(3)}
+                                    </span>
+                                  )
+                                })()}
                               </div>
                               <div className="text-xs text-gray-500 leading-relaxed space-y-1">
-                                <div className="truncate">
+                                <div className="line-clamp-4">
                                   <span className="font-semibold text-blue-600">Prompt:</span>{' '}
-                                  {(example[selectedTable.prompt_col] || '').substring(0, 80)}...
+                                  {(() => {
+                                    const text = example[selectedTable.prompt_col] || ''
+                                    return text.length > 400 ? text.substring(0, 400) + '...' : text
+                                  })()}
                                 </div>
-                                <div className="truncate">
+                                <div className="line-clamp-4">
                                   <span className="font-semibold text-green-600">Answer:</span>{' '}
-                                  {(example[selectedTable.answer_col] || '').substring(0, 80)}...
+                                  {(() => {
+                                    const text = example[selectedTable.answer_col] || ''
+                                    return text.length > 400 ? text.substring(0, 400) + '...' : text
+                                  })()}
                                 </div>
-                                <div className="truncate">
+                                <div className="line-clamp-4">
                                   <span className="font-semibold text-purple-600">Prediction:</span>{' '}
-                                  {(example[selectedTable.pred_col] || '').substring(0, 80)}...
+                                  {(() => {
+                                    const text = example[selectedTable.pred_col] || ''
+                                    return text.length > 400 ? text.substring(0, 400) + '...' : text
+                                  })()}
                                 </div>
                               </div>
                             </div>
                           ))}
-                        </div>
+                          </div>
+                        ) : (
+                          <div className="text-center text-gray-500 py-12 w-full">
+                            <p>No examples match the active slices.</p>
+                            <button
+                              onClick={() => setActiveSlices(new Set())}
+                              className="mt-2 px-3 py-1 text-sm text-blue-600 hover:text-blue-800 underline"
+                            >
+                              Clear slice filters
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ) : selectedTable ? (
                       <div className="text-center text-gray-500 py-12 w-full">
@@ -688,7 +1091,7 @@ function TrainingPage() {
                           title="Previous (←)"
                         >←</button>
                         <span className="text-sm text-gray-600">
-                          {selectedTableData.findIndex(ex => ex === selectedTableExample) + 1} of {selectedTableData.length}
+                          {getFilteredTableData().findIndex(ex => JSON.stringify(ex) === JSON.stringify(selectedTableExample)) + 1} of {getFilteredTableData().length}
                         </span>
                         <button 
                           onClick={() => navigateTableExample('next')}
@@ -719,8 +1122,76 @@ function TrainingPage() {
                         </div>
                         <div className="p-4 rounded-lg bg-gray-50 border border-gray-200">
                           <div className="font-bold text-sm text-gray-800 mb-2">Score</div>
-                          <div className="text-gray-900">
-                            {selectedTableExample[selectedTable.score_col] || 'No score'}
+                          <div>
+                            {(() => {
+                              const score = selectedTableExample[selectedTable.score_col]
+                              if (score === null || score === undefined || score === '') {
+                                return (
+                                  <span className="px-3 py-1 text-sm rounded-full bg-gray-200 text-gray-600">
+                                    N/A
+                                  </span>
+                                )
+                              }
+                              
+                              // Handle boolean values
+                              if (typeof score === 'boolean' || score === 'true' || score === 'false') {
+                                const isTrue = score === true || score === 'true'
+                                return (
+                                  <span className={`px-3 py-1 text-sm rounded-full font-medium text-white ${
+                                    isTrue ? 'bg-green-500' : 'bg-red-500'
+                                  }`}>
+                                    {isTrue ? 'CORRECT' : 'INCORRECT'}
+                                  </span>
+                                )
+                              }
+                              
+                              const numScore = parseFloat(score)
+                              if (isNaN(numScore)) {
+                                return (
+                                  <span className="px-3 py-1 text-sm rounded-full bg-gray-200 text-gray-600">
+                                    N/A
+                                  </span>
+                                )
+                              }
+                              
+                              // Create gradient from red (0) to yellow (0.5) to green (1)
+                              let bgColor, textColor
+                              if (numScore < 0.5) {
+                                // Red to yellow gradient
+                                const intensity = numScore * 2 // 0 to 1
+                                bgColor = `rgb(${255}, ${Math.round(165 + (255 - 165) * intensity)}, 0)`
+                                textColor = 'text-white'
+                              } else {
+                                // Yellow to green gradient
+                                const intensity = (numScore - 0.5) * 2 // 0 to 1
+                                bgColor = `rgb(${Math.round(255 - 255 * intensity)}, 255, 0)`
+                                textColor = intensity > 0.3 ? 'text-white' : 'text-black'
+                              }
+                              
+                              return (
+                                <span 
+                                  className={`px-3 py-1 text-sm rounded-full font-medium ${textColor}`}
+                                  style={{ backgroundColor: bgColor }}
+                                >
+                                  {numScore.toFixed(3)}
+                                </span>
+                              )
+                            })()}
+                          </div>
+                        </div>
+                        
+                        {/* Full Row Data */}
+                        <div className="p-4 rounded-lg bg-slate-50 border border-slate-200">
+                          <div className="font-bold text-sm text-slate-800 mb-2">Full Row Data</div>
+                          <div className="space-y-2">
+                            {Object.entries(selectedTableExample).map(([key, value]) => (
+                              <div key={key} className="border-b border-slate-200 pb-2 last:border-b-0 last:pb-0">
+                                <div className="font-medium text-xs text-slate-700 mb-1">{key}</div>
+                                <div className="text-xs text-slate-900 break-all">
+                                  {typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </div>
                       </div>
