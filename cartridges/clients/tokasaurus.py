@@ -88,7 +88,7 @@ class TokasaurusClient(Client):
                 import pickle
                 t0 = time.time()
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
-                    endpoint = "/batch/chat/completions" if not use_cartridge_endpoint else "/batch/cartridge/chat/completions"
+                    endpoint = "/custom/synchronous-batch-completions" if not use_cartridge_endpoint else "/batch/cartridge/chat/completions"
                     async with session.post(
                         f"{self.config.url}{endpoint}",
                         json={"requests": requests},
@@ -241,7 +241,7 @@ class TokasaurusClient(Client):
         )
         # SE (07/07): Running validation with ChatCompletion Pydantic model is very slow.
         # So we use model_construct to create the objects.
-        responses: List[ChatCompletion] = [ChatCompletion.model_construct(**r) for r in response]
+        responses: List[ChatCompletion] = [ChatCompletion.model_construct(**r) if isinstance(r, dict) else r for r in response]
         logger.info(f"[batch={modal_upstream_id}] Responses received")
         
         samples = []
