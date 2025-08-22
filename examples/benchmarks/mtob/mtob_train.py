@@ -7,21 +7,20 @@ from pydrantic.variables import FormatStringVariable
 
 from cartridges.data.mtob.evals import MTOBKalamangToEnglishGenerateDataset
 from cartridges.initialization import KVFromRandomText
-from cartridges.models.llama.modeling_llama import FlexLlamaForCausalLM
-from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
 from cartridges.train import GenerationEvalConfig, TrainConfig
 from cartridges.models.config import HFModelConfig
-from cartridges.datasets import TrainDataset
+from cartridges.datasets import DataSource, TrainDataset
 from cartridges.utils.wandb import WandBConfig
 
 
-NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "8192"))
+NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "4096"))
 
 MODEL = os.environ.get("MODEL", "llama")
 if MODEL == "qwen":
+    from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
     data_sources = [
-        "/data/sabri/cartridges/2025-07-28-18-33-28-m07d28_mtob_synthesize/m07d28_mtob_synthesize_qwen3-4b_n65536-0/artifact/dataset.pkl",
-        "/data/sabri/cartridges/2025-07-28-20-04-14-m07d28_mtob_synthesize/m07d28_mtob_synthesize_qwen3-4b_n65536-0/artifact/dataset.pkl"
+        "hazyresearch/m07d28_mtob_synthesize_qwen3-4b_n65536-0",
+        "hazyresearch/m07d28_mtob_synthesize_qwen3-4b_n65536-1"
 
     ]
     model=HFModelConfig(
@@ -29,10 +28,14 @@ if MODEL == "qwen":
         model_cls=FlexQwen3ForCausalLM,
     )
 elif MODEL == "llama":
+    from cartridges.models.llama.modeling_llama import FlexLlamaForCausalLM
+    # TODO: Note in the paper we also ran this on Llama-3.1-8B-Instruct. It is currently
+    # on our backlog to run this experiment with Llama-3.1-8B-Instruct on the public, 
+    # refactored repository. Leave an issue if you'd like to see the 8B datasets
+    # and we will try to prioritize it.
     data_sources = [
-        "/data/sabri/cartridges/2025-07-30-19-03-42-m07d28_mtob_synthesize/m07d28_mtob_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl",
-        "/data/sabri/cartridges/2025-07-30-19-18-45-m07d28_mtob_synthesize/m07d28_mtob_synthesize_llama-3.2-3b_n65536-0/artifact/dataset.pkl"
-
+        "hazyresearch/m07d28_mtob_synthesize_llama-3.2-3b_n65536-0",
+        "hazyresearch/m07d28_mtob_synthesize_llama-3.2-3b_n65536-1"
     ]
     model = HFModelConfig(
         pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
@@ -54,7 +57,7 @@ for lr in [2e-2]:
         global_batch_size=32,
 
         dataset=TrainDataset.Config(
-            data_sources=data_sources,
+            data_sources=[DataSource(path=source, type="hf") for source in data_sources],
             top_k_logits=20,
             packed_seq_length=2048,
             packing_mode="truncate",

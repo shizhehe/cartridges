@@ -9,7 +9,10 @@ from cartridges.clients.openai import OpenAIClient
 from cartridges.clients.base import ClientResponse, ClientSample
 from cartridges.clients.usage import Usage
 
-base_url = "https://hazyresearch--vllm-qwen3-4b-1xh100-serve.modal.run/v1"
+base_url = os.path.join(os.environ.get(
+    "CARTRIDGES_VLLM_QWEN3_4B_URL", 
+    "http://localhost:8000"
+), "v1")
 model_name = "Qwen/Qwen3-4b"
 
 @pytest.fixture

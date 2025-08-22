@@ -16,7 +16,7 @@ from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE,
 
 
 class NIAHGenerateDataset(GenerateEvalDataset):
-    class Config(ObjectConfig):
+    class Config(GenerateEvalDataset.Config):
         _pass_as_config = True
         niah_path: Optional[str] = None
         sample_idx: int = 0

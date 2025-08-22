@@ -11,7 +11,7 @@ from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE,
 
 
 class LongHealthMultipleChoiceGenerateDataset(GenerateEvalDataset):
-    class Config(ObjectConfig):
+    class Config(GenerateEvalDataset.Config):
         _pass_as_config = True
         patient_ids: Optional[List[str]] = None
         max_questions: Optional[int] = None
