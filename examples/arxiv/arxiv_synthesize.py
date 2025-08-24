@@ -17,6 +17,15 @@ client = TokasaurusClient.Config(
     model_name="Qwen/Qwen3-4b",
 )
 
+client = TokasaurusClient.Config(
+    # url="https://hazyresearch--toka-llama-3-2-3b-1xh100-batch-serve.modal.run",
+    # url="https://hazyresearch--toka-llama-3-2-3b-1xh100-cartridges-serve.modal.run",
+    # url="https://hazyresearch--toka-llama-3-2-3b-1xh100-main-serve.modal.run",
+    url="http://0.0.0.0:10210",
+    model_name="meta-llama/Llama-3.2-3B-Instruct",
+    cartridges=[]
+)
+
 config = SynthesizeConfig(
 
     synthesizer=SelfStudySynthesizer.Config(
@@ -36,16 +45,16 @@ config = SynthesizeConfig(
                 ],
                 chunker=TokenChunker.Config(
                     tokenizer=client.model_name,
-                    min_tokens_per_chunk=512,
-                    max_tokens_per_chunk=1024,
+                    min_tokens_per_chunk=2048,
+                    max_tokens_per_chunk=4096,
                 ),
             )
         ],
     ),
 
-    num_samples=256, 
-    batch_size=1,  
-    max_num_batches_in_parallel=256,
+    num_samples=8192, 
+    batch_size=64,  
+    max_num_batches_in_parallel=4,
 
     name=FormatStringVariable(f"{Path(__file__).stem}_{{synthesizer.client.model_name}}_n{{num_samples}}"),
     run_id=FormatStringVariable("{name}"),

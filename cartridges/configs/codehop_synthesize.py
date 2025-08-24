@@ -28,10 +28,12 @@ elif MODEL == "llama":
         # url="https://hazyresearch--toka-llama-3-2-3b-1xh100-batch-serve.modal.run",
         url="https://hazyresearch--toka-llama-3-2-3b-1xh100-cartridges-serve.modal.run",
         # url="https://hazyresearch--toka-llama-3-2-3b-1xh100-main-serve.modal.run",
+        # url="http://0.0.0.0:10210",
         model_name="meta-llama/Llama-3.2-3B-Instruct",
         cartridges=[
             CartridgeConfig(
-                id="hazy-research/cartridges/85axrvk4",
+                # id="hazy-research/cartridges/85axrvk4",
+                id="hazy-research/cartridges/4d3h0kl4", #8192
                 source="wandb"
             )
         ]
@@ -88,7 +90,7 @@ config = SynthesizeConfig(
     num_samples=65768, 
     batch_size=32,    # Smaller batches 
     
-    max_num_batches_in_parallel=256,
+    max_num_batches_in_parallel=512,
 
     name=FormatStringVariable(f"{Path(__file__).stem}_n{{num_samples}}"),
     run_id=FormatStringVariable("{name}"),

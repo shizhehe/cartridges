@@ -19,10 +19,12 @@ MODEL_NAME = os.environ.get("MODEL_NAME", "meta-llama/Llama-3.2-3B-Instruct")
 DP_SIZE = int(os.environ.get("DP_SIZE", 1))
 PP_SIZE = int(os.environ.get("PP_SIZE", 1))
 MAX_TOPK_LOGPROBS = int(os.environ.get("MAX_TOPK_LOGPROBS", 20))
-GPU_TYPE: Literal["H100", "H200", "B200", "A100-80GB"] = os.environ.get("GPU_TYPE", "H100")
+GPU_TYPE: Literal["H100", "H200", "B200", "A100-80GB", "A100-40GB"] = os.environ.get("GPU_TYPE", "A100-40GB")
 MIN_CONTAINERS = int(os.environ.get("MIN_CONTAINERS", 0))
 MAX_CONTAINERS = int(os.environ.get("MAX_CONTAINERS", 32))
-ALLOW_CONCURRENT_INPUTS = int(os.environ.get("ALLOW_CONCURRENT_INPUTS", 4))
+SCALEDOWN_WINDOW = int(os.environ.get("SCALEDOWN_WINDOW", 15))
+ALLOW_CONCURRENT_INPUTS = int(os.environ.get("ALLOW_CONCURRENT_INPUTS", 32))
+MAX_COMPLETION_TOKENS = os.environ.get("MAX_COMPLETION_TOKENS", str(128_000))
 SECRETS = os.environ.get("SECRETS", "sabri-api-keys")
 # --- END ARGS ---
 
@@ -58,6 +60,8 @@ branch_short = BRANCH.split("/")[-1]
 name = f"toka-{model_short}-{gpu_count}x{GPU_TYPE}"
 if MIN_CONTAINERS > 0:
     name += f"-min{MIN_CONTAINERS}"
+if SCALEDOWN_WINDOW > 1:
+    name += f"-win{SCALEDOWN_WINDOW}"
 name += f"-{branch_short}"
 app = modal.App(name)
 
@@ -77,7 +81,7 @@ def wait_for_port(port, host="localhost", timeout=60.0):
     image=image,
     gpu=f"{GPU_TYPE}:{DP_SIZE}",
     allow_concurrent_inputs=ALLOW_CONCURRENT_INPUTS,
-    scaledown_window=1 * MINUTES,
+    scaledown_window=SCALEDOWN_WINDOW * MINUTES,
     min_containers=MIN_CONTAINERS,
     max_containers=MAX_CONTAINERS,
     secrets=[modal.Secret.from_name(SECRETS)],
@@ -104,12 +108,18 @@ def serve():
     cmd = [
         "toka",
         f"model={MODEL_NAME}",
-        f"kv_cache_num_tokens='({400_000})'",
-        f"max_seqs_per_forward={1024}",
+        f"kv_cache_num_tokens='({200_000})'",
+        f"max_seqs_per_forward={128}",
         f"max_topk_logprobs={MAX_TOPK_LOGPROBS}",
         f"port={PORT}",
         f"dp_size={DP_SIZE}",
+        f"wandb_enabled=True",
+        f"wandb_entity=hazy-research",
+        f"wandb_project=tokasaurus",
     ]
+    if MAX_COMPLETION_TOKENS is not None:
+        cmd.append(f"max_completion_tokens={MAX_COMPLETION_TOKENS}")   
+
     def ping() -> bool:
         """Check if the server is responsive. ReturnsTrue if the server responds with 
         "pong", False otherwise.
