@@ -30,6 +30,7 @@ function DatasetsPage() {
   })
   const [isScrolled, setIsScrolled] = useState(false)
   const [copySuccess, setCopySuccess] = useState(false)
+  const [currentAbortController, setCurrentAbortController] = useState(null)
 
   // Navigate examples (similar to table navigation)
   const navigateExample = async (direction) => {
@@ -83,6 +84,12 @@ function DatasetsPage() {
       // Ensure datasets are sorted by relative path (reverse alphabetical)
       const sortedData = data.sort((a, b) => b.relative_path.localeCompare(a.relative_path))
       setDatasets(sortedData)
+      
+      // Auto-select the most recent dataset (first in sorted list) if no dataset is currently selected
+      if (sortedData.length > 0 && !selectedDataset) {
+        console.log('Auto-selecting most recent dataset:', sortedData[0].path)
+        selectDataset(sortedData[0].path)
+      }
     } catch (error) {
       console.error('Failed to discover datasets:', error)
     } finally {
@@ -95,7 +102,22 @@ function DatasetsPage() {
     discoverDatasets()
   }, [outputDir])
 
+  // Cleanup abort controller on unmount
+  useEffect(() => {
+    return () => {
+      if (currentAbortController) {
+        currentAbortController.abort()
+      }
+    }
+  }, [currentAbortController])
+
   const selectDataset = async (datasetPath) => {
+    // Cancel any pending logprobs request when switching datasets
+    if (currentAbortController) {
+      currentAbortController.abort()
+      setCurrentAbortController(null)
+    }
+    
     // Immediately set the selected dataset and show the path
     setSelectedDataset(datasetPath)
     setExamples([])
@@ -113,7 +135,7 @@ function DatasetsPage() {
       
       // Reset search and load the first page of examples
       setSearchQuery('')
-      await loadDatasetWithSearch(0)
+      await loadDatasetWithSearch(0, datasetPath)
       
       // Also automatically load the config
       try {
@@ -143,10 +165,11 @@ function DatasetsPage() {
     }
   }
 
-  const loadDatasetWithSearch = async (page = currentPage) => {
-    if (!selectedDataset) return
+  const loadDatasetWithSearch = async (page = currentPage, datasetPath = null) => {
+    const dataset = datasetPath || selectedDataset
+    if (!dataset) return
 
-    setLoadingDatasetPath(selectedDataset)
+    setLoadingDatasetPath(dataset)
     setDatasetError(null)
     
     try {
@@ -159,7 +182,7 @@ function DatasetsPage() {
         search_metadata: searchFields.metadata.toString()
       })
 
-      const response = await fetch(`/api/dataset/${encodeURIComponent(selectedDataset)}?${searchParams}`)
+      const response = await fetch(`/api/dataset/${encodeURIComponent(dataset)}?${searchParams}`)
       const data = await response.json()
       
       setExamples(data.examples)
@@ -189,6 +212,15 @@ function DatasetsPage() {
   const fetchExampleWithLogprobs = async (exampleIndex) => {
     if (!selectedDataset) return null
 
+    // Cancel any existing request
+    if (currentAbortController) {
+      currentAbortController.abort()
+    }
+
+    // Create new abort controller for this request
+    const abortController = new AbortController()
+    setCurrentAbortController(abortController)
+
     setLoadingLogprobs(true)
     try {
       console.log('Fetching example with logprobs, index:', exampleIndex, 'dataset:', selectedDataset)
@@ -200,7 +232,8 @@ function DatasetsPage() {
         body: JSON.stringify({
           dataset_path: selectedDataset,
           example_index: exampleIndex
-        })
+        }),
+        signal: abortController.signal
       })
       const data = await response.json()
       
@@ -221,12 +254,23 @@ function DatasetsPage() {
         })))
       }
       
+      // Clear the abort controller since request completed successfully
+      if (currentAbortController === abortController) {
+        setCurrentAbortController(null)
+      }
+      
       return data.example
     } catch (error) {
-      console.error('Failed to fetch example with logprobs:', error)
+      // Only log error if it wasn't an abort
+      if (!abortController.signal.aborted) {
+        console.error('Failed to fetch example with logprobs:', error)
+      }
       return null
     } finally {
-      setLoadingLogprobs(false)
+      // Only clear loading state if this request wasn't aborted
+      if (!abortController.signal.aborted) {
+        setLoadingLogprobs(false)
+      }
     }
   }
 
@@ -742,6 +786,11 @@ function DatasetsPage() {
               <div className="flex items-center gap-4">
                 <button 
                   onClick={() => {
+                    // Cancel any pending logprobs request when going back to examples list
+                    if (currentAbortController) {
+                      currentAbortController.abort()
+                      setCurrentAbortController(null)
+                                    }
                     setSelectedExample(null)
                     setSelectedExampleWithLogprobs(null)
                   }}
