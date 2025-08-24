@@ -8,6 +8,7 @@ version = "0.0.1"
 description = "Lightweight and general-purpose long-context representations"
 requires-python = ">=3.12"
 dependencies = [
+    "aiofiles",
     "torch",
     "openai",
     "datasets",
