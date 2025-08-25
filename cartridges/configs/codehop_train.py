@@ -19,7 +19,7 @@ dataset_dir = Path(DATASET_DIR).parent
 
 NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "2048"))
 
-ROUND = 1
+LEVEL = 1
 
 MODEL = os.environ.get("MODEL", "llama")
 if MODEL == "qwen":
@@ -40,7 +40,7 @@ elif MODEL == "llama":
         pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
         model_cls=FlexLlamaForCausalLM,
     )
-    if ROUND == 1:
+    if LEVEL == 1:
         data_sources = [
             # "/data/sabri/cartridges/2025-08-18-10-25-20-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
             # "/data/sabri/cartridges/2025-08-18-10-50-58-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet"
@@ -51,7 +51,7 @@ elif MODEL == "llama":
             
             # round 1
             DataSource(
-                path="/data/sabri/cartridges/2025-08-20-17-27-57-codehop_synthesize/codehop_synthesize_n65768-0/artifact/dataset.parquet",
+                path="/data/sabri/cartridges/2025-08-24-15-39-39-codehop_synthesize/codehop_synthesize_n8192-0/artifact/dataset.parquet",
                 limit=8192,
                 type="local"
             )

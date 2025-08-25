@@ -6,8 +6,7 @@ from pydrantic.variables import FormatStringVariable
 
 from cartridges.clients.tokasaurus import TokasaurusClient
 from cartridges.clients.base import CartridgeConfig
-from cartridges.data.chunkers import TokenChunker
-from cartridges.data.resources import DirectoryResource
+from cartridges.data.code.resources import PythonRepositoryResource
 from cartridges.synthesize import SynthesizeConfig
 from cartridges.synthesizers.self_study import SelfStudySynthesizer
 from cartridges.utils.wandb import WandBConfig
@@ -17,10 +16,10 @@ from cartridges.utils.wandb import WandBConfig
 DATASET_DIR = "/data/sabri/cartridges/2025-08-20-10-26-45-make_codehop/codehop-nf14-nm1-dc2-v4-fn36-0/repo-df0b47"
 
 
-MODEL = os.environ.get("MODEL", "llama")
+MODEL = os.environ.get("MODEL", "qwen")
 if MODEL == "qwen":
     client = TokasaurusClient.Config(
-        url="https://hazyresearch--toka-qwen3-4b-1xh100-min0-serve.modal.run",
+        url="https://hazyresearch--toka-qwen3-4b-1xh100-cartridges-serve.modal.run",
         model_name="Qwen/Qwen3-4b",
     )
 elif MODEL == "llama":
@@ -66,22 +65,9 @@ config = SynthesizeConfig(
         # max_completion_tokens_b=256,
         tools=[],
         resources=[
-            DirectoryResource.Config(
+            PythonRepositoryResource.Config(
                 path=DATASET_DIR,
-                seed_prompts=[
-                    "generic",
-                    "creative",
-                    "structuring",
-                    "summarization",
-                    "question",
-                    "use_case",
-                ],
-                # chunker=TokenChunker.Config(
-                #     tokenizer=client.model_name,
-                #     min_tokens_per_chunk=64,
-                #     max_tokens_per_chunk=256,
-                #     wrap_chunk=True,
-                # ),
+                max_level=1,
             )
         ],
         system_prompt_template=SYSTEM_PROMPT_TEMPLATE,
@@ -99,7 +85,7 @@ config = SynthesizeConfig(
         entity="hazy-research",
         tags=[f"codehop_synthesize"],
     ),
-    upload_to_wandb=False,
+    upload_to_wandb=True,
     save_wandb_preview=False,
 )
 

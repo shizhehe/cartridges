@@ -8,6 +8,7 @@ import time
 from typing import Any, Dict, List, Optional, Literal, Callable
 from pydantic import BaseModel
 from pydrantic import ObjectConfig
+import aiofiles
 
 from cartridges.data.chunkers import Chunker
 from cartridges.utils import get_logger
@@ -82,6 +83,7 @@ class DirectoryResource(Resource):
     class Config(Resource.Config):
         path: str
         included_extensions: List[str] = [".py", ".txt", ".json", ".yaml", ".yml", ".toml", ".ini", ".xml"]
+        recursive: bool = False
         
         chunker: Optional[Chunker.Config] = None
         
@@ -89,49 +91,67 @@ class DirectoryResource(Resource):
 
     def __init__(self, config: Config):
         self.config = config
-        self.files = None
         self.file_contents: Dict[str, str | Chunker] = {}
-
-    async def setup(self):
-        t0 = time.time()
-        # Get all files in the directory that match the included extensions
-        all_files = [f for f in os.listdir(self.config.path) if os.path.isfile(os.path.join(self.config.path, f))]
-        self.files = [
-            f for f in all_files 
-            if any(f.endswith(ext) for ext in self.config.included_extensions)
-        ]
+    
+    async def _load_files(self):
+        # Get all files based on recursive setting
+        if self.config.recursive:
+            file_paths = []
+            for root, dirs, files in os.walk(self.config.path):
+                for file_name in files:
+                    if any(file_name.endswith(ext) for ext in self.config.included_extensions):
+                        file_paths.append(os.path.join(root, file_name))
+        else:
+            all_files = [f for f in os.listdir(self.config.path) if os.path.isfile(os.path.join(self.config.path, f))]
+            file_paths = [
+                os.path.join(self.config.path, f) for f in all_files 
+                if any(f.endswith(ext) for ext in self.config.included_extensions)
+            ]
         
-        # Preload all file contents
-        self.file_contents = {}
-        for file_name in self.files:
-            file_path = os.path.join(self.config.path, file_name)
+        # Load all files in parallel
+        async def load_single_file(file_path: str) -> tuple[str, str]:
             try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
+                async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
+                    content = await f.read()
             except UnicodeDecodeError:
                 # If file can't be decoded as UTF-8, try with latin-1 or skip
                 try:
-                    with open(file_path, 'r', encoding='latin-1') as f:
-                        content = f.read()
+                    async with aiofiles.open(file_path, 'r', encoding='latin-1') as f:
+                        content = await f.read()
                 except Exception:
-                    content = f"[Unable to read file {file_name}]"
+                    content = f"[Unable to read file {os.path.basename(file_path)}]"
             
+            # Use relative path from base directory as key for consistent naming
+            rel_path = os.path.relpath(file_path, self.config.path)
+            return rel_path, content
+        
+        # Load all files concurrently
+        tasks = [load_single_file(file_path) for file_path in file_paths]
+        results = await asyncio.gather(*tasks)
+        
+        return dict(results)
+
+    async def setup(self):
+        t0 = time.time()
+        # Preload all file contents
+        self.file_contents = await self._load_files()
+        for file_name, content in self.file_contents.items():
             if self.config.chunker is not None:
                 self.file_contents[file_name] = self.config.chunker.instantiate(text=content)
             else:
                 self.file_contents[file_name] = content
-        logger.info(f"Loaded {len(self.files)} files from {self.config.path} in {time.time() - t0:.2f} seconds")
+        logger.info(f"Loaded {len(self.file_contents)} files from {self.config.path} in {time.time() - t0:.2f} seconds")
         
 
     async def sample_prompt(self, batch_size: int) -> tuple[str, List[str]]:
-        if self.files is None:
+        if not self.file_contents:
             raise ValueError("No files found in directory. Make sure to call setup() first and check that the directory contains files with the specified extensions.")
         
-        if len(self.files) == 0:
+        if len(self.file_contents) == 0:
             raise ValueError("No files found in directory.")
 
         # Select a random file
-        selected_file = random.choice(self.files)
+        selected_file = random.choice(list(self.file_contents.keys()))
         
         # Get preloaded content
         content = self.file_contents[selected_file]
@@ -154,16 +174,22 @@ class DirectoryResource(Resource):
             return f"File: {file_name}\n\n{content}"
     
     def to_string(self) -> str:
-        if self.files is None:
+        if not self.file_contents:
             raise ValueError("Make sure to call setup() first and check that the directory contains files with the specified extensions.")
         
-        if len(self.files) == 0:
+        if len(self.file_contents) == 0:
             raise ValueError("No files found in directory.")
         
-        return "\n---end of file---\n".join([
-            self._format_file(file_name, content)
-            for file_name, content in self.file_contents.items()
-        ])
+        formatted_files = []
+        for file_name, content in self.file_contents.items():
+            if isinstance(content, Chunker):
+                # For chunkers, we'll use the full text representation
+                content_str = content.to_string() if hasattr(content, 'to_string') else str(content)
+            else:
+                content_str = content
+            formatted_files.append(self._format_file(file_name, content_str))
+        
+        return "\n---end of file---\n".join(formatted_files)
 
 class BaseStructuredResource(Resource, ABC):
     """This base class is to be used for resources that can be structured as a nested 
