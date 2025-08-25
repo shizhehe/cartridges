@@ -44,7 +44,13 @@ image = (
 if BRANCH != "main":
     image = image.run_commands(f"cd /root/tokasaurus && git fetch --all && git checkout --track origin/{BRANCH}")
 image = image.run_commands("cd /root/tokasaurus && git pull", force_build=True)
-image = image.env({"MODEL_NAME": MODEL_NAME})
+image = image.env({
+    "MODEL_NAME": MODEL_NAME, 
+    "MAX_COMPLETION_TOKENS": MAX_COMPLETION_TOKENS, 
+    "MAX_TOPK_LOGPROBS": str(MAX_TOPK_LOGPROBS),
+    "DP_SIZE": str(DP_SIZE),
+    "PP_SIZE": str(PP_SIZE),
+})
 
 
 hf_cache_vol = modal.Volume.from_name(
