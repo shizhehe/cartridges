@@ -17,6 +17,19 @@ def slice_by_depth(df: pd.DataFrame) -> list[Slice]:
         for depth, df in dfs
     ]
 
+def slice_by_file(df: pd.DataFrame) -> list[Slice]:
+    dfs = df.groupby("file_name")
+    return [
+        Slice(
+            name=f"File {file}", 
+            df=df,
+            metrics={
+                "generate_codehop/score": df["score"].mean(),  
+            }
+        )
+        for file, df in dfs
+    ]
+
 registry.register(Dashboard(
     name="CodeHop",
     filters={"$and": [{"tags": "codehop"}, {"tags": "train"}]},
@@ -25,6 +38,7 @@ registry.register(Dashboard(
     step="train/optimizer_step",
     slice_fns=[
         slice_by_depth,
+        slice_by_file,
     ]
 ))
     
