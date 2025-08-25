@@ -6,6 +6,7 @@ class MethodCall:
     file: str | None  # None indicates it's a local method call
     method: str
     method_obj: "Method"
+    arg: str | None  # None indicates 
 
     def __eq__(self, other):
         return isinstance(other, MethodCall) and self.file == other.file and self.method == other.method
@@ -36,7 +37,10 @@ class Method:
         return_val = self.mapping[x]
 
         if isinstance(return_val, MethodCall):
-            return return_val.method_obj.call(x, )
+            if return_val.arg is None:
+                return return_val.method_obj.call(x)
+            else:
+                return return_val.method_obj.call(return_val.arg)
         elif isinstance(return_val, LiteralStr):
             return return_val.content
         else:

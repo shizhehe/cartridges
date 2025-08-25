@@ -13,7 +13,8 @@ from cartridges.utils.wandb import WandBConfig
 
 
 # DATASET_DIR = "/data/sabri/cartridges/2025-08-20-10-12-26-make_codehop/codehop-nf4-nm3-dc2-v4-fn36-0/repo-e2c17c"
-DATASET_DIR = "/data/sabri/cartridges/2025-08-20-10-26-45-make_codehop/codehop-nf14-nm1-dc2-v4-fn36-0/repo-df0b47"
+# DATASET_DIR = "/data/sabri/cartridges/2025-08-20-10-26-45-make_codehop/codehop-nf14-nm1-dc2-v4-fn36-0/repo-df0b47"
+DATASET_DIR = "/data/sabri/cartridges/2025-08-24-22-00-09-make_codehop/codehop-nf12-nm1-dc3-v4-fn36-0/repo-27f65b"
 
 
 MODEL = os.environ.get("MODEL", "qwen")

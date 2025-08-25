@@ -48,8 +48,6 @@ def make_return_value(
         "literal",
     ]
 
-    # if len(local_methods):
-    #     return_values_choices.append("local_method_call")
     if len(methods_other_files):
         return_values_choices.append("other_file_method_call")
 
@@ -57,19 +55,6 @@ def make_return_value(
     return_value_type = random.choice(return_values_choices)
     if return_value_type == "literal":
         return LiteralStr(content=random.choice(output_vocab)), 0
-
-    if return_value_type == "local_method_call":
-        method = random.choice(local_methods)
-        call_chain_depth = max(method.call_chain_depth + 1, call_chain_depth)
-
-        return (
-            MethodCall(
-                file=None,
-                method=method.name,
-                method_obj=method,
-            ),
-            1,
-        )
 
     assert len(methods_other_files) > 0, "No candidate files available for method call"
     method, file = random.choice(methods_other_files)
@@ -80,6 +65,7 @@ def make_return_value(
             file=file.name,
             method=method.name,
             method_obj=method,
+            arg=random.choice(output_vocab),
         ),
         call_chain_depth,
     )

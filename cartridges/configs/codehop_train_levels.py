@@ -15,6 +15,7 @@ from cartridges.utils.wandb import WandBConfig
 
 from cartridges.configs.codehop_synthesize import DATASET_DIR
 dataset_dir = Path(DATASET_DIR).parent
+filename = Path(__file__).stem
 
 
 NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "2048"))
@@ -30,7 +31,8 @@ if MODEL == "qwen":
     )
     if LEVEL == 1:
         data_sources = [
-            "/data/sabri/cartridges/2025-08-24-15-39-39-codehop_synthesize/codehop_synthesize_n8192-0/artifact/dataset.parquet"
+            # "/data/sabri/cartridges/2025-08-24-15-39-39-codehop_synthesize/codehop_synthesize_n8192-0/artifact/dataset.parquet"
+            DataSource(path="codehop_synthesize_n65768:v1", type="wandb")
         ]
     elif LEVEL == 2:
         raise NotImplementedError("Level 2 not implemented")
@@ -62,12 +64,12 @@ config = TrainConfig(
     ),
 
     save_every_n_steps=512,
-    generate_eval_every_n_steps=128,
+    generate_eval_every_n_steps=16,
     generate_evals=[
         GenerationEvalConfig(
             dataset=CodeHopGenerateDataset.Config(make_run_dir=str(dataset_dir)),
             name_for_wandb=f"codehop",
-            generate_max_new_tokens=8,
+            generate_max_new_tokens=64,
             batch_size=32,
             temperature=0.0,
         )
@@ -76,7 +78,7 @@ config = TrainConfig(
 
     wandb=WandBConfig(tags=["train", "codehop"]),
     output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),
-    name=FormatStringVariable(f"codehop_train_lr{{lr}}_toks{NUM_TOKENS}"),
+    name=FormatStringVariable(f"{filename}_lr{{lr}}_toks{NUM_TOKENS}"),
 )
 
 

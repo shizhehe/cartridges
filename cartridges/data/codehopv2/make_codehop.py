@@ -41,34 +41,19 @@ class MakeCodeHopConfig(RunConfig):
 def make_return_value(
     local_methods: list[Method],
     methods_other_files: list[tuple[Method, CodeHopFile]],
-    output_vocab: list[str],
+    vocab: list[str],
 ) -> tuple[MethodCall | LiteralStr, int]:
     return_values_choices = [
         "literal",
     ]
 
-    # if len(local_methods):
-    #     return_values_choices.append("local_method_call")
     if len(methods_other_files):
         return_values_choices.append("other_file_method_call")
 
     call_chain_depth = 0
     return_value_type = random.choice(return_values_choices)
     if return_value_type == "literal":
-        return LiteralStr(content=random.choice(output_vocab)), 0
-
-    if return_value_type == "local_method_call":
-        method = random.choice(local_methods)
-        call_chain_depth = max(method.call_chain_depth + 1, call_chain_depth)
-
-        return (
-            MethodCall(
-                file=None,
-                method=method.name,
-                method_obj=method,
-            ),
-            1,
-        )
+        return LiteralStr(content=random.choice(vocab)), 0
 
     assert len(methods_other_files) > 0, "No candidate files available for method call"
     method, file = random.choice(methods_other_files)
@@ -79,6 +64,7 @@ def make_return_value(
             file=file.name,
             method=method.name,
             method_obj=method,
+            arg=random.choice(vocab)
         ),
         call_chain_depth,
     )
@@ -138,7 +124,7 @@ def make_code_hop(
                 input_str: make_return_value(
                     local_methods=available_methods_this_file,
                     methods_other_files=available_methods_other_files,
-                    output_vocab=vocab,
+                    vocab=vocab,
                 )
                 for input_str in vocab
             }
@@ -178,9 +164,9 @@ def serialize_output(output: MethodCall | LiteralStr) -> str:
         f'"{output.content}"'
         if isinstance(output, LiteralStr)
         else (
-            f"{output.file}.{output.method}(x)"
+            f"{output.file}.{output.method}(\"{output.arg}\")"
             if output.file is not None
-            else f"{output.method}(x)"
+            else f"{output.method}(\"{output.arg}\")"
         )
     )
 
@@ -214,9 +200,9 @@ def serialize_file(file: CodeHopFile):
 if __name__ == "__main__":
     import pydrantic
     config = MakeCodeHopConfig(
-        num_files=10,
-        num_methods_per_file=2,
-        deepest_call_chain=2,
+        num_files=12,
+        num_methods_per_file=1,
+        deepest_call_chain=3,
         vocab_size=4,
         function_name_vocab_size=36,
         run_id=FormatStringVariable(

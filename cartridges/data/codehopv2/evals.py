@@ -46,15 +46,26 @@ class CodeHopGenerateDataset(GenerateEvalDataset):
         for file in files:
             for method in file.methods:
                 for vocab_word in code_hop.vocab:
+                    # question = dedent(f"""\
+                    #     Please tell me the string output of running the following python code.
+                    #     Respond with just a literal string in quotes.
+                    #     Do not include any other text.
+                        
+                    #     ```
+                    #     import {file.name}
+                    #     print({file.name}.{method.name}("{vocab_word}"))
+                    #     ```"""
+                    # )
                     question = dedent(f"""\
                         Please tell me the string output of running the following python code.
-                        Respond with just a literal string in quotes.
-                        Do not include any other text.
                         
                         ```
                         import {file.name}
                         print({file.name}.{method.name}("{vocab_word}"))
-                        ```"""
+                        ```
+
+                        Respond with the following format: 
+                        `The output of {file.name}.{method.name}("{vocab_word}") will be \"{{your answer}}\"."""
                     )
             
                     answer, depth = method.call_with_depth(vocab_word)
