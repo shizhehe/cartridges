@@ -4,11 +4,11 @@ from dashboards.base import Dashboard, registry, Slice
 
 
 def slice_by_depth(df: pd.DataFrame) -> list[Slice]:
-    dfs = df.groupby("depth")
+    dfs = df.groupby("call_chain_depth")
 
     return [
         Slice(
-            name=f"Depth {depth}", 
+            name=f"Call Chain Depth {depth}", 
             df=df,
             metrics={
                 "generate_codehop/score": df["score"].mean(),
@@ -30,6 +30,21 @@ def slice_by_file(df: pd.DataFrame) -> list[Slice]:
         for file, df in dfs
     ]
 
+
+def slice_by_file_level(df: pd.DataFrame) -> list[Slice]:
+    dfs = df.groupby("file_level")
+    return [
+        Slice(
+            name=f"File Level {file}", 
+            df=df,
+            metrics={
+                "generate_codehop/score": df["score"].mean(),  
+            }
+        )
+        for file, df in dfs
+    ]
+
+
 registry.register(Dashboard(
     name="CodeHop",
     filters={"$and": [{"tags": "codehop"}, {"tags": "train"}]},
@@ -38,7 +53,7 @@ registry.register(Dashboard(
     step="train/optimizer_step",
     slice_fns=[
         slice_by_depth,
-        slice_by_file,
+        slice_by_file_level,
     ]
 ))
     

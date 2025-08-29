@@ -107,7 +107,6 @@ def serve():
     os.system("nvidia-smi")
     os.system("which nvidia-smi")
     os.environ["OPENAI_API_KEY"] = "*"     # placeholder
-
     PING_TIMEOUT_SECONDS = 1.0
     WAIT_FOR_SERVER_BACKOFF_SECONDS = 1.0
     

@@ -56,14 +56,16 @@ class Method:
         else:
             raise ValueError(f"Invalid type for return value: {type(return_val)}")
 
+
 @dataclass
 class CodeHopFile:
     name: str
     methods: list[Method]
+    imports: list[str]
+    level: int
 
 
 @dataclass
 class CodeHop:
     files: list[CodeHopFile]
     vocab: list[str]
-

@@ -10,7 +10,7 @@ from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
 from cartridges.train import GenerationEvalConfig, TrainConfig, DataSource
 from cartridges.models.config import HFModelConfig
 from cartridges.datasets import TrainDataset
-from cartridges.data.codehopv2.evals import CodeHopGenerateDataset
+from cartridges.data.codehop.evals import CodeHopGenerateDataset
 from cartridges.utils.wandb import WandBConfig
 
 from cartridges.configs.codehop_synthesize import DATASET_DIR

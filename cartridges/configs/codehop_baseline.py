@@ -5,7 +5,7 @@ import pydrantic
 
 from cartridges.clients.tokasaurus import TokasaurusClient
 from cartridges.clients.openai import OpenAIClient
-from cartridges.data.codehopv2.evals import CodeHopGenerateDataset
+from cartridges.data.codehop.evals import CodeHopGenerateDataset
 from cartridges.data.resources import DirectoryResource
 from cartridges.evaluate import ICLBaseline, EvaluateConfig
 from cartridges.evaluate import GenerationEvalConfig

@@ -20,9 +20,12 @@ class MakeCodeHopConfig(RunConfig):
     num_files: int=2
     num_methods_per_file: int=8
     deepest_call_chain: int=8
+    max_imports_per_file: int=4
 
-    input_vocab_size: int=128
-    output_vocab_size: int=128
+    frac_level_1_files: float=0.25
+
+
+    vocab_size: int=128
     function_name_vocab_size: int=128
 
     def run(self):
@@ -42,7 +45,7 @@ class MakeCodeHopConfig(RunConfig):
 def make_return_value(
     local_methods: list[Method],
     methods_other_files: list[tuple[Method, CodeHopFile]],
-    output_vocab: list[str],
+    vocab: list[str],
 ) -> tuple[MethodCall | LiteralStr, int]:
     return_values_choices = [
         "literal",
@@ -54,7 +57,7 @@ def make_return_value(
     call_chain_depth = 0
     return_value_type = random.choice(return_values_choices)
     if return_value_type == "literal":
-        return LiteralStr(content=random.choice(output_vocab)), 0
+        return LiteralStr(content=random.choice(vocab)), 0
 
     assert len(methods_other_files) > 0, "No candidate files available for method call"
     method, file = random.choice(methods_other_files)
@@ -65,7 +68,7 @@ def make_return_value(
             file=file.name,
             method=method.name,
             method_obj=method,
-            arg=random.choice(output_vocab),
+            arg=random.choice(vocab)
         ),
         call_chain_depth,
     )
@@ -90,29 +93,33 @@ def make_code_hop(
     words = [f"{adj}_{noun}" for adj in adjs for noun in nouns]
     vocab = sorted(list(set(words)))
 
-    output_vocab = random.sample(vocab, config.output_vocab_size)
-    input_vocab = random.sample(vocab, config.input_vocab_size)
-    method_names = random.sample(vocab, config.function_name_vocab_size)
+    vocab = random.sample(vocab, config.vocab_size)
+    all_method_names = [
+        f"apply_{adj}_random_map"
+        for adj in random.sample(adjs, config.function_name_vocab_size)
+    ]
+    all_file_names = [
+        f"{adj}_random_maps"
+        for adj in random.sample(adjs, config.num_files)
+    ]
     files: list[CodeHopFile] = []
-    file_names = set()
 
-    for _ in range(config.num_files):
-
-        this_function_method_names = list(method_names)
-
-        random.shuffle(this_function_method_names)
+    file_to_level = {}
+    for file_name in all_file_names:
+        method_names = random.sample(all_method_names, config.num_methods_per_file)
         methods: list[Method] = []
 
-        available_methods_other_files = [
-            (method, file)
-            for file in files
-            for method in file.methods
-            if method.call_chain_depth < config.deepest_call_chain
-        ]
+        if random.random() < config.frac_level_1_files:
+            available_methods_other_files = []
+        else:
+            available_methods_other_files = [
+                (method, file)
+                for file in files
+                for method in file.methods
+                if method.call_chain_depth < config.deepest_call_chain
+            ]
 
-        for method_name, _ in zip(
-            this_function_method_names, range(config.num_methods_per_file)
-        ):
+        for method_name in method_names:
 
             available_methods_this_file = [
                 method
@@ -120,47 +127,54 @@ def make_code_hop(
                 if method.call_chain_depth < config.deepest_call_chain
             ]
 
-            return_values_true, true_call_chain_depth = make_return_value(
-                local_methods=available_methods_this_file,
-                methods_other_files=available_methods_other_files,
-                output_vocab=output_vocab,
-            )
-            for _ in range(1000):
-                return_values_false, false_call_chain_depth = make_return_value(
+            mapping = {}
+            remaining_options = set(vocab)
+            for input_str in vocab:
+                return_val, call_chain_depth = make_return_value(
                     local_methods=available_methods_this_file,
                     methods_other_files=available_methods_other_files,
-                    output_vocab=output_vocab,
+                    vocab=list(remaining_options),
                 )
-                if return_values_false != return_values_true:
-                    break
-            else:
-                raise ValueError("Could not find a different return value")
+                mapping[input_str] = (return_val, call_chain_depth)
 
+                # We want to ensure that the functions do not return the same literal
+                # string for different inputs.
+                if isinstance(return_val, LiteralStr):
+                    remaining_options.remove(return_val.content)
+            
 
             methods.append(
                 Method(
                     name=method_name,
-                    cond_eq=random.choice(input_vocab),
-                    case_true_return_value=return_values_true,
-                    case_false_return_value=return_values_false,
-                    call_chain_depth=max(true_call_chain_depth, false_call_chain_depth),
+                    mapping={k: v for k, (v, _) in mapping.items()},
+                    call_chain_depth=max(call_chain_depth for _, call_chain_depth in mapping.values()),
                 )
             )
-
-        for _ in range(100):
-            file_name = random.choice(vocab)
-            if file_name not in file_names and file_name not in method_names:
-                break
+        
+        imports = set(
+            [
+                return_val.file
+                for method in methods
+                for return_val in method.mapping.values()
+                if isinstance(return_val, MethodCall)
+                and return_val.file is not None
+            ]
+        )
+        if len(imports) > 0:
+            file_to_level[file_name] = max(file_to_level[f] for f in imports) + 1
         else:
-            raise ValueError("Could not find a unique file name after 100 tries")
+            file_to_level[file_name] = 1
 
         file = CodeHopFile(
             name=file_name,
             methods=methods,
+            imports=list(imports),
+            level=file_to_level[file_name],
         )
-        file_names.add(file_name)
         files.append(file)
-    code_hop = CodeHop(files=files, input_vocab=input_vocab, output_vocab=output_vocab)
+    code_hop = CodeHop(files=files, vocab=vocab)
+    for file in files:
+        print(file.name, file.level)
 
     config_hash = config.hash()
     repo_dir = os.path.join(config.run_dir, f"repo-{config_hash}")
@@ -176,75 +190,48 @@ def make_code_hop(
     print(f"Generated {len(files)} files with {sum(len(file.methods) for file in files)} total methods")
     return code_hop
 
-
-
 def serialize_output(output: MethodCall | LiteralStr) -> str:
     return (
         f'"{output.content}"'
         if isinstance(output, LiteralStr)
         else (
-            f"{output.file}.{output.method}(x)"
+            f"{output.file}.{output.method}(\"{output.arg}\")"
             if output.file is not None
-            else f"{output.method}(x)"
+            else f"{output.method}(\"{output.arg}\")"
         )
     )
 
+def serialize_method(method: Method):
+    out = f"def {method.name}(x):\n"
+    for input_str, return_val in method.mapping.items():
+        out += f"    if x == \"{input_str}\":\n"
+        out += f"        return {serialize_output(return_val)}\n"
+    out += f"    raise ValueError(f\"Unexpected input: {{x}}\")\n"
+    return out + "\n"
 
 def serialize_file(file: CodeHopFile):
-    imports = set()
-
-    for method in file.methods:
-        for return_val in [
-            method.case_true_return_value,
-            method.case_false_return_value,
-        ]:
-            if isinstance(return_val, MethodCall):
-                if return_val.file is not None:
-                    imports.add(return_val.file)
+    imports = file.imports
 
     method_strings = []
     for method in file.methods:
-        #         method_strings.append(
-        #             f"""
-        # def {method.name}(x):
-        #     return {serialize_output(method.case_true_return_value)}
-        # """
-        #         )
+        method_strings.append(serialize_method(method))
 
-        #         method_strings.append(
-        #             f"""
-        # def {method.name}(x):
-        #     if x[:1] == "{method.cond_input_prefix}":
-        #         return {serialize_output(method.case_true_return_value)}
-        #     else:
-        #         return {serialize_output(method.case_false_return_value)}
-        # """
-        #         )
+    imports = "\n".join([f'import {mod}' for mod in imports])
+    methods = "\n\n".join(method_strings)
 
-        method_strings.append(
-            f"""def {method.name}(x):
-    if x == "{method.cond_eq}":
-        return {serialize_output(method.case_true_return_value)}
-    else:
-        return {serialize_output(method.case_false_return_value)}
-    """)
-
-    return f"""{"\n".join([f'import {mod}' for mod in imports])}
-{"\n\n".join(method_strings)}
-"""
+    return f"{imports}\n\n{methods}"
 
 
 if __name__ == "__main__":
     import pydrantic
     config = MakeCodeHopConfig(
-        num_files=4,
-        num_methods_per_file=10,
-        deepest_call_chain=2,
-        input_vocab_size=8,
-        output_vocab_size=8,
+        num_files=16,
+        num_methods_per_file=1,
+        deepest_call_chain=3,
+        vocab_size=5,
         function_name_vocab_size=36,
         run_id=FormatStringVariable(
-            "codehop-nf{num_files}-nm{num_methods_per_file}-dc{deepest_call_chain}-iv{input_vocab_size}-ov{output_vocab_size}-fn{function_name_vocab_size}"
+            "codehop-nf{num_files}-nm{num_methods_per_file}-dc{deepest_call_chain}-v{vocab_size}-fn{function_name_vocab_size}"
         )
     )
     pydrantic.main([config])

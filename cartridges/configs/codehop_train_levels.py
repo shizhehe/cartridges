@@ -4,60 +4,75 @@ from pathlib import Path
 import pydrantic
 from pydrantic.variables import FormatStringVariable
 
+from cartridges.clients.base import CartridgeConfig
 from cartridges.initialization import KVFromRandomText, KVFromPretrained
 from cartridges.models.llama.modeling_llama import FlexLlamaForCausalLM
 from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
 from cartridges.train import GenerationEvalConfig, TrainConfig, DataSource
 from cartridges.models.config import HFModelConfig
 from cartridges.datasets import TrainDataset
-from cartridges.data.codehopv2.evals import CodeHopGenerateDataset
+from cartridges.data.codehop.evals import CodeHopGenerateDataset
 from cartridges.utils.wandb import WandBConfig
 
-from cartridges.configs.codehop_synthesize import DATASET_DIR
-dataset_dir = Path(DATASET_DIR).parent
+NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "4096"))
+LEVEL = int(os.environ.get("LEVEL", "1"))
+MODEL = os.environ.get("MODEL", "qwen")
+REPO = os.environ.get("REPO", "244c02")
+
+REPOS = {
+    "244c02": {
+        "dataset_dir": "/data/sabri/cartridges/2025-08-26-16-23-39-make_codehop/codehop-nf16-nm1-dc3-v5-fn36-0/repo-244c02",
+        "datasources": {
+            "qwen": {
+                1: [
+                    DataSource(path="codehop_synthesize_repo-244c02_level1_n65536:v0", type="wandb"),
+                ]
+            },
+            "llama": {
+                1: [
+                    DataSource(path="codehop_synthesize_llama_repo-244c02_level1_n65768:v0", type="wandb"),
+                ]
+            }
+        },
+        "initializer": {
+            "qwen": {
+                1: KVFromRandomText.Config(max_tokens=NUM_TOKENS),
+            },
+            "llama": {
+                1: KVFromRandomText.Config(max_tokens=NUM_TOKENS),
+            },
+        }
+    }
+}
+dataset_dir = Path(REPOS[REPO]["dataset_dir"]).parent
 filename = Path(__file__).stem
 
 
-NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "2048"))
-
-LEVEL = 1
-
-MODEL = os.environ.get("MODEL", "qwen")
 if MODEL == "qwen":
 
     model=HFModelConfig(
         pretrained_model_name_or_path="Qwen/Qwen3-4b",
         model_cls=FlexQwen3ForCausalLM,
     )
-    if LEVEL == 1:
-        data_sources = [
-            # "/data/sabri/cartridges/2025-08-24-15-39-39-codehop_synthesize/codehop_synthesize_n8192-0/artifact/dataset.parquet"
-            DataSource(path="codehop_synthesize_n65768:v1", type="wandb")
-        ]
-    elif LEVEL == 2:
-        raise NotImplementedError("Level 2 not implemented")
-    kv_cache_initializer=KVFromRandomText.Config(max_tokens=NUM_TOKENS)
 elif MODEL == "llama":
     model=HFModelConfig(
         pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
         model_cls=FlexLlamaForCausalLM,
     )
-    if LEVEL == 1:
-        kv_cache_initializer=KVFromRandomText.Config(max_tokens=NUM_TOKENS)
 else:
     raise ValueError(f"Invalid model: {MODEL}")
 
 
 config = TrainConfig(
     model=model,
-    kv_cache_initializer=kv_cache_initializer,
+    kv_cache_initializer=REPOS[REPO]["initializer"][MODEL][LEVEL],
     
     lr=2e-2,
     epochs=2,
     global_batch_size=32,
 
     dataset=TrainDataset.Config(
-        data_sources=data_sources,
+        data_sources=REPOS[REPO]["datasources"][MODEL][LEVEL],
         top_k_logits=20,
         packed_seq_length=2048,
         packing_mode="truncate",
@@ -78,7 +93,7 @@ config = TrainConfig(
 
     wandb=WandBConfig(tags=["train", "codehop"]),
     output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),
-    name=FormatStringVariable(f"{filename}_lr{{lr}}_toks{NUM_TOKENS}"),
+    name=FormatStringVariable(f"{filename}_{MODEL}_{REPO}_level{LEVEL}_lr{{lr}}_toks{NUM_TOKENS}"),
 )
 
 

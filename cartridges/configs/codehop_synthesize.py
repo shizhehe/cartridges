@@ -11,32 +11,50 @@ from cartridges.synthesize import SynthesizeConfig
 from cartridges.synthesizers.self_study import SelfStudySynthesizer
 from cartridges.utils.wandb import WandBConfig
 
-
-# DATASET_DIR = "/data/sabri/cartridges/2025-08-20-10-12-26-make_codehop/codehop-nf4-nm3-dc2-v4-fn36-0/repo-e2c17c"
-# DATASET_DIR = "/data/sabri/cartridges/2025-08-20-10-26-45-make_codehop/codehop-nf14-nm1-dc2-v4-fn36-0/repo-df0b47"
-DATASET_DIR = "/data/sabri/cartridges/2025-08-24-22-00-09-make_codehop/codehop-nf12-nm1-dc3-v4-fn36-0/repo-27f65b"
-
-
+LEVEL = int(os.environ.get("LEVEL", "1"))
 MODEL = os.environ.get("MODEL", "qwen")
+REPO = "repo-244c02"
+
+REPO_TO_DATA = {
+    "repo-244c02": {
+        "dataset_dir": "/data/sabri/cartridges/2025-08-26-16-23-39-make_codehop/codehop-nf16-nm1-dc3-v5-fn36-0/repo-244c02",
+        "cartridges": {
+            "qwen": {
+                1: [],
+            },
+            "llama": {
+                1: [],
+            },
+        }
+    },
+    "repo-b0b268": {
+        "dataset_dir": "/data/sabri/cartridges/2025-08-25-11-32-21-make_codehop/codehop-nf10-nm1-dc3-v5-fn36-0/repo-b0b268",
+        "level_to_cartridge": {
+            1: [],
+            2: [
+                CartridgeConfig(
+                    id="hazy-research/cartridges/k9zti795",
+                    source="wandb"
+                )
+            ],
+        }
+    }
+}
+
+cartridges = REPO_TO_DATA[REPO]["cartridges"][MODEL][LEVEL]
+dataset_dir = REPO_TO_DATA[REPO]["dataset_dir"]
+
 if MODEL == "qwen":
     client = TokasaurusClient.Config(
         url="https://hazyresearch--toka-qwen3-4b-1xh100-cartridges-serve.modal.run",
         model_name="Qwen/Qwen3-4b",
+        cartridges=cartridges
     )
 elif MODEL == "llama":
     client = TokasaurusClient.Config(
-        # url="https://hazyresearch--toka-llama-3-2-3b-1xh100-batch-serve.modal.run",
         url="https://hazyresearch--toka-llama-3-2-3b-1xh100-cartridges-serve.modal.run",
-        # url="https://hazyresearch--toka-llama-3-2-3b-1xh100-main-serve.modal.run",
-        # url="http://0.0.0.0:10210",
         model_name="meta-llama/Llama-3.2-3B-Instruct",
-        cartridges=[
-            CartridgeConfig(
-                # id="hazy-research/cartridges/85axrvk4",
-                id="hazy-research/cartridges/4d3h0kl4", #8192
-                source="wandb"
-            )
-        ]
+        cartridges=cartridges
     )
 else:
     raise ValueError(f"Invalid model: {MODEL}")
@@ -67,8 +85,8 @@ config = SynthesizeConfig(
         tools=[],
         resources=[
             PythonRepositoryResource.Config(
-                path=DATASET_DIR,
-                max_level=1,
+                path=dataset_dir,
+                max_level=LEVEL,
             )
         ],
         system_prompt_template=SYSTEM_PROMPT_TEMPLATE,
@@ -79,7 +97,7 @@ config = SynthesizeConfig(
     
     max_num_batches_in_parallel=512,
 
-    name=FormatStringVariable(f"{Path(__file__).stem}_n{{num_samples}}"),
+    name=FormatStringVariable(f"{Path(__file__).stem}_{MODEL}_{REPO}_level{LEVEL}_n{{num_samples}}"),
     run_id=FormatStringVariable("{name}"),
     wandb=WandBConfig(
         project="cartridges",
