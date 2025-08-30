@@ -98,6 +98,7 @@ def make_code_hop(
         f"apply_{adj}_random_map"
         for adj in random.sample(adjs, config.function_name_vocab_size)
     ]
+    breakpoint()
     all_file_names = [
         f"{adj}_random_maps"
         for adj in random.sample(adjs, config.num_files)
@@ -225,9 +226,9 @@ def serialize_file(file: CodeHopFile):
 if __name__ == "__main__":
     import pydrantic
     config = MakeCodeHopConfig(
-        num_files=16,
+        num_files=768,
         num_methods_per_file=1,
-        deepest_call_chain=3,
+        deepest_call_chain=0,
         vocab_size=5,
         function_name_vocab_size=36,
         run_id=FormatStringVariable(

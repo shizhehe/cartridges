@@ -41,6 +41,9 @@ REPO_TO_DATA = {
     }
 }
 
+
+enhancing_dataset_dir = "/data/sabri/cartridges/2025-08-30-13-33-13-make_codehop/codehop-nf768-nm1-dc0-v5-fn36-0/repo-e30278"
+
 cartridges = REPO_TO_DATA[REPO]["cartridges"][MODEL][LEVEL]
 dataset_dir = REPO_TO_DATA[REPO]["dataset_dir"]
 
@@ -89,6 +92,10 @@ config = SynthesizeConfig(
                 max_level=LEVEL,
             )
         ],
+        enhancing_resources=[
+            PythonRepositoryResource.Config(path=enhancing_dataset_dir)
+        ],
+        a_sees_enhancing_ctx=False,
         system_prompt_template=SYSTEM_PROMPT_TEMPLATE,
     ),
     output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),

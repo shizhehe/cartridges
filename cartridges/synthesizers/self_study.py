@@ -4,7 +4,7 @@ import asyncio
 import time
 import uuid
 import random
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 from transformers import AutoTokenizer
 
@@ -41,6 +41,11 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
 
         resources: List[Resource.Config]
 
+        # enhancing resources are added to the context during the training
+        # similar to "Context-Enhanced Learning" (https://arxiv.org/pdf/2503.01821)
+        enhancing_resources: List[Resource.Config] | None | Literal["same"] = None
+        a_sees_enhancing_ctx: bool = True
+
         tools: List[Tool.Config | ToolSet.Config]
         use_tools_a: bool = False
         use_tools_b: bool = False
@@ -48,6 +53,7 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
 
         system_prompt_template: str = SYSTEM_PROMPT_TEMPLATE
         tool_prompt_template: str = TOOL_PROMPT_TEMPLATE
+        
 
         max_rounds: int = 1
 
@@ -80,7 +86,18 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
             resource.instantiate() for resource in self.config.resources
         ]
         await asyncio.gather(*[resource.setup() for resource in self.resources])
-    
+
+        # enhancing resources are added to the context during the training
+        # similar to "Context-Enhanced Learning" (https://arxiv.org/pdf/2503.01821)
+        self.enhancing_resources: List[Resource] | None = None
+        if self.config.enhancing_resources == "same":
+            self.enhancing_resources = self.resources
+        elif self.config.enhancing_resources is not None:
+            self.enhancing_resources = [
+                resource.instantiate() for resource in self.config.enhancing_resources
+            ]
+            await asyncio.gather(*[resource.setup() for resource in self.enhancing_resources])
+
         self.is_setup = True
     
     async def cleanup(self):
@@ -111,6 +128,16 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
         resource = random.choice(self.resources)
         ctx, seed_prompts = await resource.sample_prompt(batch_size=batch_size)
 
+        if self.enhancing_resources is not None:
+            enhancing_ctx, _ = await random.choice(self.enhancing_resources).sample_prompt(batch_size=1)
+            enhancing_system_prompt = self.config.system_prompt_template.format(subcorpus=enhancing_ctx)
+            enhancing_msgs_b = [system(enhancing_system_prompt)] 
+            enhancing_msgs_a = enhancing_msgs_b if self.config.a_sees_enhancing_ctx else []
+        else:
+            enhancing_ctx = None
+            enhancing_msgs_a, enhancing_msgs_b = [], []
+            
+
         initial_system_prompt = self.config.system_prompt_template.format(subcorpus=ctx)
         assert len(seed_prompts) == batch_size
         logger.info(f"[batch={batch_id}] Prompt sampling took {time.time() - t0} seconds")
@@ -126,9 +153,11 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
                 "tool_calls": [],
                 "seed_prompt": seed_prompt,
                 "initial_system_prompt": initial_system_prompt,
+                "enhancing_system_prompt": enhancing_system_prompt,
             }
             for seed_prompt in seed_prompts
         ]
+
         logger.info(f"[batch={batch_id}] Initialization of convos took {time.time() - t0} seconds")
         # --- end initialization of convos ---
         # (3) Generate convos
@@ -141,7 +170,7 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
 
                 tool_resps: List[str] = await self._get_content_via_tool(
                     convos=[
-                        trim_fields([user(seed), *flip_roles(convo)])
+                        trim_fields([*enhancing_msgs_a, user(seed), *flip_roles(convo)])
                         for seed, convo in zip(seed_prompts, convos)
                     ],
                     metas=metas,
@@ -159,7 +188,7 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
             t0 = time.time()
             resps = await self.client.chat(
                 [
-                    trim_fields([system(ctx), user(seed), *flip_roles(convo)])
+                    trim_fields([system(ctx), *enhancing_msgs_a, user(seed), *flip_roles(convo)])
                     for ctx, seed, convo in zip(contexts, seed_prompts, convos)
                 ],
                 temperature=self.config.temperature_a,
@@ -182,7 +211,7 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
             if self.config.use_tools_b:
                 t0 = time.time()
                 tool_resps: List[str] = await self._get_content_via_tool(
-                    convos=trim_fields(convos),
+                    convos=trim_fields([*enhancing_msgs_b, *convos]),
                     metas=metas,
                     contexts=contexts,
                     batch_id=batch_id,
@@ -197,7 +226,10 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
             # --- begin bot B response generation ---
             t0 = time.time()
             resps = await self.client.chat(
-                [trim_fields([system(ctx), *convo]) for ctx, convo in zip(contexts, convos)],
+                [
+                    trim_fields([system(ctx), *enhancing_msgs_b, *convo]) 
+                    for ctx, convo in zip(contexts, convos)
+                ],
                 temperature=self.config.temperature_b,
                 top_logprobs=self.config.num_top_logprobs,
                 max_completion_tokens=self.config.max_completion_tokens_b,
@@ -219,7 +251,7 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
         t0 = time.time()
         examples = self._responses_and_chats_to_training_examples(
             samples=resps,
-            convos=convos,
+            convos=[[*enhancing_msgs_b, *convo] for convo in convos],
             metas=metas,
             contexts=contexts,
         )
@@ -295,7 +327,6 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
                         response=None,
                     )
                 )
-        
         # --- end tool grouping ---
 
         # (3.2) Apply the tool in batch
@@ -358,12 +389,17 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
         ):
 
             def prepare_logprobs(message: dict) -> FlatTopLogprobs | None:
-                if message["resp_obj"].top_logprobs is not None:
+                if "resp_obj" in message and message["resp_obj"].top_logprobs is not None:
                     return message["resp_obj"].top_logprobs.flatten(
                         threshold=self.config.min_prob_mass)
                 else:
                     return None
-
+            
+            def prepare_token_ids(message: dict) -> List[int]:
+                if "resp_obj" in message:
+                    return message["resp_obj"].token_ids
+                else:
+                    return None
             
             examples.append(
                 Conversation(
@@ -371,7 +407,7 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
                         Conversation.Message(
                             role=message["role"],
                             content=message["content"],
-                            token_ids=message["resp_obj"].token_ids,
+                            token_ids=prepare_token_ids(message),
                             top_logprobs=prepare_logprobs(message),
                         )
                         for message in chat

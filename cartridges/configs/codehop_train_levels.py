@@ -25,12 +25,14 @@ REPOS = {
         "datasources": {
             "qwen": {
                 1: [
-                    DataSource(path="codehop_synthesize_repo-244c02_level1_n65536:v0", type="wandb"),
+                    # DataSource(path="codehop_synthesize_repo-244c02_level1_n65536:v0", type="wandb"),
+                    # DataSource(path="codehop_synthesize_qwen_repo-244c02_level1_n1024:v0", type="wandb"),
+                    DataSource(path="codehop_synthesize_qwen_repo-244c02_level1_n65768:v1", type="wandb"),
                 ]
             },
             "llama": {
                 1: [
-                    DataSource(path="codehop_synthesize_llama_repo-244c02_level1_n65768:v0", type="wandb"),
+                    DataSource(path="codehop_synthesize_llama_repo-244c02_level1_n65768:v3", type="wandb"),
                 ]
             }
         },
