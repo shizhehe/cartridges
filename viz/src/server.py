@@ -85,12 +85,19 @@ def serialize_training_example(example, tokenizer: AutoTokenizer=None, include_l
     try:
         messages = []
         for msg in example.messages:
+            
             token_ids = msg.token_ids.tolist() if hasattr(msg.token_ids, "tolist") else msg.token_ids
+
+            if token_ids is not None and tokenizer is not None:
+                token_strs = [tokenizer.decode([token_id], skip_special_tokens=False) for token_id in token_ids]
+            else:
+                token_strs = None
+
             message_data = {
                 'content': msg.content,
                 'role': msg.role,
                 'token_ids': token_ids,
-                'token_strs': [tokenizer.decode([token_id], skip_special_tokens=False) for token_id in token_ids] if tokenizer else None,
+                'token_strs': token_strs,
                 'top_logprobs': None
             }
             
