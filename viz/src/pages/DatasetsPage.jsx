@@ -733,9 +733,9 @@ function DatasetsPage() {
                           {example.messages.slice(0, 2).map((message, msgIndex) => (
                             <div key={msgIndex}>
                               <span className={`font-semibold ${
-                                message.role === 'user' ? 'text-blue-600' : 'text-green-600'
+                                message.role === 'user' ? 'text-blue-600' : message.role === 'system' ? 'text-yellow-600' : 'text-green-600'
                               }`}>
-                                {message.role === 'user' ? 'User:' : 'Assistant:'}
+                                {message.role === 'user' ? 'User:' : message.role === 'system' ? 'System:' : 'Assistant:'}
                               </span>{' '}
                               {message.content.substring(0, 80)}...
                             </div>
@@ -850,13 +850,15 @@ function DatasetsPage() {
                 <div key={messageIndex} className={`p-4 rounded-lg border ${
                   message.role === 'user' 
                     ? 'bg-blue-50 border-blue-200' 
-                    : 'bg-green-50 border-green-200'
+                    : message.role === 'system'
+                      ? 'bg-yellow-50 border-yellow-200'
+                      : 'bg-green-50 border-green-200'
                 }`}>
                   <div className="flex items-center justify-between mb-2">
                     <div className={`font-bold text-sm ${
-                      message.role === 'user' ? 'text-blue-800' : 'text-green-800'
+                      message.role === 'user' ? 'text-blue-800' : message.role === 'system' ? 'text-yellow-800' : 'text-green-800'
                     }`}>
-                      {message.role === 'user' ? 'User' : 'Assistant'}
+                      {message.role === 'user' ? 'User' : message.role === 'system' ? 'System' : 'Assistant'}
                     </div>
                     <button
                       onClick={() => handleCopyContent(message.content)}
@@ -865,14 +867,16 @@ function DatasetsPage() {
                           ? 'bg-green-200 text-green-800' 
                           : message.role === 'user' 
                             ? 'bg-blue-200 hover:bg-blue-300 text-blue-800' 
-                            : 'bg-green-200 hover:bg-green-300 text-green-800'
+                            : message.role === 'system'
+                              ? 'bg-yellow-200 hover:bg-yellow-300 text-yellow-800'
+                              : 'bg-green-200 hover:bg-green-300 text-green-800'
                       }`}
                     >
                       {copySuccess ? '✓ Copied' : 'Copy'}
                     </button>
                   </div>
                   <div className={`break-words leading-relaxed prose prose-sm max-w-none ${
-                    message.role === 'user' ? 'text-blue-900' : 'text-green-900'
+                    message.role === 'user' ? 'text-blue-900' : message.role === 'system' ? 'text-yellow-900' : 'text-green-900'
                   }`}>
                     <ReactMarkdown>{message.content}</ReactMarkdown>
                   </div>
