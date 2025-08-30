@@ -95,7 +95,12 @@ def serialize_training_example(example, tokenizer: AutoTokenizer=None, include_l
             }
             
             # Handle logprobs if they exist and are requested
-            if include_logprobs and hasattr(msg, 'top_logprobs') and msg.top_logprobs is not None:
+            if (
+                include_logprobs and 
+                hasattr(msg, 'top_logprobs') and 
+                msg.top_logprobs is not None and 
+                token_ids is not None 
+            ):
                 # Use the original structure to get all top-k alternatives for each position
                 top_logprobs_matrix = msg.top_logprobs  # This is the original TopLogprobs object
                 
