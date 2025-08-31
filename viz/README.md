@@ -7,6 +7,8 @@ We encourage you to adapt the interface to your needs, we've found Claude Code t
 
 ## Setup
 
+**Note:** The following works for us with node --version `v24.4.0`. If you're running into issues installing dependencies, or with the frontend, try using this version.
+
 1. Install the dependencies:
 ```bash
 cd viz
