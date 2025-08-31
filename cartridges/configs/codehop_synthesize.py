@@ -24,21 +24,15 @@ REPO_TO_DATA = {
             },
             "llama": {
                 1: [],
+                2: [
+                    CartridgeConfig(
+                        id="hazy-research/cartridges/1mreremx",
+                        source="wandb"
+                    )
+                ],
             },
         }
     },
-    "repo-b0b268": {
-        "dataset_dir": "/data/sabri/cartridges/2025-08-25-11-32-21-make_codehop/codehop-nf10-nm1-dc3-v5-fn36-0/repo-b0b268",
-        "level_to_cartridge": {
-            1: [],
-            2: [
-                CartridgeConfig(
-                    id="hazy-research/cartridges/k9zti795",
-                    source="wandb"
-                )
-            ],
-        }
-    }
 }
 
 
@@ -80,7 +74,7 @@ config = SynthesizeConfig(
         client=client,
         max_rounds=1,
         prob_thinking=0.0,
-        temperature_a=1.0,
+        temperature_a=0.6,
         temperature_b=0.0,
         use_tools_a=False, 
         use_tools_b=False,
@@ -95,7 +89,8 @@ config = SynthesizeConfig(
         enhancing_resources=[
             PythonRepositoryResource.Config(path=enhancing_dataset_dir)
         ],
-        a_sees_enhancing_ctx=False,
+        a_sees_enhancing_ctx=True,
+        prob_enhancing_ctx=0.0,
         system_prompt_template=SYSTEM_PROMPT_TEMPLATE,
     ),
     output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),

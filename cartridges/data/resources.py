@@ -78,6 +78,45 @@ class TextFileResource(TextResource):
         self.text = open(self.config.path).read()
         await super().setup()
 
+async def load_directory_files(path: str, included_extensions: List[str], recursive: bool=True):
+    # Get all files based on recursive setting
+    if recursive:
+        file_paths = []
+        for root, dirs, files in os.walk(path):
+            for file_name in files:
+                if any(file_name.endswith(ext) for ext in included_extensions):
+                    file_paths.append(os.path.join(root, file_name))
+    else:
+        all_files = [f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
+        file_paths = [
+            os.path.join(path, f) for f in all_files 
+            if any(f.endswith(ext) for ext in included_extensions)
+        ]
+    
+    # Load all files in parallel
+    async def load_single_file(file_path: str) -> tuple[str, str]:
+        try:
+            async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
+                content = await f.read()
+        except UnicodeDecodeError:
+            # If file can't be decoded as UTF-8, try with latin-1 or skip
+            try:
+                async with aiofiles.open(file_path, 'r', encoding='latin-1') as f:
+                    content = await f.read()
+            except Exception:
+                content = f"[Unable to read file {os.path.basename(file_path)}]"
+        
+        # Use relative path from base directory as key for consistent naming
+        rel_path = os.path.relpath(file_path, path)
+        return rel_path, content
+    
+    # Load all files concurrently
+    tasks = [load_single_file(file_path) for file_path in file_paths]
+    results = await asyncio.gather(*tasks)
+    
+    return dict(results)
+
+
 class DirectoryResource(Resource):
 
     class Config(Resource.Config):
@@ -95,41 +134,11 @@ class DirectoryResource(Resource):
     
     async def _load_files(self):
         # Get all files based on recursive setting
-        if self.config.recursive:
-            file_paths = []
-            for root, dirs, files in os.walk(self.config.path):
-                for file_name in files:
-                    if any(file_name.endswith(ext) for ext in self.config.included_extensions):
-                        file_paths.append(os.path.join(root, file_name))
-        else:
-            all_files = [f for f in os.listdir(self.config.path) if os.path.isfile(os.path.join(self.config.path, f))]
-            file_paths = [
-                os.path.join(self.config.path, f) for f in all_files 
-                if any(f.endswith(ext) for ext in self.config.included_extensions)
-            ]
-        
-        # Load all files in parallel
-        async def load_single_file(file_path: str) -> tuple[str, str]:
-            try:
-                async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
-                    content = await f.read()
-            except UnicodeDecodeError:
-                # If file can't be decoded as UTF-8, try with latin-1 or skip
-                try:
-                    async with aiofiles.open(file_path, 'r', encoding='latin-1') as f:
-                        content = await f.read()
-                except Exception:
-                    content = f"[Unable to read file {os.path.basename(file_path)}]"
-            
-            # Use relative path from base directory as key for consistent naming
-            rel_path = os.path.relpath(file_path, self.config.path)
-            return rel_path, content
-        
-        # Load all files concurrently
-        tasks = [load_single_file(file_path) for file_path in file_paths]
-        results = await asyncio.gather(*tasks)
-        
-        return dict(results)
+        return await load_directory_files(
+            path=self.config.path,
+            included_extensions=self.config.included_extensions,
+            recursive=self.config.recursive
+        )
 
     async def setup(self):
         t0 = time.time()

@@ -46,6 +46,7 @@ class TokasaurusClient(Client):
 
         on_failure: Literal["raise", "continue"] = "raise"
 
+        # This only works on the geoff/cartridges branch of the tokasaurus server. 
         cartridges: Optional[List[CartridgeConfig]] = None
 
     def __init__(self, config: Config):

@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os
-from typing import Dict, List, Literal, Optional, Any
+from typing import Dict, List, Literal, Optional, Any, TypedDict
 from abc import abstractmethod
 from collections import deque
 import json
@@ -15,7 +15,7 @@ from transformers import PreTrainedTokenizerFast
 from pydrantic import ObjectConfig, BaseConfig
 import numpy as np
 
-from cartridges.structs import Conversation, read_conversations
+from cartridges.structs import Conversation, read_conversations, MessageDict
 from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE, MODELS_WITH_THINKING
 from cartridges.utils import get_logger
 from cartridges.utils.hf import read_conversations_from_hf
@@ -26,15 +26,6 @@ from cartridges.utils.wandb import read_conversations_from_wandb
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
 logger = get_logger(__name__)
-
-BOS_TOKEN_ID = 128000
-EOS_TOKEN_ID = 128009
-START_HEADER_ID = 128006
-END_HEADER_ID = 128007
-USER_TOKEN_ID = 882
-ASSISTANT_TOKEN_ID = 78191
-
-
 
 @dataclass
 class TokenCounts:
@@ -502,15 +493,13 @@ class LossEvalDataset(TrainDataset):
 @dataclass
 class GenerateEvalDatasetElement:
     input_ids: torch.Tensor
-    prompt: str
+
+    # messages to be used as the prompt
+    prompt: List[Dict[str, str]]
 
     answer: Optional[str]
     metadata: dict[str, Any]
     convo_id: Optional[str] = None
-    
-    # this is needed for some datasets, like MMLU, where the in context examples
-    # are structured as prior messages
-    prompt_messages: Optional[List[Dict[str,str]]] = None
 
 class GenerateEvalDataset(Dataset):
     class Config(ObjectConfig):
@@ -551,7 +540,10 @@ class GenerateEvalDataset(Dataset):
 
         return GenerateEvalDatasetElement(
             input_ids=input_ids,    
-            prompt=convo.messages[-2].content,
+            prompt=[
+                {"role": msg.role, "content": msg.content}
+                for msg in convo.messages[:-1]
+            ],
             answer=convo.messages[-1].content,
             convo_id=str(index),
             metadata={"idx": index}

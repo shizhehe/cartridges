@@ -1,6 +1,8 @@
 
+import asyncio
 import os
 import pickle
+import random
 from textwrap import dedent
 from typing import Dict, Optional, Tuple
 
@@ -9,13 +11,19 @@ from transformers import PreTrainedTokenizerFast
 from cartridges.data.codehop.structs import LiteralStr
 from cartridges.datasets import GenerateEvalDataset, GenerateEvalDatasetElement
 from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE
-
+from cartridges.data.resources import load_directory_files
+from cartridges.data.code.resources import _file_with_header
 
 class CodeHopGenerateDataset(GenerateEvalDataset):
     class Config(GenerateEvalDataset.Config):
         _pass_as_config = True
         make_run_dir: str
         thinking: bool = False
+
+        enhancing_dir: str | None = None
+        enhancing_system_prompt_template: str | None = None
+
+
 
     def __init__(
         self, 
@@ -81,13 +89,42 @@ class CodeHopGenerateDataset(GenerateEvalDataset):
                     questions.append((question, answer, meta))
         self.questions = questions
 
+
+        
+        if self.config.enhancing_dir is not None:
+            assert self.config.enhancing_system_prompt_template is not None
+            self.enhancing_files = asyncio.run(load_directory_files(
+                recursive=True,
+                included_extensions=[".py"],
+                path=self.config.enhancing_dir,
+            ))
+            # Randomly shuffle the enhancing files using a consistent seed
+            enhancing_files_list = list(self.enhancing_files.items())
+            rng = random.Random(seed)  # Use a consistent seed for reproducible results
+            rng.shuffle(enhancing_files_list)
+        else:
+            self.enhancing_files = None
+            
     
     def __getitem__(
         self, index: int
     ) -> GenerateEvalDatasetElement:
         question, answer, meta = self.questions[index]
+        convo = [] 
+
+        if self.enhancing_files is not None:
+            filename, file_content = random.choice(list(self.enhancing_files.items()))
+            enhancing_context = _file_with_header(filename, file_content)
+            convo.append({
+                "role": "system",
+                "content": self.config.enhancing_system_prompt_template.format(subcorpus=f"\n\n{enhancing_context}"),
+            })
+        
+        convo.append({"role": "user", "content": question})
+
+
         input_ids = self.tokenizer.apply_chat_template(
-            [{"role": "user", "content": question}],
+            convo,
             add_generation_prompt=True,
             return_tensors="pt",
             chat_template=MODEL_TO_CHAT_TEMPLATE.get(self.tokenizer.name_or_path, None),
@@ -101,7 +138,7 @@ class CodeHopGenerateDataset(GenerateEvalDataset):
                 "idx": index,
                 **meta,
             },
-            prompt=question,
+            prompt=convo,
         )
 
     def __len__(self):

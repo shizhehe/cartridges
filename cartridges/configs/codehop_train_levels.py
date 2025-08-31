@@ -4,7 +4,6 @@ from pathlib import Path
 import pydrantic
 from pydrantic.variables import FormatStringVariable
 
-from cartridges.clients.base import CartridgeConfig
 from cartridges.initialization import KVFromRandomText, KVFromPretrained
 from cartridges.models.llama.modeling_llama import FlexLlamaForCausalLM
 from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
@@ -14,10 +13,14 @@ from cartridges.datasets import TrainDataset
 from cartridges.data.codehop.evals import CodeHopGenerateDataset
 from cartridges.utils.wandb import WandBConfig
 
+from cartridges.configs.codehop_synthesize import SYSTEM_PROMPT_TEMPLATE
+
 NUM_TOKENS = int(os.environ.get("NUM_TOKENS", "4096"))
 LEVEL = int(os.environ.get("LEVEL", "1"))
 MODEL = os.environ.get("MODEL", "qwen")
 REPO = os.environ.get("REPO", "244c02")
+
+ENHANCING_DATASET_DIR = "/data/sabri/cartridges/2025-08-30-13-33-13-make_codehop/codehop-nf768-nm1-dc0-v5-fn36-0/repo-e30278"
 
 REPOS = {
     "244c02": {
@@ -32,7 +35,10 @@ REPOS = {
             },
             "llama": {
                 1: [
-                    DataSource(path="codehop_synthesize_llama_repo-244c02_level1_n65768:v3", type="wandb"),
+                    DataSource(path="codehop_synthesize_llama_repo-244c02_level1_n65768:v4", type="wandb"),
+                ],
+                2: [
+                    DataSource(path="codehop_synthesize_llama_repo-244c02_level2_n65768:v1", type="wandb"),
                 ]
             }
         },
@@ -42,6 +48,7 @@ REPOS = {
             },
             "llama": {
                 1: KVFromRandomText.Config(max_tokens=NUM_TOKENS),
+                2: KVFromPretrained.Config(wandb_run_id="hazy-research/cartridges/1mreremx"),
             },
         }
     }
@@ -88,6 +95,17 @@ config = TrainConfig(
             name_for_wandb=f"codehop",
             generate_max_new_tokens=64,
             batch_size=32,
+            temperature=0.0,
+        ), 
+        GenerationEvalConfig(
+            dataset=CodeHopGenerateDataset.Config(
+                make_run_dir=str(dataset_dir), 
+                enhancing_dir=str(ENHANCING_DATASET_DIR),
+                enhancing_system_prompt_template=SYSTEM_PROMPT_TEMPLATE,
+            ),
+            name_for_wandb=f"codehop_w_ctx",
+            generate_max_new_tokens=64,
+            batch_size=16,
             temperature=0.0,
         )
     ],

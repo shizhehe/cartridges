@@ -45,6 +45,7 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
         # similar to "Context-Enhanced Learning" (https://arxiv.org/pdf/2503.01821)
         enhancing_resources: List[Resource.Config] | None | Literal["same"] = None
         a_sees_enhancing_ctx: bool = True
+        prob_enhancing_ctx: float = 0.4
 
         tools: List[Tool.Config | ToolSet.Config]
         use_tools_a: bool = False
@@ -53,7 +54,6 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
 
         system_prompt_template: str = SYSTEM_PROMPT_TEMPLATE
         tool_prompt_template: str = TOOL_PROMPT_TEMPLATE
-        
 
         max_rounds: int = 1
 
@@ -128,13 +128,14 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
         resource = random.choice(self.resources)
         ctx, seed_prompts = await resource.sample_prompt(batch_size=batch_size)
 
-        if self.enhancing_resources is not None:
+        is_enhancing_ctx = random.random() < self.config.prob_enhancing_ctx
+        if self.enhancing_resources is not None and is_enhancing_ctx:
             enhancing_ctx, _ = await random.choice(self.enhancing_resources).sample_prompt(batch_size=1)
             enhancing_system_prompt = self.config.system_prompt_template.format(subcorpus=enhancing_ctx)
             enhancing_msgs_b = [system(enhancing_system_prompt)] 
             enhancing_msgs_a = enhancing_msgs_b if self.config.a_sees_enhancing_ctx else []
         else:
-            enhancing_ctx = None
+            enhancing_system_prompt = None
             enhancing_msgs_a, enhancing_msgs_b = [], []
             
 

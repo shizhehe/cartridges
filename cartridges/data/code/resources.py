@@ -71,6 +71,9 @@ def _file_to_module_name(file_name: str) -> str:
 def _module_to_file_name(module_name: str) -> str:
     return module_name.replace(".", "/") + ".py"
 
+def _file_with_header(file_name: str, content: str) -> str:
+    return f"```\n # File: {file_name} \n # You can use this file with \"import {_file_to_module_name(file_name)}\" \n\n {content} \n```"
+
 class PythonRepositoryResource(DirectoryResource):
 
     class Config(Resource.Config):
@@ -121,7 +124,7 @@ class PythonRepositoryResource(DirectoryResource):
         module = random.choice(candidate_modules)
         
         context = self.module_to_content[module]
-        context = f"\n\n```\n # File: {_module_to_file_name(module)} \n # You can use this file with \"import {module}\" \n\n {context} \n```"
+        context = f"\n\n{_file_with_header(_module_to_file_name(module), context)}"
         seed_prompts = random.choices(CODE_SEED_PROMPTS, k=batch_size)
         return context, seed_prompts
 
