@@ -29,7 +29,8 @@ function DatasetsPage() {
     metadata: false
   })
   const [isScrolled, setIsScrolled] = useState(false)
-  const [copySuccess, setCopySuccess] = useState(false)
+  const [copySuccess, setCopySuccess] = useState({})
+  const [collapsedMessages, setCollapsedMessages] = useState({})
   const [currentAbortController, setCurrentAbortController] = useState(null)
 
   // Navigate examples (similar to table navigation)
@@ -48,6 +49,8 @@ function DatasetsPage() {
     // Immediately show the new example
     setSelectedExample(examples[newIndex])
     setSelectedExampleWithLogprobs(null) // Clear previous detailed data
+    setCollapsedMessages({}) // Reset collapsed state
+    setCopySuccess({}) // Reset copy success state
     
     // Then fetch detailed example with logprobs in background
     const globalIndex = (currentPage * examplesPerPage) + newIndex
@@ -201,11 +204,20 @@ function DatasetsPage() {
     loadDatasetWithSearch(0)
   }
 
-  const handleCopyContent = (content) => {
+  const handleCopyContent = (content, messageIndex) => {
     navigator.clipboard.writeText(content).then(() => {
-      setCopySuccess(true)
-      setTimeout(() => setCopySuccess(false), 2000)
+      setCopySuccess(prev => ({...prev, [messageIndex]: true}))
+      setTimeout(() => {
+        setCopySuccess(prev => ({...prev, [messageIndex]: false}))
+      }, 2000)
     })
+  }
+
+  const toggleMessageCollapse = (messageIndex) => {
+    setCollapsedMessages(prev => ({
+      ...prev,
+      [messageIndex]: !prev[messageIndex]
+    }))
   }
 
   // Fetch detailed example with logprobs
@@ -710,6 +722,8 @@ function DatasetsPage() {
                           // Immediately show the basic example
                           setSelectedExample(example)
                           setSelectedExampleWithLogprobs(null) // Clear previous detailed data
+                          setCollapsedMessages({}) // Reset collapsed state
+                          setCopySuccess({}) // Reset copy success state
                           
                           // Then fetch detailed data with logprobs in the background
                           const globalIndex = (currentPage * examplesPerPage) + index
@@ -733,9 +747,9 @@ function DatasetsPage() {
                           {example.messages.slice(0, 2).map((message, msgIndex) => (
                             <div key={msgIndex}>
                               <span className={`font-semibold ${
-                                message.role === 'user' ? 'text-blue-600' : 'text-green-600'
+                                message.role === 'user' ? 'text-blue-600' : message.role === 'system' ? 'text-yellow-600' : 'text-green-600'
                               }`}>
-                                {message.role === 'user' ? 'User:' : 'Assistant:'}
+                                {message.role === 'user' ? 'User:' : message.role === 'system' ? 'System:' : 'Assistant:'}
                               </span>{' '}
                               {message.content.substring(0, 80)}...
                             </div>
@@ -793,6 +807,8 @@ function DatasetsPage() {
                                     }
                     setSelectedExample(null)
                     setSelectedExampleWithLogprobs(null)
+                    setCollapsedMessages({}) // Reset collapsed state
+                    setCopySuccess({}) // Reset copy success state
                   }}
                   className="px-4 py-2 bg-gray-100 border border-gray-300 rounded cursor-pointer text-sm hover:bg-gray-200"
                 >
@@ -850,35 +866,55 @@ function DatasetsPage() {
                 <div key={messageIndex} className={`p-4 rounded-lg border ${
                   message.role === 'user' 
                     ? 'bg-blue-50 border-blue-200' 
-                    : 'bg-green-50 border-green-200'
+                    : message.role === 'system'
+                      ? 'bg-yellow-50 border-yellow-200'
+                      : 'bg-green-50 border-green-200'
                 }`}>
                   <div className="flex items-center justify-between mb-2">
                     <div className={`font-bold text-sm ${
-                      message.role === 'user' ? 'text-blue-800' : 'text-green-800'
+                      message.role === 'user' ? 'text-blue-800' : message.role === 'system' ? 'text-yellow-800' : 'text-green-800'
                     }`}>
-                      {message.role === 'user' ? 'User' : 'Assistant'}
+                      {message.role === 'user' ? 'User' : message.role === 'system' ? 'System' : 'Assistant'}
                     </div>
-                    <button
-                      onClick={() => handleCopyContent(message.content)}
-                      className={`text-xs px-2 py-1 rounded transition-all ${
-                        copySuccess 
-                          ? 'bg-green-200 text-green-800' 
-                          : message.role === 'user' 
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => toggleMessageCollapse(messageIndex)}
+                        className={`text-xs px-2 py-1 rounded transition-all ${
+                          message.role === 'user' 
                             ? 'bg-blue-200 hover:bg-blue-300 text-blue-800' 
-                            : 'bg-green-200 hover:bg-green-300 text-green-800'
-                      }`}
-                    >
-                      {copySuccess ? '✓ Copied' : 'Copy'}
-                    </button>
+                            : message.role === 'system'
+                              ? 'bg-yellow-200 hover:bg-yellow-300 text-yellow-800'
+                              : 'bg-green-200 hover:bg-green-300 text-green-800'
+                        }`}
+                      >
+                        {collapsedMessages[messageIndex] ? 'Expand' : 'Collapse'}
+                      </button>
+                      <button
+                        onClick={() => handleCopyContent(message.content, messageIndex)}
+                        className={`text-xs px-2 py-1 rounded transition-all ${
+                          copySuccess[messageIndex] 
+                            ? 'bg-green-200 text-green-800' 
+                            : message.role === 'user' 
+                              ? 'bg-blue-200 hover:bg-blue-300 text-blue-800' 
+                              : message.role === 'system'
+                                ? 'bg-yellow-200 hover:bg-yellow-300 text-yellow-800'
+                                : 'bg-green-200 hover:bg-green-300 text-green-800'
+                        }`}
+                      >
+                        {copySuccess[messageIndex] ? '✓ Copied' : 'Copy'}
+                      </button>
+                    </div>
                   </div>
-                  <div className={`break-words leading-relaxed prose prose-sm max-w-none ${
-                    message.role === 'user' ? 'text-blue-900' : 'text-green-900'
-                  }`}>
-                    <ReactMarkdown>{message.content}</ReactMarkdown>
-                  </div>
+                  {!collapsedMessages[messageIndex] && (
+                    <div className={`break-words leading-relaxed prose prose-sm max-w-none ${
+                      message.role === 'user' ? 'text-blue-900' : message.role === 'system' ? 'text-yellow-900' : 'text-green-900'
+                    }`}>
+                      <ReactMarkdown>{message.content}</ReactMarkdown>
+                    </div>
+                  )}
                   
                   {/* Token visualization */}
-                  {message.token_ids && message.token_ids.length > 0 && (
+                  {!collapsedMessages[messageIndex] && message.token_ids && message.token_ids.length > 0 && (
                     <div>
                       {/* Show loading state when we have basic message but waiting for logprobs */}
                       {/* Always show tokens, with loading state if waiting for probabilities */}

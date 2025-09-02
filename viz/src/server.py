@@ -85,37 +85,54 @@ def serialize_training_example(example, tokenizer: AutoTokenizer=None, include_l
     try:
         messages = []
         for msg in example.messages:
+            
             token_ids = msg.token_ids.tolist() if hasattr(msg.token_ids, "tolist") else msg.token_ids
+
+            if token_ids is not None and tokenizer is not None:
+                token_strs = [tokenizer.decode([token_id], skip_special_tokens=False) for token_id in token_ids]
+            else:
+                token_strs = None
+
             message_data = {
                 'content': msg.content,
                 'role': msg.role,
                 'token_ids': token_ids,
-                'token_strs': [tokenizer.decode([token_id], skip_special_tokens=False) for token_id in token_ids] if tokenizer else None,
+                'token_strs': token_strs,
                 'top_logprobs': None
             }
             
             # Handle logprobs if they exist and are requested
-            if include_logprobs and hasattr(msg, 'top_logprobs') and msg.top_logprobs is not None:
+            if (
+                include_logprobs and 
+                hasattr(msg, 'top_logprobs') and 
+                msg.top_logprobs is not None and 
+                token_ids is not None 
+            ):
                 # Use the original structure to get all top-k alternatives for each position
                 top_logprobs_matrix = msg.top_logprobs  # This is the original TopLogprobs object
                 
-                # Create list of lists, same length as token_ids
-                token_idx_to_logprobs = [[] for _ in range(len(token_ids))]
-                
-                for token_idx, token_id, logprobs in zip(top_logprobs_matrix.token_idx, top_logprobs_matrix.token_id, top_logprobs_matrix.logprobs):
-                    token_idx_to_logprobs[token_idx].append({
-                        'token_id': int(token_id),
-                        "token_str": tokenizer.decode([token_id], skip_special_tokens=False) if tokenizer else None,
-                        'logprob': float(logprobs)
-                    })
-                            
-                result = []
-                for token_idx, logprobs in enumerate(token_idx_to_logprobs):
-                    # Sort by logprob (highest first)
-                    logprobs.sort(key=lambda x: x['logprob'], reverse=True)
-                    result.append(logprobs)
-                
-                message_data['top_logprobs'] = result
+                # Add null checks for the internal arrays before attempting to iterate
+                if (top_logprobs_matrix.token_idx is not None and 
+                    top_logprobs_matrix.token_id is not None and 
+                    top_logprobs_matrix.logprobs is not None):
+                    
+                    # Create list of lists, same length as token_ids
+                    token_idx_to_logprobs = [[] for _ in range(len(token_ids))]
+                    
+                    for token_idx, token_id, logprobs in zip(top_logprobs_matrix.token_idx, top_logprobs_matrix.token_id, top_logprobs_matrix.logprobs):
+                        token_idx_to_logprobs[token_idx].append({
+                            'token_id': int(token_id),
+                            "token_str": tokenizer.decode([token_id], skip_special_tokens=False) if tokenizer else None,
+                            'logprob': float(logprobs)
+                        })
+                                
+                    result = []
+                    for token_idx, logprobs in enumerate(token_idx_to_logprobs):
+                        # Sort by logprob (highest first)
+                        logprobs.sort(key=lambda x: x['logprob'], reverse=True)
+                        result.append(logprobs)
+                    
+                    message_data['top_logprobs'] = result
             
             messages.append(message_data)
         
