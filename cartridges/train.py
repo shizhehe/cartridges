@@ -585,7 +585,7 @@ def evaluate_perplexity(
                 )
 
                 epoch_loss += (ce_by_token.sum())
-                epoch_denom += batch.input_ids.shape[0]
+                epoch_denom += ce_by_token.shape[0]
 
             if cache_tuning:
                 assert cache is not None

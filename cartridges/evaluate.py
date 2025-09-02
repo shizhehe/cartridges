@@ -105,13 +105,9 @@ def evaluate_loss(config: LossEvalRunConfig):
             commit=False,
         )
 
-
-    
-    wrapped_model = CacheAndModel(cache, model,)
-
     evaluate_perplexity(
         config=config,
-        model=wrapped_model,
+        model=CacheAndModel(cache, model),
         cache=cache,
         eval_dataset=eval_dataset,
         ds_config=config.eval,
