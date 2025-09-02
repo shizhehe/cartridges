@@ -6,12 +6,15 @@ Example: python -m cartridges.utils.chat hazy-research/cartridges/ehij7vlt
 """
 
 import argparse
+import os
 import sys
 import torch
 import readline
 from typing import List, Dict
 from transformers import AutoTokenizer
 
+from cartridges.cache import AttnConfig
+from cartridges.initialization.text import KVFromText
 from cartridges.utils.wandb import load_model_and_cache_from_wandb
 from cartridges.generation import flex_generate
 
@@ -104,8 +107,9 @@ def main():
         
         model = cache_and_model.model.to("cuda").to(torch.bfloat16)
         cache = cache_and_model.cache.to("cuda").to(torch.bfloat16)
+    
         tokenizer = AutoTokenizer.from_pretrained(cache_and_model.model.name_or_path)
-        
+
         print("Model and cache loaded successfully!\n")
         
     except Exception as e:

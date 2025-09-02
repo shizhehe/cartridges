@@ -10,47 +10,143 @@ from typing import Callable, Dict, List, Literal, Optional, Union
 
 # from kvpress import DuoAttentionPress, ExpectedAttentionPress
 import pandas as pd
+from pydantic import Field
+import torch
+import torch.distributed as dist
 from tqdm import tqdm
 from transformers import AutoTokenizer
 import wandb
 import pydrantic
 
+from cartridges.cache import AttnConfig, KVCacheFactory, TrainableCache
 from cartridges.data.resources import Resource
 from cartridges.datasets import GenerateEvalDatasetElement, GenerateEvalDataset
 from cartridges.clients.base import ClientConfig, ClientResponse
 
-from cartridges.train import GenerationEvalConfig
-from cartridges.utils.wandb import WandBConfig, prepare_wandb, seed_everything, get_logger
+from cartridges.models.config import ModelConfig
+from cartridges.train import CacheAndModel, GenerationEvalConfig, LossEvalConfig, evaluate_perplexity
+from cartridges.utils import get_logger, seed_everything
+from cartridges.utils.wandb import WandBConfig, prepare_wandb
 
 
 
 logger = get_logger(__name__)
 
+class LossEvalRunConfig(pydrantic.RunConfig):
+    eval: LossEvalConfig
+    model: ModelConfig
+    kv_cache_initializer: Optional[KVCacheFactory.Config] = None
 
-class EvaluateConfig(pydrantic.RunConfig):
+    batch_size: int
+    device: str = "cuda"
+    seed: int = 42
+    
     name: str = "default"  # A name for the run for wandb
-    generator: BaselineGenerator.Config
-    wandb: Optional[WandBConfig] = None
+    wandb: Optional[WandBConfig] = Field(default_factory=WandBConfig)
+    
+    def run(self):
+        return evaluate_loss(self)
 
+
+def evaluate_loss(config: LossEvalRunConfig):
+    seed_everything(config.seed)
+    
+    is_ddp = "LOCAL_RANK" in os.environ
+    if is_ddp:
+        local_rank = int(os.environ["LOCAL_RANK"])
+        torch.cuda.set_device(local_rank)
+
+
+        logger.info(f"[Rank {dist.get_rank()}] initialized.")
+        is_rank_zero = dist.get_rank() == 0
+        num_devices = dist.get_world_size()
+    else:
+        local_rank = config.device
+        is_rank_zero = True
+        num_devices = 1
+    
+    model = config.model.instantiate().to(local_rank).to(torch.bfloat16)
+    tokenizer = AutoTokenizer.from_pretrained(config.model.pretrained_model_name_or_path)    
+
+    attn_config = AttnConfig(
+        n_layers=model.config.num_hidden_layers,
+        n_heads=model.config.num_key_value_heads,
+        head_dim=(
+            model.config.head_dim
+            if hasattr(model.config, "head_dim")
+            else model.config.hidden_size // model.config.num_attention_heads
+        )
+    )
+
+    if config.kv_cache_initializer is not None:
+        initializer = config.kv_cache_initializer.instantiate()
+        cache: TrainableCache = initializer.initialize_kv_cache(
+            tokenizer=tokenizer, model=model, attn_config=attn_config,
+        )
+        cache = cache.to(local_rank).to(torch.bfloat16)
+    else:
+        cache = None
+
+    eval_dataset = config.eval.dataset.instantiate(tokenizer=tokenizer, seed=config.seed)
+
+    # Only set up W&B if rank 0 or running single-process
+    if config.wandb is not None and is_rank_zero:
+        config.wandb.name = config.name
+        prepare_wandb(config.wandb, config.to_dict())
+
+        wandb_log_dict = {
+            "num_cache_tokens": cache._num_trainable_tokens if cache is not None else 0
+        }
+
+        wandb.log(
+            wandb_log_dict,
+            # SE (03/10): by setting commit=False, we avoid incrementing the step count
+            # to 1. Without this, the first evaluation at step 0 will not be logged
+            commit=False,
+        )
+
+
+    
+    wrapped_model = CacheAndModel(cache, model,)
+
+    evaluate_perplexity(
+        config=config,
+        model=wrapped_model,
+        cache=cache,
+        eval_dataset=eval_dataset,
+        ds_config=config.eval,
+        optimizer_step=0,
+        epoch=0,
+        local_rank=local_rank,
+        cache_tuning=cache is not None,
+    )
+    
+    if config.wandb is not None:
+        wandb.finish()
+
+
+
+class GenerationEvalRunConfig(pydrantic.RunConfig):
     # dataset for actually producing generations
     eval: GenerationEvalConfig
+    generator: BaselineGenerator.Config
 
     batch_size: int
     max_num_batches_in_parallel: int = 1
-    parallelism_strategy: Literal["thread", "process"] = "thread"
 
     tokenizer: str = "meta-llama/Llama-3.2-1B-Instruct"
-    device: str = "cuda"
 
     seed: int = 42
-
+    
+    name: str = "default"  # A name for the run for wandb
+    wandb: Optional[WandBConfig] = None
     output_dir: str = os.environ.get("CARTRIDGES_OUTPUT_DIR", ".")
 
     def run(self):
         return asyncio.run(evaluate_generation(self))
 
 
-async def evaluate_generation(config: EvaluateConfig):
+async def evaluate_generation(config: GenerationEvalRunConfig):
     seed_everything(config.seed)
 
     logger.info(f"ICL will be saved to {config.run_dir}")

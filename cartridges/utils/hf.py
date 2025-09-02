@@ -56,7 +56,6 @@ def read_conversations_from_hf(repo_id: str, token: Optional[str] = None) -> lis
             logger.info(f"Loaded {len(conversations)} conversations from {parquet_file}")
         
         conversations = all_conversations
-        print(len(conversations), "HERREEEEE")
         
     except ImportError:
         # Fallback to single file if huggingface_hub is not available

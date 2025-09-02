@@ -2,7 +2,6 @@ from __future__ import annotations
 from abc import ABCMeta, abstractmethod
 import contextlib
 from dataclasses import dataclass, field
-import itertools
 import math
 from math import cos, pi
 import os
@@ -37,7 +36,7 @@ from cartridges.datasets import (
 )
 from cartridges.models.config import ModelConfig
 from cartridges.utils import get_logger, seed_everything
-from cartridges.utils.wandb import download_artifacts, WandBConfig, prepare_wandb
+from cartridges.utils.wandb import WandBConfig, prepare_wandb
 
 
 logger = get_logger(__name__)
@@ -915,14 +914,12 @@ class CacheAndModel(nn.Module):
         input_ids: torch.Tensor, 
         seq_ids: torch.Tensor, 
         position_ids: torch.Tensor,
-        # labels: torch.Tensor
     ):
 
         out = self.model(
             input_ids=input_ids,
             seq_ids=seq_ids,
             position_ids=position_ids,
-            # labels=labels,
             use_cache=True,
             past_key_values=self.cache
         )

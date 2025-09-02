@@ -352,9 +352,6 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
         
         inputs_embeds = self.embed_tokens(input_ids)
 
-        if use_cache and past_key_values is None:
-            past_key_values = DynamicCache()
-
         cartridge_len = past_key_values.num_cartridge_tokens() if past_key_values is not None else 0
         position_ids = position_ids + cartridge_len
         
@@ -366,7 +363,6 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
             device=inputs_embeds.device,
         )
         # --- end build block mask ---
-
 
         hidden_states = inputs_embeds
 

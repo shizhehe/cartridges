@@ -10,7 +10,7 @@ DEFAULT_TEXT_SOURCE = os.path.join(
     os.environ["CARTRIDGES_DIR"], "cartridges/initialization/data/gradient.txt"
 )
 
-class KVFromRandomText(KVCacheFactory):
+class KVFromText(KVCacheFactory):
     class Config(KVCacheFactory.Config):
         max_tokens: Optional[int]
         text_source: str = DEFAULT_TEXT_SOURCE
@@ -45,9 +45,7 @@ class KVFromRandomText(KVCacheFactory):
                 past_key_values=init_cache,
                 mode="generate",
             )
-
-            print(self.config.num_frozen_tokens)
-
+            
             return TrainableCache(
                 config=attn_config,
                 init_keys=init_cache._keys,
@@ -55,4 +53,6 @@ class KVFromRandomText(KVCacheFactory):
                 num_frozen_tokens=self.config.num_frozen_tokens,
             )
 
-
+class KVFromRandomText(KVFromText):
+    # for backwards compatibility
+    pass

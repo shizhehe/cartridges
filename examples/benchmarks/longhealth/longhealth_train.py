@@ -5,7 +5,7 @@ import socket
 import pydrantic
 from pydrantic.variables import FormatStringVariable
 
-from cartridges.initialization import KVFromRandomText
+from cartridges.initialization import KVFromText
 from cartridges.train import GenerationEvalConfig, TrainConfig
 from cartridges.models.config import HFModelConfig
 from cartridges.datasets import TrainDataset, DataSource
@@ -48,7 +48,7 @@ else:
 
 config = TrainConfig(
     model=model,
-    kv_cache_initializer=KVFromRandomText.Config(
+    kv_cache_initializer=KVFromText.Config(
         max_tokens=NUM_TOKENS
     ),
     
