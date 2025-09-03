@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 import pydrantic
 
-from cartridges.initialization import KVFromRandomText
+from cartridges.initialization import KVFromText
 from cartridges.train import TrainConfig, LossEvalConfig, GenerationEvalConfig
 from cartridges.models import HFModelConfig, FlexQwen3ForCausalLM
 from cartridges.datasets import DataSource, GenerateEvalDataset, TrainDataset, LossEvalDataset
@@ -14,9 +14,9 @@ config = TrainConfig(
         pretrained_model_name_or_path="Qwen/Qwen3-4b",
         model_cls=FlexQwen3ForCausalLM,
     ),
-    kv_cache_initializer=KVFromRandomText.Config(
+    kv_cache_initializer=KVFromText.Config(
         text_source=os.path.join(os.environ["CARTRIDGES_DIR"], "examples/arxiv/cartridges.tex"),
-        max_tokens=2048
+        max_tokens=None
     ),
     
     lr=2e-2,
@@ -35,7 +35,7 @@ config = TrainConfig(
         packing_mode="truncate",
     ),
 
-    loss_eval_every_n_steps=128,
+    loss_eval_every_n_steps=16,
     loss_evals=[
         LossEvalConfig(
             dataset=LossEvalDataset.Config(
@@ -62,6 +62,7 @@ config = TrainConfig(
             batch_size=16
         )
     ],
+    distributed_backend="gloo",
 
     save_every_n_steps=512,
     name="cartridges-tutorial-train",

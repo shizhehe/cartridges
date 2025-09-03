@@ -10,7 +10,7 @@ DEFAULT_TEXT_SOURCE = os.path.join(
     os.environ["CARTRIDGES_DIR"], "cartridges/initialization/data/gradient.txt"
 )
 
-class KVFromRandomText(KVCacheFactory):
+class KVFromText(KVCacheFactory):
     class Config(KVCacheFactory.Config):
         max_tokens: Optional[int]
         text_source: str = DEFAULT_TEXT_SOURCE
@@ -34,20 +34,20 @@ class KVFromRandomText(KVCacheFactory):
         init_cache = TrainableCache(config=attn_config)
         
         with torch.no_grad():
-            input_ids = input_ids.to(model.device)
-            seq_ids = torch.full_like(input_ids, 0, dtype=torch.long)
-            position_ids = torch.arange(input_ids.shape[-1], dtype=torch.long).to(model.device)
-            model(
-                input_ids=input_ids,
-                seq_ids=seq_ids,
-                position_ids=position_ids,
-                use_cache=True,
-                past_key_values=init_cache,
-                mode="generate",
-            )
+            with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
 
-            print(self.config.num_frozen_tokens)
-
+                input_ids = input_ids.to(model.device)
+                seq_ids = torch.full_like(input_ids, 0, dtype=torch.long)
+                position_ids = torch.arange(input_ids.shape[-1], dtype=torch.long).to(model.device)
+                model(
+                    input_ids=input_ids,
+                    seq_ids=seq_ids,
+                    position_ids=position_ids,
+                    use_cache=True,
+                    past_key_values=init_cache,
+                    mode="generate",
+                )
+                
             return TrainableCache(
                 config=attn_config,
                 init_keys=init_cache._keys,
@@ -55,4 +55,6 @@ class KVFromRandomText(KVCacheFactory):
                 num_frozen_tokens=self.config.num_frozen_tokens,
             )
 
-
+class KVFromRandomText(KVFromText):
+    # for backwards compatibility
+    pass

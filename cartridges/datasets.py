@@ -472,6 +472,9 @@ class LossEvalDataset(TrainDataset):
         packing_mode: Literal["truncate", "pad"]="pad"
         packed_seq_length: int = 2048
 
+        system_prompt: str | None = None
+        
+
         user_prompt_prefix: list[str] | None = None
 
 
@@ -481,8 +484,16 @@ class LossEvalDataset(TrainDataset):
 
         elements = []
         for row in data:
+            if self.config.system_prompt is not None:
+                messages = [
+                    Conversation.Message(role="system", content=self.config.system_prompt, token_ids=None),
+                    *row.messages,
+                ]
+            else:
+                messages = row.messages
+
             elements.append(MODEL_TO_MESSAGE_CONVERTER[self.tokenizer.name_or_path.lower()](
-                row.messages,
+                messages,
                 retokenize=self.config.targets == "tokens",
                 tokenizer=self.tokenizer,
             ))

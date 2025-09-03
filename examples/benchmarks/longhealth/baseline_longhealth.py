@@ -5,7 +5,7 @@ import pydrantic
 
 from cartridges.clients.openai import CartridgeConfig, OpenAIClient
 from cartridges.data.longhealth.resources import LongHealthResource
-from cartridges.evaluate import ICLBaseline, EvaluateConfig
+from cartridges.evaluate import ICLBaseline, GenerationEvalRunConfig
 from cartridges.data.longhealth.evals import LongHealthMultipleChoiceGenerateDataset
 from cartridges.evaluate import GenerationEvalConfig
 
@@ -36,7 +36,7 @@ patients_str = f"p{NUM_PATIENTS}"
 patient_ids = [f"patient_{idx:02d}" for idx in patient_idxs]
 
 configs = [
-    EvaluateConfig(
+    GenerationEvalRunConfig(
         name=f"longhealth_mc_{patients_str}",
         generator=ICLBaseline.Config(
             client=client,

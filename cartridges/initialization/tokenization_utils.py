@@ -24,15 +24,6 @@ def llama3_tokenize_data_into_system_prompt(
 
     return torch.tensor(input_ids)[None, :]
 
-def llama2_tokenize_data_into_system_prompt(
-    tokenizer,
-    content: str,
-    max_tokens: Optional[int],
-) -> torch.Tensor:
-    out = tokenizer.encode(content, add_special_tokens=True, return_tensors="pt")[None, :]
-    breakpoint()
-    return out
-
 
 
 def qwen_tokenize_data_into_system_prompt(
@@ -42,10 +33,14 @@ def qwen_tokenize_data_into_system_prompt(
 ) -> torch.Tensor:
     END_TOKEN_IDS = [151645, 198]
 
-    input_ids = tokenizer.apply_chat_template([{"role": "system", "content": content}])
+    input_ids = tokenizer.apply_chat_template(
+        [{"role": "system", "content": content}],
+        include_special_tokens=True,
+    )
 
     if max_tokens is not None and len(input_ids) > max_tokens:
         input_ids = input_ids[: max_tokens - len(END_TOKEN_IDS)] + END_TOKEN_IDS
+    
 
     return torch.tensor(input_ids)[None, :]
 

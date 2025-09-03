@@ -1,10 +1,10 @@
 from .random import KVFromRandomVectors
-from .text import KVFromRandomText
+from .text import KVFromText
 from .pretrained import KVFromPretrained
 
 
 __all__ = [
     "KVFromRandomVectors",
-    "KVFromRandomText",
+    "KVFromText",
     "KVFromPretrained",
 ]
