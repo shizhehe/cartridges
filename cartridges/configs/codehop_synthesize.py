@@ -14,6 +14,7 @@ from cartridges.utils.wandb import WandBConfig
 LEVEL = int(os.environ.get("LEVEL", "1"))
 MODEL = os.environ.get("MODEL", "qwen")
 REPO = "repo-244c02"
+PROB_ENHANCING_CTX = 0.0
 
 REPO_TO_DATA = {
     "repo-244c02": {
@@ -90,7 +91,7 @@ config = SynthesizeConfig(
             PythonRepositoryResource.Config(path=enhancing_dataset_dir)
         ],
         a_sees_enhancing_ctx=True,
-        prob_enhancing_ctx=0.0,
+        prob_enhancing_ctx=PROB_ENHANCING_CTX,
         system_prompt_template=SYSTEM_PROMPT_TEMPLATE,
     ),
     output_dir=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."),
@@ -99,7 +100,7 @@ config = SynthesizeConfig(
     
     max_num_batches_in_parallel=512,
 
-    name=FormatStringVariable(f"{Path(__file__).stem}_{MODEL}_{REPO}_level{LEVEL}_n{{num_samples}}"),
+    name=FormatStringVariable(f"{Path(__file__).stem}_{MODEL}_{REPO}_level{LEVEL}_n{{num_samples}}_e{PROB_ENHANCING_CTX}"),
     run_id=FormatStringVariable("{name}"),
     wandb=WandBConfig(
         project="cartridges",

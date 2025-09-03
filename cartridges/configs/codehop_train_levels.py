@@ -4,7 +4,7 @@ from pathlib import Path
 import pydrantic
 from pydrantic.variables import FormatStringVariable
 
-from cartridges.initialization import KVFromRandomText, KVFromPretrained
+from cartridges.initialization import KVFromText, KVFromPretrained
 from cartridges.models.llama.modeling_llama import FlexLlamaForCausalLM
 from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
 from cartridges.train import GenerationEvalConfig, TrainConfig, DataSource
@@ -35,7 +35,13 @@ REPOS = {
             },
             "llama": {
                 1: [
-                    DataSource(path="codehop_synthesize_llama_repo-244c02_level1_n65768:v4", type="wandb"),
+                    # DataSource(path="codehop_synthesize_llama_repo-244c02_level1_n65768:v4", type="wandb"),
+                    
+                    
+                    DataSource(path="codehop_synthesize_llama_repo-244c02_level1_n65768_e0.0:v0", type="wandb"),
+                    DataSource(path="codehop_synthesize_llama_repo-244c02_level1_n65768_e0.0:v1", type="wandb"),
+
+
                 ],
                 2: [
                     DataSource(path="codehop_synthesize_llama_repo-244c02_level2_n65768:v1", type="wandb"),
@@ -44,10 +50,10 @@ REPOS = {
         },
         "initializer": {
             "qwen": {
-                1: KVFromRandomText.Config(max_tokens=NUM_TOKENS),
+                1: KVFromText.Config(max_tokens=NUM_TOKENS),
             },
             "llama": {
-                1: KVFromRandomText.Config(max_tokens=NUM_TOKENS),
+                1: KVFromText.Config(max_tokens=NUM_TOKENS),
                 2: KVFromPretrained.Config(wandb_run_id="hazy-research/cartridges/1mreremx"),
             },
         }

@@ -290,14 +290,14 @@ See [`TrainConfig`](./cartridges/train.py#L66) for documentation on the configur
 ```python
 from cartridges.models import HFModelConfig, FlexQwen3ForCausalLM
 from cartridges.train import TrainConfig, CartridgeTrainDataset, DataSource
-from cartridges.initialization.random import KVFromRandomText
+from cartridges.initialization.random import KVFromText
 
 config = TrainConfig(
     model=HFModelConfig(
         pretrained_model_name_or_path="Qwen/Qwen3-4b",
         model_cls=FlexQwen3ForCausalLM,
     ),
-    kv_cache_initializer=KVFromRandomText.Config(max_tokens=2048),
+    kv_cache_initializer=KVFromText.Config(max_tokens=2048),
     
     lr=2e-2,
     epochs=1,
@@ -330,7 +330,7 @@ torchrun --standalone --nproc_per_node=2 path/to/file.py
 > data parallel training. If you encounter this error, you can set `distributed_backend="gloo"`
 > while we debug the issue.
 
-**KV Cache Initialization.** The `kv_cache_initializer` controls how the cartridge's KV cache is initialized before training. In [`cartridges/initialization`](./cartridges/initialization), we provide several different options including `KVFromRandomText`, `KVFromRandomVectors`, and `KVCacheFromPretrained`. `KVFromRandomText` is usually the best choice. The `max_tokens` parameter determines the size of the cartridge ($p$ in the paper). Larger values improve performance, but increase memory usage and training time.
+**KV Cache Initialization.** The `kv_cache_initializer` controls how the cartridge's KV cache is initialized before training. In [`cartridges/initialization`](./cartridges/initialization), we provide several different options including `KVFromText`, `KVFromRandomVectors`, and `KVCacheFromPretrained`. `KVFromText` is usually the best choice. The `max_tokens` parameter determines the size of the cartridge ($p$ in the paper). Larger values improve performance, but increase memory usage and training time.
 
 > **Note:** We've also experimented with more sophisticated initialization strategies based off of summarization and other KV cache compression techniques. We will eventually add support for these to this codebase.
 

@@ -55,6 +55,6 @@ class KVFromText(KVCacheFactory):
                 num_frozen_tokens=self.config.num_frozen_tokens,
             )
 
-class KVFromRandomText(KVFromText):
+class KVFromText(KVFromText):
     # for backwards compatibility
     pass

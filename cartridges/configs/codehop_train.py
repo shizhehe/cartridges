@@ -4,7 +4,7 @@ from pathlib import Path
 import pydrantic
 from pydrantic.variables import FormatStringVariable
 
-from cartridges.initialization import KVFromRandomText, KVFromPretrained
+from cartridges.initialization import KVFromText, KVFromPretrained
 from cartridges.models.llama.modeling_llama import FlexLlamaForCausalLM
 from cartridges.models.qwen.modeling_qwen3 import FlexQwen3ForCausalLM
 from cartridges.train import GenerationEvalConfig, TrainConfig, DataSource
@@ -34,7 +34,7 @@ if MODEL == "qwen":
         pretrained_model_name_or_path="Qwen/Qwen3-4b",
         model_cls=FlexQwen3ForCausalLM,
     )
-    kv_cache_initializer=KVFromRandomText.Config(max_tokens=NUM_TOKENS)
+    kv_cache_initializer=KVFromText.Config(max_tokens=NUM_TOKENS)
 elif MODEL == "llama":
     model=HFModelConfig(
         pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
@@ -56,7 +56,7 @@ elif MODEL == "llama":
                 type="local"
             )
         ]
-        kv_cache_initializer=KVFromRandomText.Config(max_tokens=NUM_TOKENS)
+        kv_cache_initializer=KVFromText.Config(max_tokens=NUM_TOKENS)
 
     elif ROUND == 2:
         data_sources = [
@@ -68,7 +68,7 @@ elif MODEL == "llama":
         # kv_cache_initializer = KVFromPretrained.Config(
         #     wandb_run_id="hazy-research/cartridges/85axrvk4",
         # )
-        kv_cache_initializer=KVFromRandomText.Config(max_tokens=NUM_TOKENS)
+        kv_cache_initializer=KVFromText.Config(max_tokens=NUM_TOKENS)
 
             
 else:
