@@ -10,9 +10,6 @@ from cartridges.models import HFModelConfig, FlexQwen3ForCausalLM, FlexLlamaForC
 from cartridges.datasets import DataSource, GenerateEvalDataset, TrainDataset, LossEvalDataset
 
 
-text = Path(os.path.join(os.environ["CARTRIDGES_DIR"], "examples/arxiv/cartridges.tex")).read_text()
-
-system_prompt = f"You are a helpful assistant that can answer questions about the following text: {text}"
 
 
 config = LossEvalRunConfig(

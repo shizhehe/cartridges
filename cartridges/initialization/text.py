@@ -15,6 +15,8 @@ class KVFromText(KVCacheFactory):
         max_tokens: Optional[int]
         text_source: str = DEFAULT_TEXT_SOURCE
 
+        system_prompt_template: Optional[str] = "{text}"
+
     def initialize_kv_cache(
         self,
         tokenizer,
@@ -22,6 +24,8 @@ class KVFromText(KVCacheFactory):
         attn_config: AttnConfig,
     ) -> TrainableCache:
         content = Path(self.config.text_source).read_text()
+        if self.config.system_prompt_template is not None:
+            content = self.config.system_prompt_template.format(text=content)
 
         tokenize_data_into_system_prompt = MODEL_TO_SYSTEM_PROMPT_TOKENIZER[tokenizer.name_or_path.lower()]
 
