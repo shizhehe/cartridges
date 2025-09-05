@@ -16,7 +16,7 @@ MODEL_TO_THINKING_OVERRIDES = {
     "qwen/qwen3-8b": lambda enable_thinking: dict(enable_thinking=enable_thinking),
 }
 
-DEFAULT_COT = "Think before responding. Put your chain of thought between the <thinking> and </thinking> tags before providing your final response."
+DEFAULT_COT = "Think before responding. Put your chain of thought/scratchpad between the <think> and </think> tags before providing your final response."
 
 COT_INSTRUCTIONS = [
     DEFAULT_COT,

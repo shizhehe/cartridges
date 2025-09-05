@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, TypedDict
 
 from cartridges.clients.base import FlatTopLogprobs
 from cartridges.utils import get_logger
@@ -8,6 +8,16 @@ from cartridges.utils import get_logger
 
 logger = get_logger(__name__)
 
+
+class MessageDict(TypedDict):
+    """This is simply a convenience type for typehints for a message dictionary
+    compatible with OpenAI-apis and tokenizer.apply_chat_template.
+    
+    It differs from Message, which is a dataclass that also has fields for token_ids and 
+    top_logprobs.
+    """
+    role: Literal["user", "assistant", "system"]
+    content: str
 
 @dataclass
 class Conversation:
@@ -26,6 +36,8 @@ class Conversation:
         # Sparse dictionary of top logprobs for each token
         top_logprobs: Optional[FlatTopLogprobs] = None
 
+        def to_message_dict(self) -> MessageDict:
+            return {"content": self.content, "role": self.role}
 
     def _repr_html_(self) -> str:
         import markdown

@@ -89,7 +89,6 @@ class Dashboard:
         history = list(run.scan_history(
             keys=[self.table, self.step],
         ))
-
         tables = []
         for row in history:
             if row[self.table] is not None:
@@ -110,8 +109,7 @@ class Dashboard:
                 self.step: row[self.step],
                 self.score_metric: row[self.score_metric],
             }
-            for row in run.scan_history(keys=["train/optimizer_step", "generate_codehop/score"])
-            # if row["generate_codehop/score"] is not None
+            for row in run.scan_history(keys=[self.step, self.score_metric])
         ])
      
         print(f"Loading {len(df)}plot rows took {time.time() - t0} seconds")

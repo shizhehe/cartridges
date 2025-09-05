@@ -812,6 +812,7 @@ def evaluate_generations(
                 f"{prefix}/num_system_and_user_tokens": df[
                     "num_system_and_user_tokens"
                 ].mean(),
+                "train/optimizer_step": optimizer_step,
                 f"{prefix}/num_assistant_tokens": df["num_assistant_tokens"].mean(),
             }
             logger.info(avg_scores)

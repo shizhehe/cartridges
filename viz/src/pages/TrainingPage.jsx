@@ -111,6 +111,80 @@ function TrainingPage() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [selectedTableExample, selectedTableData])
 
+  // Helper function to check if a value is a conversation (array of messages)
+  const isConversation = (value) => {
+    try {
+      if (!Array.isArray(value) || value.length === 0) {
+        return false
+      }
+      
+      const isConv = value.every(item => 
+        typeof item === 'object' && 
+        item !== null && 
+        typeof item.role === 'string' && 
+        (typeof item.content === 'string' || typeof item.content === 'number')
+      )
+      
+      // Debug logging for problematic cases
+      if (!isConv && Array.isArray(value) && value.length > 0) {
+        console.log('isConversation failed for:', value)
+      }
+      
+      return isConv
+    } catch (error) {
+      console.warn('Error checking if value is conversation:', error, value)
+      return false
+    }
+  }
+
+  // Helper function to render conversation messages
+  const renderConversation = (messages, title, bgColor, borderColor, textColor) => {
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return (
+        <div className={`p-4 rounded-lg ${bgColor} border ${borderColor}`}>
+          <div className={`font-bold text-sm ${textColor} mb-2`}>{title}</div>
+          <div className="text-gray-500 text-sm">No conversation data</div>
+        </div>
+      )
+    }
+
+    return (
+      <div className={`p-4 rounded-lg ${bgColor} border ${borderColor}`}>
+        <div className={`font-bold text-sm ${textColor} mb-4`}>{title}</div>
+        <div className="space-y-3">
+          {messages.map((message, index) => {
+            // Ensure message is an object with the required properties
+            if (!message || typeof message !== 'object') {
+              console.warn('Invalid message in conversation:', message)
+              return null
+            }
+            
+            return (
+              <div key={index} className={`p-3 rounded-lg border ${
+                message.role === 'user' 
+                  ? 'bg-blue-50 border-blue-200' 
+                  : message.role === 'system'
+                    ? 'bg-yellow-50 border-yellow-200'
+                    : 'bg-green-50 border-green-200'
+              }`}>
+                <div className={`font-semibold text-xs mb-1 ${
+                  message.role === 'user' ? 'text-blue-800' : message.role === 'system' ? 'text-yellow-800' : 'text-green-800'
+                }`}>
+                  {message.role === 'user' ? 'User' : message.role === 'system' ? 'System' : 'Assistant'}
+                </div>
+                <div className={`text-sm leading-relaxed ${
+                  message.role === 'user' ? 'text-blue-900' : message.role === 'system' ? 'text-yellow-900' : 'text-green-900'
+                }`}>
+                  <ReactMarkdown>{String(message.content || '')}</ReactMarkdown>
+                </div>
+              </div>
+            )
+          }).filter(Boolean)}
+        </div>
+      </div>
+    )
+  }
+
   // Get filtered table data based on active slices
   const getFilteredTableData = () => {
     if (!selectedTableData || activeSlices.size === 0) {
@@ -264,8 +338,7 @@ function TrainingPage() {
       return
     }
 
-    setLoadingDashboard(true)
-    setSelectedRun(run)
+    // Clear all cached data FIRST before setting new run
     setDashboardData(null)
     setPlotData([])  // Clear previous plot data
     setSelectedTable(null)
@@ -275,6 +348,11 @@ function TrainingPage() {
     setTableSlices([])  // Clear previous table slices
     setActiveSlices(new Set())  // Clear active slices
     setSelectedSlicesForPlot(new Set())  // Clear selected slices for plot
+    setLoadingSliceMetrics(false)  // Reset loading state
+    
+    // Now set the new run and loading state
+    setSelectedRun(run)
+    setLoadingDashboard(true)
     
     try {
       const response = await fetch('/api/dashboard/analyze', {
@@ -601,7 +679,32 @@ function TrainingPage() {
               </label>
               <select
                 value={selectedDashboard}
-                onChange={(e) => setSelectedDashboard(e.target.value)}
+                onChange={(e) => {
+                  const newDashboard = e.target.value
+                  console.log('Dashboard changed:', selectedDashboard, '->', newDashboard)
+                  
+                  // Clear all cached data including runs (since they may have cached slice scores)
+                  setDashboardData(null)
+                  setPlotData([])
+                  setSelectedTable(null)
+                  setSelectedTableData(null)
+                  setSelectedTableExample(null)
+                  setTableSlices([])
+                  setActiveSlices(new Set())
+                  setSliceMetricsOverTime([])
+                  setSelectedSlicesForPlot(new Set())
+                  setWandbRuns([])  // Clear runs since they may have cached slice scores
+                  setSelectedRun(null)  // Clear selected run
+                  
+                  // Update dashboard selection
+                  setSelectedDashboard(newDashboard)
+                  
+                  // Fetch fresh runs with new dashboard filters
+                  if (newDashboard) {
+                    console.log('Fetching fresh runs for new dashboard:', newDashboard)
+                    fetchWandbRuns()
+                  }
+                }}
                 className="w-full p-2 border border-gray-300 rounded text-sm"
               >
                 <option value="">Select a dashboard</option>
@@ -804,7 +907,7 @@ function TrainingPage() {
                 )}
                 
                 {/* Slice Selection for Plots */}
-                {sliceMetricsOverTime.length > 0 && (
+                {!loadingSliceMetrics && sliceMetricsOverTime.length > 0 && (
                   <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded">
                     <div className="text-sm font-medium text-gray-700 mb-2">
                       Show slice metrics in plot:
@@ -1050,21 +1153,24 @@ function TrainingPage() {
                                 <div className="line-clamp-4">
                                   <span className="font-semibold text-blue-600">Prompt:</span>{' '}
                                   {(() => {
-                                    const text = example[selectedTable.prompt_col] || ''
+                                    const value = example[selectedTable.prompt_col]
+                                    const text = isConversation(value) ? '[Conversation]' : String(value || '')
                                     return text.length > 400 ? text.substring(0, 400) + '...' : text
                                   })()}
                                 </div>
                                 <div className="line-clamp-4">
                                   <span className="font-semibold text-green-600">Answer:</span>{' '}
                                   {(() => {
-                                    const text = example[selectedTable.answer_col] || ''
+                                    const value = example[selectedTable.answer_col]
+                                    const text = isConversation(value) ? '[Conversation]' : String(value || '')
                                     return text.length > 400 ? text.substring(0, 400) + '...' : text
                                   })()}
                                 </div>
                                 <div className="line-clamp-4">
                                   <span className="font-semibold text-purple-600">Prediction:</span>{' '}
                                   {(() => {
-                                    const text = example[selectedTable.pred_col] || ''
+                                    const value = example[selectedTable.pred_col]
+                                    const text = isConversation(value) ? '[Conversation]' : String(value || '')
                                     return text.length > 400 ? text.substring(0, 400) + '...' : text
                                   })()}
                                 </div>
@@ -1123,24 +1229,54 @@ function TrainingPage() {
                     </div>
                     <div className="flex-1 overflow-y-auto px-6 w-full">
                       <div className="space-y-6">
-                        <div className="p-4 rounded-lg bg-blue-50 border border-blue-200">
-                          <div className="font-bold text-sm text-blue-800 mb-2">Prompt</div>
-                          <div className="break-words leading-relaxed text-blue-900 prose prose-sm max-w-none">
-                            <ReactMarkdown>{selectedTableExample[selectedTable.prompt_col] || 'No prompt'}</ReactMarkdown>
-                          </div>
-                        </div>
-                        <div className="p-4 rounded-lg bg-green-50 border border-green-200">
-                          <div className="font-bold text-sm text-green-800 mb-2">Expected Answer</div>
-                          <div className="break-words leading-relaxed text-green-900 prose prose-sm max-w-none">
-                            <ReactMarkdown>{selectedTableExample[selectedTable.answer_col] || 'No answer'}</ReactMarkdown>
-                          </div>
-                        </div>
-                        <div className="p-4 rounded-lg bg-purple-50 border border-purple-200">
-                          <div className="font-bold text-sm text-purple-800 mb-2">Prediction</div>
-                          <div className="break-words leading-relaxed text-purple-900 prose prose-sm max-w-none">
-                            <ReactMarkdown>{selectedTableExample[selectedTable.pred_col] || 'No prediction'}</ReactMarkdown>
-                          </div>
-                        </div>
+                        {/* Prompt - can be either string or conversation */}
+                        {(() => {
+                          const promptValue = selectedTableExample[selectedTable.prompt_col]
+                          if (isConversation(promptValue)) {
+                            return renderConversation(promptValue, 'Prompt (Conversation)', 'bg-blue-50', 'border-blue-200', 'text-blue-800')
+                          } else {
+                            return (
+                              <div className="p-4 rounded-lg bg-blue-50 border border-blue-200">
+                                <div className="font-bold text-sm text-blue-800 mb-2">Prompt</div>
+                                <div className="break-words leading-relaxed text-blue-900 prose prose-sm max-w-none">
+                                  <ReactMarkdown>{String(promptValue || 'No prompt')}</ReactMarkdown>
+                                </div>
+                              </div>
+                            )
+                          }
+                        })()}
+                        {/* Expected Answer - can be either string or conversation */}
+                        {(() => {
+                          const answerValue = selectedTableExample[selectedTable.answer_col]
+                          if (isConversation(answerValue)) {
+                            return renderConversation(answerValue, 'Expected Answer (Conversation)', 'bg-green-50', 'border-green-200', 'text-green-800')
+                          } else {
+                            return (
+                              <div className="p-4 rounded-lg bg-green-50 border border-green-200">
+                                <div className="font-bold text-sm text-green-800 mb-2">Expected Answer</div>
+                                <div className="break-words leading-relaxed text-green-900 prose prose-sm max-w-none">
+                                  <ReactMarkdown>{String(answerValue || 'No answer')}</ReactMarkdown>
+                                </div>
+                              </div>
+                            )
+                          }
+                        })()}
+                        {/* Prediction - can be either string or conversation */}
+                        {(() => {
+                          const predValue = selectedTableExample[selectedTable.pred_col]
+                          if (isConversation(predValue)) {
+                            return renderConversation(predValue, 'Prediction (Conversation)', 'bg-purple-50', 'border-purple-200', 'text-purple-800')
+                          } else {
+                            return (
+                              <div className="p-4 rounded-lg bg-purple-50 border border-purple-200">
+                                <div className="font-bold text-sm text-purple-800 mb-2">Prediction</div>
+                                <div className="break-words leading-relaxed text-purple-900 prose prose-sm max-w-none">
+                                  <ReactMarkdown>{String(predValue || 'No prediction')}</ReactMarkdown>
+                                </div>
+                              </div>
+                            )
+                          }
+                        })()}
                         <div className="p-4 rounded-lg bg-gray-50 border border-gray-200">
                           <div className="font-bold text-sm text-gray-800 mb-2">Score</div>
                           <div>
@@ -1208,8 +1344,50 @@ function TrainingPage() {
                             {Object.entries(selectedTableExample).map(([key, value]) => (
                               <div key={key} className="border-b border-slate-200 pb-2 last:border-b-0 last:pb-0">
                                 <div className="font-medium text-xs text-slate-700 mb-1">{key}</div>
-                                <div className="text-xs text-slate-900 break-all">
-                                  {typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
+                                <div className="text-xs text-slate-900">
+                                  {isConversation(value) ? (
+                                    <div className="space-y-2">
+                                      {value.map((message, index) => {
+                                        if (!message || typeof message !== 'object') {
+                                          console.warn('Invalid message in Full Row Data conversation:', message)
+                                          return null
+                                        }
+                                        return (
+                                          <div key={index} className={`p-2 rounded border ${
+                                            message.role === 'user' 
+                                              ? 'bg-blue-50 border-blue-200' 
+                                              : message.role === 'system'
+                                                ? 'bg-yellow-50 border-yellow-200'
+                                                : 'bg-green-50 border-green-200'
+                                          }`}>
+                                            <div className={`font-semibold text-xs ${
+                                              message.role === 'user' ? 'text-blue-800' : message.role === 'system' ? 'text-yellow-800' : 'text-green-800'
+                                            }`}>
+                                              {String(message.role || 'unknown')}
+                                            </div>
+                                            <div className="mt-1 text-xs break-all">
+                                              {String(message.content || '')}
+                                            </div>
+                                          </div>
+                                        )
+                                      }).filter(Boolean)}
+                                    </div>
+                                  ) : (
+                                    <div className="break-all">
+                                      {(() => {
+                                        try {
+                                          if (typeof value === 'object' && value !== null) {
+                                            return JSON.stringify(value, null, 2)
+                                          } else {
+                                            return String(value || '')
+                                          }
+                                        } catch (error) {
+                                          console.warn('Error rendering value:', key, value, error)
+                                          return `[Error rendering ${typeof value}]`
+                                        }
+                                      })()}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             ))}

@@ -15,7 +15,7 @@ from transformers import PreTrainedTokenizerFast
 from pydrantic import ObjectConfig, BaseConfig
 import numpy as np
 
-from cartridges.structs import Conversation, read_conversations
+from cartridges.structs import Conversation, MessageDict, read_conversations
 from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE, MODELS_WITH_THINKING
 from cartridges.utils import get_logger
 from cartridges.utils.hf import read_conversations_from_hf
@@ -533,6 +533,18 @@ class GenerateEvalDatasetElement:
     # are structured as prior messages
     prompt_messages: Optional[List[Dict[str,str]]] = None
 
+
+@dataclass
+class GenerateEvalDatasetElement:
+    input_ids: torch.Tensor
+
+    # messages to be used as the prompt
+    prompt: List[MessageDict] | str
+
+    answer: Optional[str]
+    metadata: dict[str, Any]
+    convo_id: Optional[str] = None
+
 class GenerateEvalDataset(Dataset):
     class Config(ObjectConfig):
         _pass_as_config = True
@@ -554,7 +566,6 @@ class GenerateEvalDataset(Dataset):
         assert len(convo.messages) > 1, "Conversation must have at least 2 messages"
         assert convo.messages[-1].role == "assistant", "Last message must be assistant"
 
-
         kwargs = {}
         if self.tokenizer.name_or_path in MODELS_WITH_THINKING:
             kwargs["enable_thinking"] = self.config.cot
@@ -572,7 +583,10 @@ class GenerateEvalDataset(Dataset):
 
         return GenerateEvalDatasetElement(
             input_ids=input_ids,    
-            prompt=convo.messages[-2].content,
+            prompt=[
+                {"role": msg.role, "content": msg.content}
+                for msg in convo.messages[:-1]
+            ],
             answer=convo.messages[-1].content,
             convo_id=str(index),
             metadata={"idx": index}
@@ -581,5 +595,4 @@ class GenerateEvalDataset(Dataset):
     def __len__(self):
         return len(self.data)
 
-        
         

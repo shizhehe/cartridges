@@ -11,6 +11,8 @@ import glob
 from pathlib import Path
 import time
 from typing import List, Dict, Any, Optional
+import concurrent.futures
+import asyncio
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -531,7 +533,7 @@ def get_dashboards():
             print(f"__file__ directory: {os.path.dirname(__file__)}")
             print(f"Absolute path to dashboards: {os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'dashboards'))}")
             
-            from dashboards.base import registry
+            from src.dashboards.base import registry
             print(f"Successfully imported registry, has {len(registry.dashboards)} dashboards")
         except ImportError as e:
             print(f"Failed to import base: {e}")
@@ -546,10 +548,10 @@ def get_dashboards():
                     
                     try:
                         # Import the module - this should register any dashboards it contains
-                        importlib.import_module(f"dashboards.{module_name}")
+                        importlib.import_module(f"src.dashboards.{module_name}")
                         print(f"Successfully imported {module_name}, registry now has {len(registry.dashboards)} dashboards")
                     except ImportError as e:
-                        print(f"Failed to import {module_name}: {e}")
+                        print(f"Here Failed to import {module_name}: {e}")
                         # Continue with other modules even if one fails
                         continue
                     except Exception as e:
@@ -596,7 +598,7 @@ def analyze_run_with_dashboard(request: Dict[str, Any]):
         # Import wandb and dashboard registry
         import wandb
         try:
-            from dashboards.base import registry
+            from src.dashboards.base import registry
             
             # Dynamically import all dashboard modules to ensure they're registered
             dashboards_dir = os.path.join(os.path.dirname(__file__), '..', 'dashboards')
@@ -607,13 +609,13 @@ def analyze_run_with_dashboard(request: Dict[str, Any]):
                     if filename.endswith('.py') and filename not in ['__init__.py', 'base.py']:
                         module_name = filename[:-3]  # Remove .py extension
                         try:
-                            importlib.import_module(module_name)
+                            importlib.import_module(f"src.dashboards.{module_name}")
                         except Exception:
                             # Ignore import errors for individual modules
                             pass
         except ImportError as e:
-            print(f"Failed to import dashboard registry: {str(e)}") 
-            return {'error': f'Failed to import dashboard registry: {str(e)}'}
+            print(f"Failed to import dashboard registry in analyze: {str(e)}") 
+            return {'error': f'Failed to import dashboard registry in analyze: {str(e)}'}
         
         # Get the dashboard
         if dashboard_name not in registry.dashboards:
@@ -702,7 +704,7 @@ def get_table_data(request: Dict[str, Any]):
         run = api.run(f"{entity}/{project}/{run_id}")
         
         # Create a TableSpec and materialize it
-        from dashboards.base import TableSpec
+        from src.dashboards.base import TableSpec
         table_spec = TableSpec(
             run=run,
             path=table_path,
@@ -715,8 +717,29 @@ def get_table_data(request: Dict[str, Any]):
         # Handle NaN values that can't be JSON serialized
         df = df.fillna('')  # Replace NaN with empty strings
         
+        # Convert to records and handle conversation data
+        records = df.to_dict('records')
+        
+        # Process each record to handle conversation data
+        import json
+        for record in records:
+            for key, value in record.items():
+                # Check if value is a string that might be JSON representing a conversation
+                if isinstance(value, str) and value.strip():
+                    try:
+                        # Try to parse as JSON
+                        if value.startswith('[') or value.startswith('{'):
+                            parsed = json.loads(value)
+                            if isinstance(parsed, list) and len(parsed) > 0:
+                                # Check if it looks like a conversation (list of dicts with role/content)
+                                if all(isinstance(item, dict) and 'role' in item and 'content' in item for item in parsed):
+                                    record[key] = parsed  # Replace string with parsed conversation
+                    except json.JSONDecodeError:
+                        # If parsing fails, keep the original string
+                        pass
+        
         return {
-            'data': df.to_dict('records'),
+            'data': records,
             'step': table_step,
             'path': table_path
         }
@@ -742,7 +765,7 @@ def get_plot_data(request: Dict[str, Any]):
         # Import wandb and dashboard registry
         import wandb
         try:
-            from dashboards.base import registry
+            from src.dashboards.base import registry
             
             # Dynamically import all dashboard modules to ensure they're registered
             dashboards_dir = os.path.join(os.path.dirname(__file__), 'dashboards')
@@ -753,13 +776,13 @@ def get_plot_data(request: Dict[str, Any]):
                     if filename.endswith('.py') and filename not in ['__init__.py', 'base.py']:
                         module_name = filename[:-3]  # Remove .py extension
                         try:
-                            importlib.import_module(f"dashboards.{module_name}")
+                            importlib.import_module(f"src.dashboards.{module_name}")
                         except Exception:
                             # Ignore import errors for individual modules
                             pass
         except ImportError as e:
-            print(f"Failed to import dashboard registry: {str(e)}") 
-            return {'error': f'Failed to import dashboard registry: {str(e)}'}
+            print(f"Failed to import dashboard registry in plots: {str(e)}") 
+            return {'error': f'Failed to import dashboard registry in plots: {str(e)}'}
         
         # Get the dashboard
         if dashboard_name not in registry.dashboards:
@@ -935,7 +958,7 @@ def get_table_slices(request: Dict[str, Any]):
         # Import wandb and dashboard registry
         import wandb
         try:
-            from dashboards.base import registry
+            from src.dashboards.base import registry
             
             # Dynamically import all dashboard modules to ensure they're registered
             dashboards_dir = os.path.join(os.path.dirname(__file__), 'dashboards')
@@ -946,13 +969,13 @@ def get_table_slices(request: Dict[str, Any]):
                     if filename.endswith('.py') and filename not in ['__init__.py', 'base.py']:
                         module_name = filename[:-3]  # Remove .py extension
                         try:
-                            importlib.import_module(f"dashboards.{module_name}")
+                            importlib.import_module(f"src.dashboards.{module_name}")
                         except Exception:
                             # Ignore import errors for individual modules
                             pass
         except ImportError as e:
-            print(f"Failed to import dashboard registry: {str(e)}")
-            return {'error': f'Failed to import dashboard registry: {str(e)}'}
+            print(f"Failed to import dashboard registry in slices: {str(e)}")
+            return {'error': f'Failed to import dashboard registry in slices: {str(e)}'}
         
         # Get the dashboard
         if dashboard_name not in registry.dashboards:
@@ -970,7 +993,7 @@ def get_table_slices(request: Dict[str, Any]):
         run = api.run(f"{entity}/{project}/{run_id}")
         
         # Create a TableSpec and materialize the data
-        from dashboards.base import TableSpec
+        from src.dashboards.base import TableSpec
         table_spec = TableSpec(
             run=run,
             path=table_path,
@@ -1013,6 +1036,56 @@ def get_table_slices(request: Dict[str, Any]):
         print(f"Error in get_table_slices: {str(e)}")
         return {'error': str(e)}
 
+def process_table_spec_for_slice_metrics(table_spec, dashboard):
+    """Process a single table spec to compute slice metrics."""
+    try:
+        print(f"Computing slice metrics for step {table_spec.step}")
+        
+        # Materialize the table data
+        df = table_spec.materialize()
+        
+        # Get slices from the dashboard
+        slices = dashboard.slices(df)
+        
+        # Store metrics for each slice at this step
+        step_metrics = {'step': table_spec.step}
+        slice_data = {}
+        
+        for slice_obj in slices:
+            slice_name = slice_obj.name
+            
+            # Convert metrics to JSON-serializable format
+            serialized_metrics = {}
+            for key, value in slice_obj.metrics.items():
+                if pd.isna(value):
+                    serialized_metrics[key] = None
+                else:
+                    serialized_metrics[key] = float(value) if isinstance(value, (int, float)) else value
+            
+            # Store slice data for this step
+            slice_data[slice_name] = {
+                'step': table_spec.step,
+                **serialized_metrics
+            }
+            
+            # Also add to step metrics for easier access
+            step_metrics[slice_name] = serialized_metrics
+        
+        return {
+            'step_metrics': step_metrics,
+            'slice_data': slice_data,
+            'success': True
+        }
+                
+    except Exception as e:
+        print(f"Error computing slice metrics for step {table_spec.step}: {e}")
+        return {
+            'step_metrics': None,
+            'slice_data': None,
+            'success': False,
+            'error': str(e)
+        }
+
 @app.post("/api/dashboard/slice-metrics")
 def get_slice_metrics_over_time(request: Dict[str, Any]):
     """Compute slice metrics across all table steps for a run and dashboard."""
@@ -1030,7 +1103,7 @@ def get_slice_metrics_over_time(request: Dict[str, Any]):
         # Import wandb and dashboard registry
         import wandb
         try:
-            from dashboards.base import registry
+            from src.dashboards.base import registry
             
             # Dynamically import all dashboard modules to ensure they're registered
             dashboards_dir = os.path.join(os.path.dirname(__file__), 'dashboards')
@@ -1041,13 +1114,13 @@ def get_slice_metrics_over_time(request: Dict[str, Any]):
                     if filename.endswith('.py') and filename not in ['__init__.py', 'base.py']:
                         module_name = filename[:-3]  # Remove .py extension
                         try:
-                            importlib.import_module(f"dashboards.{module_name}")
+                            importlib.import_module(f"src.dashboards.{module_name}")
                         except Exception:
                             # Ignore import errors for individual modules
                             pass
         except ImportError as e:
-            print(f"Failed to import dashboard registry: {str(e)}")
-            return {'error': f'Failed to import dashboard registry: {str(e)}'}
+            print(f"Failed to import dashboard registry in slice-metrics: {str(e)}")
+            return {'error': f'Failed to import dashboard registry in slice-metrics: {str(e)}'}
         
         # Get the dashboard
         if dashboard_name not in registry.dashboards:
@@ -1068,56 +1141,59 @@ def get_slice_metrics_over_time(request: Dict[str, Any]):
         table_specs = dashboard.tables(run)
         print(f"Found {len(table_specs)} table specs for slice metrics computation")
         
-        # Compute slice metrics for each table step
+        # Compute slice metrics for each table step in parallel
         slice_metrics_over_time = {}
         step_data = []
         
-        for table_spec in table_specs:
-            try:
-                print(f"Computing slice metrics for step {table_spec.step}")
-                
-                # Materialize the table data
-                df = table_spec.materialize()
-                
-                # Get slices from the dashboard
-                slices = dashboard.slices(df)
-                
-                # Store metrics for each slice at this step
-                step_metrics = {'step': table_spec.step}
-                
-                for slice_obj in slices:
-                    slice_name = slice_obj.name
+        print(f"Starting parallel computation for {len(table_specs)} table specs")
+        
+        # Use ThreadPoolExecutor for parallel processing
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            # Submit all tasks
+            future_to_spec = {
+                executor.submit(process_table_spec_for_slice_metrics, table_spec, dashboard): table_spec 
+                for table_spec in table_specs
+            }
+            
+            # Process completed tasks as they finish
+            for future in concurrent.futures.as_completed(future_to_spec):
+                table_spec = future_to_spec[future]
+                try:
+                    result = future.result()
                     
-                    # Initialize slice tracking if not exists
-                    if slice_name not in slice_metrics_over_time:
-                        slice_metrics_over_time[slice_name] = {
-                            'name': slice_name,
-                            'data': []
-                        }
-                    
-                    # Convert metrics to JSON-serializable format
-                    serialized_metrics = {}
-                    for key, value in slice_obj.metrics.items():
-                        if pd.isna(value):
-                            serialized_metrics[key] = None
-                        else:
-                            serialized_metrics[key] = float(value) if isinstance(value, (int, float)) else value
-                    
-                    # Add step and metrics to slice data
-                    step_data_point = {
-                        'step': table_spec.step,
-                        **serialized_metrics
-                    }
-                    slice_metrics_over_time[slice_name]['data'].append(step_data_point)
-                    
-                    # Also add to step metrics for easier access
-                    step_metrics[slice_name] = serialized_metrics
-                
-                step_data.append(step_metrics)
-                
-            except Exception as e:
-                print(f"Error computing slice metrics for step {table_spec.step}: {e}")
-                continue
+                    if result['success']:
+                        step_metrics = result['step_metrics']
+                        slice_data = result['slice_data']
+                        
+                        # Add to step_data
+                        step_data.append(step_metrics)
+                        
+                        # Process slice data
+                        for slice_name, step_data_point in slice_data.items():
+                            # Initialize slice tracking if not exists
+                            if slice_name not in slice_metrics_over_time:
+                                slice_metrics_over_time[slice_name] = {
+                                    'name': slice_name,
+                                    'data': []
+                                }
+                            
+                            # Add step data to slice
+                            slice_metrics_over_time[slice_name]['data'].append(step_data_point)
+                    else:
+                        print(f"Failed to process step {table_spec.step}: {result.get('error', 'Unknown error')}")
+                        
+                except Exception as e:
+                    print(f"Error processing result for step {table_spec.step}: {e}")
+                    continue
+        
+        # Sort step_data by step number to maintain order
+        step_data.sort(key=lambda x: x['step'])
+        
+        # Sort slice data by step for each slice
+        for slice_name in slice_metrics_over_time:
+            slice_metrics_over_time[slice_name]['data'].sort(key=lambda x: x['step'])
+        
+        print(f"Completed parallel computation for all table specs")
         
         # Convert to list format
         slice_metrics_list = list(slice_metrics_over_time.values())
