@@ -182,7 +182,7 @@ def make_code_hop(
     os.makedirs(repo_dir, exist_ok=True)
     for file in files:
         with open(os.path.join(repo_dir, f"{file.name}.py"), "w") as f:
-            f.write(serialize_file(file))
+            f.write(file.serialize())
     dataset_path = os.path.join(config.run_dir, f"dataset-{config_hash}.pkl")
     pickle.dump(code_hop, open(dataset_path, "wb"))
     print(f"CodeHop dataset generated successfully!")
@@ -190,37 +190,6 @@ def make_code_hop(
     print(f"Dataset pickle saved to: {dataset_path}")
     print(f"Generated {len(files)} files with {sum(len(file.methods) for file in files)} total methods")
     return code_hop
-
-def serialize_output(output: MethodCall | LiteralStr) -> str:
-    return (
-        f'"{output.content}"'
-        if isinstance(output, LiteralStr)
-        else (
-            f"{output.file}.{output.method}(\"{output.arg}\")"
-            if output.file is not None
-            else f"{output.method}(\"{output.arg}\")"
-        )
-    )
-
-def serialize_method(method: Method):
-    out = f"def {method.name}(x):\n"
-    for input_str, return_val in method.mapping.items():
-        out += f"    if x == \"{input_str}\":\n"
-        out += f"        return {serialize_output(return_val)}\n"
-    out += f"    raise ValueError(f\"Unexpected input: {{x}}\")\n"
-    return out + "\n"
-
-def serialize_file(file: CodeHopFile):
-    imports = file.imports
-
-    method_strings = []
-    for method in file.methods:
-        method_strings.append(serialize_method(method))
-
-    imports = "\n".join([f'import {mod}' for mod in imports])
-    methods = "\n\n".join(method_strings)
-
-    return f"{imports}\n\n{methods}"
 
 
 if __name__ == "__main__":

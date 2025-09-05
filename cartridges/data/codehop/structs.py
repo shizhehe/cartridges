@@ -10,6 +10,12 @@ class MethodCall:
 
     def __eq__(self, other):
         return isinstance(other, MethodCall) and self.file == other.file and self.method == other.method
+    
+    def serialize(self):
+        if self.file is not None:
+            return f"{self.file}.{self.method}(\"{self.arg}\")"    
+        else: 
+            return f"{self.method}(\"{self.arg}\")"
 
 
 @dataclass
@@ -18,6 +24,9 @@ class LiteralStr:
 
     def __eq__(self, other):
         return isinstance(other, LiteralStr) and self.content == other.content
+    
+    def serialize(self):
+        return f'"{self.content}"'
 
 
 @dataclass
@@ -55,6 +64,15 @@ class Method:
             return return_val.content, 1
         else:
             raise ValueError(f"Invalid type for return value: {type(return_val)}")
+        
+    def serialize(self):
+        out = f"def {self.name}(x):\n"
+        for input_str, return_val in self.mapping.items():
+            out += f"    if x == \"{input_str}\":\n"
+            out += f"        return {return_val.serialize()}\n"
+        out += f"    raise ValueError(f\"Unexpected input: {{x}}\")\n"
+        return out + "\n"
+
 
 
 @dataclass
@@ -63,6 +81,20 @@ class CodeHopFile:
     methods: list[Method]
     imports: list[str]
     level: int
+
+
+    def serialize(self):
+        imports = self.imports
+
+        method_strings = []
+        for method in self.methods:
+            method_strings.append(method.serialize())
+
+        imports = "\n".join([f'import {mod}' for mod in imports])
+        methods = "\n\n".join(method_strings)
+
+        return f"{imports}\n\n{methods}"
+
 
 
 @dataclass

@@ -54,7 +54,8 @@ REPOS = {
             },
             "llama": {
                 1: KVFromText.Config(max_tokens=NUM_TOKENS),
-                2: KVFromPretrained.Config(wandb_run_id="hazy-research/cartridges/1mreremx"),
+                # 2: KVFromPretrained.Config(wandb_run_id="hazy-research/cartridges/1mreremx"),
+                2: KVFromPretrained.Config(wandb_run_id="hazy-research/cartridges/u3ybattg"),
             },
         }
     }
@@ -96,21 +97,34 @@ config = TrainConfig(
     save_every_n_steps=512,
     generate_eval_every_n_steps=16,
     generate_evals=[
-        GenerationEvalConfig(
-            dataset=CodeHopGenerateDataset.Config(make_run_dir=str(dataset_dir)),
-            name_for_wandb=f"codehop",
-            generate_max_new_tokens=64,
-            batch_size=32,
-            temperature=0.0,
-        ), 
+        # GenerationEvalConfig(
+        #     dataset=CodeHopGenerateDataset.Config(make_run_dir=str(dataset_dir)),
+        #     name_for_wandb=f"codehop",
+        #     generate_max_new_tokens=64,
+        #     batch_size=32,
+        #     temperature=0.0,
+        # ), 
+        # GenerationEvalConfig(
+        #     dataset=CodeHopGenerateDataset.Config(
+        #         make_run_dir=str(dataset_dir), 
+        #         enhancing_dir=str(ENHANCING_DATASET_DIR),
+        #         enhancing_system_prompt_template=SYSTEM_PROMPT_TEMPLATE,
+        #     ),
+        #     name_for_wandb=f"codehop_w_ctx",
+        #     generate_max_new_tokens=64,
+        #     batch_size=16,
+        #     temperature=0.0,
+        # ),
         GenerationEvalConfig(
             dataset=CodeHopGenerateDataset.Config(
                 make_run_dir=str(dataset_dir), 
-                enhancing_dir=str(ENHANCING_DATASET_DIR),
+                enhance_with_target_file=True,
                 enhancing_system_prompt_template=SYSTEM_PROMPT_TEMPLATE,
+                thinking=True,
+                levels=[2],
             ),
-            name_for_wandb=f"codehop_w_ctx",
-            generate_max_new_tokens=64,
+            name_for_wandb=f"codehop_w_target_level2",
+            generate_max_new_tokens=1024,
             batch_size=16,
             temperature=0.0,
         )

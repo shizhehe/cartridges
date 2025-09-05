@@ -8,7 +8,7 @@ from typing import Dict, Optional, Tuple
 
 from transformers import PreTrainedTokenizerFast
 
-from cartridges.data.codehop.structs import LiteralStr
+from cartridges.data.codehop.structs import LiteralStr, CodeHop
 from cartridges.datasets import GenerateEvalDataset, GenerateEvalDatasetElement
 from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE
 from cartridges.data.resources import load_directory_files
@@ -19,10 +19,11 @@ class CodeHopGenerateDataset(GenerateEvalDataset):
         _pass_as_config = True
         make_run_dir: str
         thinking: bool = False
+        levels: list[int] | None = None
 
         enhancing_dir: str | None = None
+        enhance_with_target_file: bool = False
         enhancing_system_prompt_template: str | None = None
-
 
 
     def __init__(
@@ -31,6 +32,9 @@ class CodeHopGenerateDataset(GenerateEvalDataset):
         tokenizer: PreTrainedTokenizerFast,
         seed: int
     ):
+        if (config.enhancing_dir is not None and config.enhance_with_target_file):
+            raise ValueError("Can enhance with file or enhancing dir, but not both.")
+        
         self.config = config
         self.tokenizer = tokenizer
 
@@ -46,14 +50,17 @@ class CodeHopGenerateDataset(GenerateEvalDataset):
             raise FileNotFoundError(f"Dataset pickle file not found at {dataset_path}")
         
         with open(dataset_path, "rb") as f:
-            code_hop = pickle.load(f)
-        
+            code_hop: CodeHop = pickle.load(f)
+        self.code_hop: CodeHop = code_hop
         files = code_hop.files
 
         questions = []
         for file in files:
+            if self.config.levels is not None and file.level not in self.config.levels:
+                continue
             for method in file.methods:
                 for vocab_word in code_hop.vocab:
+                    thinking_prompt = "" if not self.config.thinking else "<think> {{Your chain of thought/scratchpad here}} </think> "
                     # question = dedent(f"""\
                     #     Please tell me the string output of running the following python code.
                     #     Respond with just a literal string in quotes.
@@ -73,7 +80,7 @@ class CodeHopGenerateDataset(GenerateEvalDataset):
                         ```
 
                         Respond with the following format: 
-                        `The output of {file.name}.{method.name}("{vocab_word}") will be \"{{your answer}}\"."""
+                        `{thinking_prompt} The output of {file.name}.{method.name}("{vocab_word}") will be \"{{your answer}}\"."""
                     )
             
                     answer, depth = method.call_with_depth(vocab_word)
@@ -86,11 +93,11 @@ class CodeHopGenerateDataset(GenerateEvalDataset):
                         "call_chain_depth": depth,
                         "file_level": file.level,
                     }
-                    questions.append((question, answer, meta))
+                    questions.append((question, answer, meta, file))
         self.questions = questions
 
 
-        
+        self.is_enhancing = self.config.enhance_with_target_file or self.config.enhancing_dir is not None
         if self.config.enhancing_dir is not None:
             assert self.config.enhancing_system_prompt_template is not None
             self.enhancing_files = asyncio.run(load_directory_files(
@@ -109,11 +116,14 @@ class CodeHopGenerateDataset(GenerateEvalDataset):
     def __getitem__(
         self, index: int
     ) -> GenerateEvalDatasetElement:
-        question, answer, meta = self.questions[index]
+        question, answer, meta, file = self.questions[index]
         convo = [] 
 
-        if self.enhancing_files is not None:
-            filename, file_content = random.choice(list(self.enhancing_files.items()))
+        if self.is_enhancing:
+            if self.enhancing_files is not None:
+                filename, file_content = random.choice(list(self.enhancing_files.items()))
+            else:
+                filename, file_content = file.name, file.serialize()
             enhancing_context = _file_with_header(filename, file_content)
             convo.append({
                 "role": "system",
