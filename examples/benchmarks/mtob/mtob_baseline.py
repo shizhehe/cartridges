@@ -5,7 +5,7 @@ import pydrantic
 from cartridges.clients.tokasaurus import TokasaurusClient
 from cartridges.data.mtob.evals import MTOBKalamangToEnglishGenerateDataset
 from cartridges.data.mtob.resources import MTOBResource
-from cartridges.evaluate import ICLBaseline, EvaluateConfig
+from cartridges.evaluate import ICLBaseline, GenerationEvalRunConfig
 from cartridges.evaluate import GenerationEvalConfig
 
 from cartridges.utils.wandb import WandBConfig
@@ -22,7 +22,7 @@ SYSTEM_PROMPT_TEMPLATE = f"""Please reference the material below to help the use
 
 
 configs = [
-    EvaluateConfig(
+    GenerationEvalRunConfig(
         name=f"mtob_baseline",
         generator=ICLBaseline.Config(
             client=client,

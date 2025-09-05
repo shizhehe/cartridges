@@ -6,7 +6,7 @@ import pydrantic
 from pydrantic.variables import FormatStringVariable
 
 from cartridges.data.ruler.evals import NIAHGenerateDataset
-from cartridges.initialization import KVFromRandomText
+from cartridges.initialization import KVFromText
 from cartridges.models.llama.modeling_llama import FlexLlamaForCausalLM
 from cartridges.train import GenerationEvalConfig, TrainConfig
 from cartridges.models.config import HFModelConfig
@@ -36,7 +36,7 @@ NIAH_PATH = "/home/sabri/code/cartridges/cartridges/data/ruler/_data/qwen3_4b-l1
 
 config = TrainConfig(
     model=model,
-    kv_cache_initializer=KVFromRandomText.Config(max_tokens=NUM_TOKENS),
+    kv_cache_initializer=KVFromText.Config(max_tokens=NUM_TOKENS),
     
     lr=2e-2,
     epochs=2,

@@ -430,8 +430,8 @@ class FlexLlamaModel(FlexLlamaPreTrainedModel):
         
         inputs_embeds = self.embed_tokens(input_ids)
 
-        if use_cache and past_key_values is None:
-            past_key_values = DynamicCache()
+        # if use_cache and past_key_values is None:
+        #     past_key_values = DynamicCache()
 
         cache_len = past_key_values.num_tokens() if past_key_values is not None else 0
         cartridge_len = past_key_values.num_cartridge_tokens() if past_key_values is not None else 0

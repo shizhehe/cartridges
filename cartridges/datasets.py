@@ -164,14 +164,17 @@ def qwen_messages_to_element(
         message_start_tokens={
             "user": [151644, 872,198],
             "assistant": [151644, 77091,198],
+            "system": [151644, 8948, 198],
         },
         message_end_tokens={
             "user": [151645],
             "assistant": [151645],
+            "system": [151645],
         },
         message_extra_end_tokens={
             "user": [198],
             "assistant": [198],
+            "system": [198],
         },
     )
 
@@ -190,44 +193,22 @@ def llama3_messages_to_element(
             "user": [128006, 882, 128007, 271],
             # "<|start_header_id|>", "assistant", "<|end_header_id|>", "\n\n"
             "assistant": [128006, 78191, 128007, 271],
+            # "<|start_header_id|>", "system", "<|end_header_id|>", "\n\n"
+            "system": [128006, 9125, 128007, 271],
         },
         message_end_tokens={
             # "<|eot_id|>"
             "user": [128009],
             "assistant": [128009],
+            "system": [128009],
         },
         message_extra_end_tokens={
             "user": [],
             "assistant": [],
+            "system": [],
         },
     )
 
-def llama2_messages_to_element(
-    messages: List[Conversation.Message],
-    retokenize: bool = False,
-    tokenizer: PreTrainedTokenizerFast | None = None,
-) -> DatasetElement:
-    fn = _base_convert_messages_to_element_retokenize if retokenize else _base_convert_messages_to_element
-
-    return fn(
-        messages,
-        tokenizer=tokenizer,
-        message_start_tokens={
-            # "<|start_header_id|>", "user", "<|end_header_id|>", "\n\n"
-            "user": [128006, 882, 128007, 271],
-            # "<|start_header_id|>", "assistant", "<|end_header_id|>", "\n\n"
-            "assistant": [128006, 78191, 128007, 271],
-        },
-        message_end_tokens={
-            # "<|eot_id|>"
-            "user": [128009],
-            "assistant": [128009],
-        },
-        message_extra_end_tokens={
-            "user": [],
-            "assistant": [],
-        },
-    )
 
 MODEL_TO_MESSAGE_CONVERTER = {
     "Qwen/Qwen3-0.6b": qwen_messages_to_element,
@@ -239,7 +220,6 @@ MODEL_TO_MESSAGE_CONVERTER = {
     "meta-llama/Llama-3.1-8B-Instruct": llama3_messages_to_element,
     "meta-llama/Llama-3.2-3B-Instruct": llama3_messages_to_element,
     "meta-llama/Llama-3.2-1B-Instruct": llama3_messages_to_element,
-    "meta-llama/Llama-2-7b-chat-hf": llama2_messages_to_element,
 }
 MODEL_TO_MESSAGE_CONVERTER = {k.lower(): v for k, v in MODEL_TO_MESSAGE_CONVERTER.items()}
 
@@ -502,6 +482,9 @@ class LossEvalDataset(TrainDataset):
         packing_mode: Literal["truncate", "pad"]="pad"
         packed_seq_length: int = 2048
 
+        system_prompt: str | None = None
+        
+
         user_prompt_prefix: list[str] | None = None
 
 
@@ -511,8 +494,16 @@ class LossEvalDataset(TrainDataset):
 
         elements = []
         for row in data:
+            if self.config.system_prompt is not None:
+                messages = [
+                    Conversation.Message(role="system", content=self.config.system_prompt, token_ids=None),
+                    *row.messages,
+                ]
+            else:
+                messages = row.messages
+
             elements.append(MODEL_TO_MESSAGE_CONVERTER[self.tokenizer.name_or_path.lower()](
-                row.messages,
+                messages,
                 retokenize=self.config.targets == "tokens",
                 tokenizer=self.tokenizer,
             ))

@@ -6,7 +6,7 @@ import pydrantic
 from cartridges.clients.tokasaurus import TokasaurusClient
 from cartridges.data.ruler.evals import NIAHGenerateDataset
 from cartridges.data.ruler.resources import NIAHResource
-from cartridges.evaluate import ICLBaseline, EvaluateConfig
+from cartridges.evaluate import ICLBaseline, GenerationEvalRunConfig
 from cartridges.evaluate import GenerationEvalConfig
 
 from cartridges.utils.wandb import WandBConfig
@@ -40,7 +40,7 @@ NUM_KEYS_TO_PATH = {
 NIAH_PATH = NUM_KEYS_TO_PATH[NUM_KEYS]
 
 configs = [
-    EvaluateConfig(
+    GenerationEvalRunConfig(
         name=f"{file_name}_{num_keys_str}",
         generator=ICLBaseline.Config(
             client=client,
