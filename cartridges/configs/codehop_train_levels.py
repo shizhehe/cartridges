@@ -26,14 +26,14 @@ REPOS = {
     "244c02": {
         "dataset_dir": "/data/sabri/cartridges/2025-08-26-16-23-39-make_codehop/codehop-nf16-nm1-dc3-v5-fn36-0/repo-244c02",
         "datasources": {
-            "qwen": {
+            "qwen-4b": {
                 1: [
                     # DataSource(path="codehop_synthesize_repo-244c02_level1_n65536:v0", type="wandb"),
                     # DataSource(path="codehop_synthesize_qwen_repo-244c02_level1_n1024:v0", type="wandb"),
                     DataSource(path="codehop_synthesize_qwen_repo-244c02_level1_n65768:v1", type="wandb"),
                 ]
             },
-            "llama": {
+            "llama-3b": {
                 1: [
                     # DataSource(path="codehop_synthesize_llama_repo-244c02_level1_n65768:v4", type="wandb"),
                     
@@ -46,16 +46,31 @@ REPOS = {
                 2: [
                     DataSource(path="codehop_synthesize_llama_repo-244c02_level2_n65768:v1", type="wandb"),
                 ]
+            },
+            "qwen-8b": {
+                1: [
+                    DataSource(path="codehop_synthesize_qwen-8b_repo-244c02_level1_n65768_e0.5:v0", type="wandb"),
+                ], 
+                2: [
+                    # TODO delete this !!!
+                    DataSource(path="codehop_synthesize_qwen-8b_repo-244c02_level1_n65768_e0.5:v0", type="wandb"),
+
+                ]
             }
         },
         "initializer": {
-            "qwen": {
+            "qwen-4b": {
                 1: KVFromText.Config(max_tokens=NUM_TOKENS),
             },
-            "llama": {
+            "llama-3b": {
                 1: KVFromText.Config(max_tokens=NUM_TOKENS),
                 # 2: KVFromPretrained.Config(wandb_run_id="hazy-research/cartridges/1mreremx"),
                 2: KVFromPretrained.Config(wandb_run_id="hazy-research/cartridges/u3ybattg"),
+            },
+            "qwen-8b": {
+                1: KVFromText.Config(max_tokens=NUM_TOKENS),
+                2: KVFromText.Config(max_tokens=NUM_TOKENS),
+                # 2: KVFromPretrained.Config(wandb_run_id="hazy-research/cartridges/35d3u62c"),
             },
         }
     }
@@ -64,16 +79,21 @@ dataset_dir = Path(REPOS[REPO]["dataset_dir"]).parent
 filename = Path(__file__).stem
 
 
-if MODEL == "qwen":
+if MODEL == "qwen-4b":
 
     model=HFModelConfig(
         pretrained_model_name_or_path="Qwen/Qwen3-4b",
         model_cls=FlexQwen3ForCausalLM,
     )
-elif MODEL == "llama":
+elif MODEL == "llama-3b":
     model=HFModelConfig(
         pretrained_model_name_or_path="meta-llama/Llama-3.2-3B-Instruct",
         model_cls=FlexLlamaForCausalLM,
+    )
+elif MODEL == "qwen-8b":
+    model=HFModelConfig(
+        pretrained_model_name_or_path="Qwen/Qwen3-8B",
+        model_cls=FlexQwen3ForCausalLM,
     )
 else:
     raise ValueError(f"Invalid model: {MODEL}")

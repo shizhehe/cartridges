@@ -15,7 +15,7 @@ root = Path(__file__).parent.parent.parent
 # --- BEGIN ARGS ---
 PORT = 8080
 BRANCH = os.environ.get("BRANCH", "geoff/cartridges")
-MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen3-4b") 
+MODEL_NAME = os.environ.get("MODEL_NAME", "meta-llama/Llama-3.2-3B-Instruct") 
 DP_SIZE = int(os.environ.get("DP_SIZE", 1))
 PP_SIZE = int(os.environ.get("PP_SIZE", 1))
 MAX_TOPK_LOGPROBS = int(os.environ.get("MAX_TOPK_LOGPROBS", 20))

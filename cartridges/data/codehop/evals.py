@@ -13,6 +13,7 @@ from cartridges.datasets import GenerateEvalDataset, GenerateEvalDatasetElement
 from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE
 from cartridges.data.resources import load_directory_files
 from cartridges.data.code.resources import _file_with_header
+from cartridges.utils.thinking import MODEL_TO_THINKING_OVERRIDES
 
 class CodeHopGenerateDataset(GenerateEvalDataset):
     class Config(GenerateEvalDataset.Config):
@@ -60,7 +61,10 @@ class CodeHopGenerateDataset(GenerateEvalDataset):
                 continue
             for method in file.methods:
                 for vocab_word in code_hop.vocab:
-                    thinking_prompt = "" if not self.config.thinking else "<think> {{Your chain of thought/scratchpad here}} </think> "
+                    if self.config.thinking and self.tokenizer.name_or_path.lower() not in MODEL_TO_THINKING_OVERRIDES :
+                        thinking_prompt = "<think> {{Your chain of thought/scratchpad here}} </think>  "
+                    else:
+                        thinking_prompt = ""
                     # question = dedent(f"""\
                     #     Please tell me the string output of running the following python code.
                     #     Respond with just a literal string in quotes.
@@ -80,7 +84,7 @@ class CodeHopGenerateDataset(GenerateEvalDataset):
                         ```
 
                         Respond with the following format: 
-                        `{thinking_prompt} The output of {file.name}.{method.name}("{vocab_word}") will be \"{{your answer}}\"."""
+                        '{thinking_prompt}The output of {file.name}.{method.name}("{vocab_word}") will be \"{{your answer}}\".'"""
                     )
             
                     answer, depth = method.call_with_depth(vocab_word)
@@ -132,13 +136,17 @@ class CodeHopGenerateDataset(GenerateEvalDataset):
         
         convo.append({"role": "user", "content": question})
 
+        if self.tokenizer.name_or_path.lower() in MODEL_TO_THINKING_OVERRIDES:
+            thinking_kwargs = MODEL_TO_THINKING_OVERRIDES[self.tokenizer.name_or_path.lower()](self.config.thinking)
+        else:
+            thinking_kwargs = {}
 
         input_ids = self.tokenizer.apply_chat_template(
             convo,
             add_generation_prompt=True,
             return_tensors="pt",
             chat_template=MODEL_TO_CHAT_TEMPLATE.get(self.tokenizer.name_or_path, None),
-            enable_thinking=self.config.thinking,
+            **thinking_kwargs,
         )
         return GenerateEvalDatasetElement(
             input_ids=input_ids,

@@ -401,7 +401,7 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
                     return message["resp_obj"].token_ids
                 else:
                     return None
-            
+            breakpoint()
             examples.append(
                 Conversation(
                     messages=[

@@ -12,22 +12,31 @@ from cartridges.synthesizers.self_study import SelfStudySynthesizer
 from cartridges.utils.wandb import WandBConfig
 
 LEVEL = int(os.environ.get("LEVEL", "1"))
-MODEL = os.environ.get("MODEL", "qwen")
+MODEL = os.environ.get("MODEL", "qwen-4b")
 REPO = "repo-244c02"
-PROB_ENHANCING_CTX = 0.0
+PROB_ENHANCING_CTX = 0.5
 
 REPO_TO_DATA = {
     "repo-244c02": {
         "dataset_dir": "/data/sabri/cartridges/2025-08-26-16-23-39-make_codehop/codehop-nf16-nm1-dc3-v5-fn36-0/repo-244c02",
         "cartridges": {
-            "qwen": {
+            "qwen-4b": {
                 1: [],
             },
-            "llama": {
+            "llama-3b": {
                 1: [],
                 2: [
                     CartridgeConfig(
                         id="hazy-research/cartridges/1mreremx",
+                        source="wandb"
+                    )
+                ],
+            },
+            "qwen-8b": {
+                1: [],
+                2: [
+                    CartridgeConfig(
+                        id="hazy-research/cartridges/u3ybattg",
                         source="wandb"
                     )
                 ],
@@ -42,13 +51,19 @@ enhancing_dataset_dir = "/data/sabri/cartridges/2025-08-30-13-33-13-make_codehop
 cartridges = REPO_TO_DATA[REPO]["cartridges"][MODEL][LEVEL]
 dataset_dir = REPO_TO_DATA[REPO]["dataset_dir"]
 
-if MODEL == "qwen":
+if MODEL == "qwen-4b":
     client = TokasaurusClient.Config(
         url="https://hazyresearch--toka-qwen3-4b-1xh100-cartridges-serve.modal.run",
         model_name="Qwen/Qwen3-4b",
         cartridges=cartridges
     )
-elif MODEL == "llama":
+elif MODEL == "qwen-8b":
+    client = TokasaurusClient.Config(
+        url="https://hazyresearch--toka-qwen3-8b-1xh100-cartridges-serve.modal.run",
+        model_name="Qwen/Qwen3-8B",
+        cartridges=cartridges
+    )
+elif MODEL == "llama-3b":
     client = TokasaurusClient.Config(
         url="https://hazyresearch--toka-llama-3-2-3b-1xh100-cartridges-serve.modal.run",
         model_name="meta-llama/Llama-3.2-3B-Instruct",
