@@ -13,14 +13,15 @@ from cartridges.data.resources import TextFileResource
 from cartridges.clients.tokasaurus import TokasaurusClient
 
 client = TokasaurusClient.Config(
-    url=os.environ.get("CARTRIDGES_TOKASAURUS_QWEN3_4B_URL", "http://localhost:8000"),
+    # url=os.environ.get("CARTRIDGES_TOKASAURUS_QWEN3_4B_URL", "http://localhost:8000"),
+    url="https://hazyresearch--toka-llama-3-2-3b-1xh100-serve.modal.run",
     model_name="Qwen/Qwen3-4b",
 )
 
 config = SynthesizeConfig(
 
     synthesizer=SelfStudySynthesizer.Config(
-        client=client,
+        client=clien,
         max_rounds=1,
         prob_thinking=0.2,
         tools=[],

@@ -873,21 +873,21 @@ def get_wandb_runs(request: Dict[str, Any]):
             print(f"Applying filters: {wandb_filters}, page: {page}, per_page: {per_page}")
             
             # Get all runs to check total count
-            all_runs = api.runs(f"{entity}/{project}", filters=wandb_filters, order="-created_at")
-            total_count = len(list(all_runs))
+            # all_runs = api.runs(f"{entity}/{project}", filters=wandb_filters, order="-created_at")
+            total_count = 0 # len(list(all_runs))
             
             # Get paginated runs
             runs = api.runs(f"{entity}/{project}", per_page=per_page, filters=wandb_filters, order="-created_at")
-            
-            # Skip to the correct page
-            runs_list = list(runs)
-            start_idx = page * per_page
-            end_idx = start_idx + per_page
-            paginated_runs = runs_list[start_idx:end_idx]
+            paginated_runs = runs
+            total_count = len(runs)
+
+
             
             # Convert runs to JSON-serializable format
             runs_data = []
-            for run in paginated_runs:
+            for idx, run in zip(range(per_page * (page + 1)), paginated_runs):
+                if idx < per_page * page:
+                    continue
                 print(f"Processing run {run.id}")
                 try:
                     # Safely serialize config and summary to handle complex objects
@@ -930,7 +930,7 @@ def get_wandb_runs(request: Dict[str, Any]):
                 'total': total_count,
                 'page': page,
                 'per_page': per_page,
-                'has_more': end_idx < total_count
+                'has_more': (page + 1) * per_page < total_count
             }
             
         except Exception as e:

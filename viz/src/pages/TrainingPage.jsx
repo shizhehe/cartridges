@@ -766,13 +766,6 @@ function TrainingPage() {
           </div>
         )}
 
-        {/* Loading State */}
-        {loadingWandb && (
-          <div className="flex flex-col items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-3"></div>
-            <div className="text-sm text-gray-600">Fetching runs from W&B...</div>
-          </div>
-        )}
 
         {/* W&B Runs */}
         {(wandbRuns.length > 0 || (!loadingWandb && dashboards.length > 0)) && (
@@ -781,16 +774,21 @@ function TrainingPage() {
               <h3 className="text-sm font-medium text-gray-700">
                 Recent Runs ({wandbRuns.length}{wandbTotalCount > 0 ? ` of ${wandbTotalCount}` : ''})
               </h3>
-              <button
-                onClick={fetchWandbRuns}
-                disabled={loadingWandb}
-                className={`px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400 text-gray-700 rounded transition-colors ${
-                  loadingWandb ? 'animate-spin' : ''
-                }`}
-                title="Refresh runs"
-              >
-                ↻
-              </button>
+              <div className="flex items-center gap-2">
+                {loadingWandb && (
+                  <div className="text-xs text-gray-500">Loading...</div>
+                )}
+                <button
+                  onClick={() => fetchWandbRuns()}
+                  disabled={loadingWandb}
+                  className={`px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400 text-gray-700 rounded transition-colors ${
+                    loadingWandb ? 'animate-spin' : ''
+                  }`}
+                  title="Refresh runs"
+                >
+                  ↻
+                </button>
+              </div>
             </div>
             <div className="space-y-2 flex-1 overflow-y-auto px-4">
               {wandbRuns.length > 0 ? wandbRuns.map((run) => (
