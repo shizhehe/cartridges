@@ -101,10 +101,10 @@ def _base_convert_messages_to_element(
         if message.token_ids is None:
             # Some synthesizers may not return token ids for some messages, in which case
             # we actually need to do the retokenization. 
-            msg_token_ids = tokenizer.encode(message.content, add_special_tokens=False)
+            message.token_ids = tokenizer.encode(message.content, add_special_tokens=False)
         else:
-            msg_token_ids = list(message.token_ids)
-        msg_input_ids = message_start_tokens[message.role] + msg_token_ids
+            message.token_ids = list(message.token_ids)
+        msg_input_ids = message_start_tokens[message.role] + message.token_ids
 
         if message.role == "assistant":
             message = drop_thinking_fn(message)
@@ -166,8 +166,21 @@ def _qwen_drop_thinking_fn(
             if thinking_start == -1:
                 # TODO: if there is no thinking section, then presumably it was called
                 # without thinking. We should add the empty thinking section back. 
-                return message
+                token_ids = [THINKING_START_TOKEN, THINKING_END_TOKEN] + message.token_ids
 
+                # SE(09/08): do we need to 
+                top_logprobs = FlatTopLogprobs(
+                    token_idx=message.top_logprobs.token_idx + 2,
+                    token_id=message.top_logprobs.token_id,
+                    logprobs=message.top_logprobs.logprobs,
+                    shape=[message.top_logprobs.shape[0] + 2, message.top_logprobs.shape[1]],
+                )
+                return Conversation.Message(
+                    role=message.role,
+                    content=message.content,
+                    token_ids=token_ids,
+                    top_logprobs=top_logprobs,
+                )
             thinking_end = message.content.find(THINKING_END_STR, thinking_start)
             if thinking_end == -1:
                 # Note: if the thinking end is not found, then presumably the message
@@ -204,15 +217,15 @@ def _qwen_drop_thinking_fn(
                 
                 # (3.2) Second, extract the thinking section tokens 
                 mask = (token_idxs < thinking_start) | (token_idxs > thinking_end)
-                logprobs = logprobs.logprobs[mask]
-                token_id = logprobs.token_id[mask]
-                token_idx = token_idx[mask]
+                logprobs = message.top_logprobs.logprobs[mask]
+                token_id = message.top_logprobs.token_id[mask]
+                token_idx = token_idxs[mask]
                 
                 top_logprobs = FlatTopLogprobs(
                     token_idx=token_idx,
                     token_id=token_id,
                     logprobs=logprobs,
-                    shape=[thinking_length, logprobs.shape[-1]],
+                    shape=[len(token_ids), message.top_logprobs.shape[-1]],
                 )
 
         return Conversation.Message(

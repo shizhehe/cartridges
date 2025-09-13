@@ -353,10 +353,9 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
                     "raw_request": req["raw_request"]
                 }
                 metas[idx]["tool_calls"].append(tool_call_record)
-        # --- end applying tool in groups ---
 
         logger.info(f"[batch={batch_id}] Tool application took {time.time() - t0} seconds")
-        # --- end tool application ---
+        # --- end applying tool in groups ---
 
         return results
     
@@ -401,7 +400,6 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
                     return message["resp_obj"].token_ids
                 else:
                     return None
-            breakpoint()
             examples.append(
                 Conversation(
                     messages=[

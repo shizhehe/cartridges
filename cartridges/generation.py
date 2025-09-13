@@ -39,7 +39,6 @@ def flex_generate(
     
     This implementation relies on the PackedCache above.
     """
-    print(tokenizer.decode(input_ids))
             
     device = input_ids.device
     model.eval()

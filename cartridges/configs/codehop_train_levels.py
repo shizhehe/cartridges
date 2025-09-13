@@ -49,12 +49,12 @@ REPOS = {
             },
             "qwen-8b": {
                 1: [
-                    DataSource(path="codehop_synthesize_qwen-8b_repo-244c02_level1_n65768_e0.5:v0", type="wandb"),
+                    # DataSource(path="codehop_synthesize_qwen-8b_repo-244c02_level1_n65768_e0.5:v0", type="wandb"),
+                    DataSource(path="codehop_synthesize_qwen-8b_repo-244c02_level1_n65768_e0.5:v1", type="wandb"),
                 ], 
                 2: [
                     # TODO delete this !!!
                     DataSource(path="codehop_synthesize_qwen-8b_repo-244c02_level1_n65768_e0.5:v0", type="wandb"),
-
                 ]
             }
         },
@@ -117,37 +117,37 @@ config = TrainConfig(
     save_every_n_steps=512,
     generate_eval_every_n_steps=16,
     generate_evals=[
-        # GenerationEvalConfig(
-        #     dataset=CodeHopGenerateDataset.Config(make_run_dir=str(dataset_dir)),
-        #     name_for_wandb=f"codehop",
-        #     generate_max_new_tokens=64,
-        #     batch_size=32,
-        #     temperature=0.0,
-        # ), 
-        # GenerationEvalConfig(
-        #     dataset=CodeHopGenerateDataset.Config(
-        #         make_run_dir=str(dataset_dir), 
-        #         enhancing_dir=str(ENHANCING_DATASET_DIR),
-        #         enhancing_system_prompt_template=SYSTEM_PROMPT_TEMPLATE,
-        #     ),
-        #     name_for_wandb=f"codehop_w_ctx",
-        #     generate_max_new_tokens=64,
-        #     batch_size=16,
-        #     temperature=0.0,
-        # ),
+        GenerationEvalConfig(
+            dataset=CodeHopGenerateDataset.Config(make_run_dir=str(dataset_dir)),
+            name_for_wandb=f"codehop",
+            generate_max_new_tokens=64,
+            batch_size=32,
+            temperature=0.0,
+        ), 
         GenerationEvalConfig(
             dataset=CodeHopGenerateDataset.Config(
                 make_run_dir=str(dataset_dir), 
-                enhance_with_target_file=True,
+                enhancing_dir=str(ENHANCING_DATASET_DIR),
                 enhancing_system_prompt_template=SYSTEM_PROMPT_TEMPLATE,
-                thinking=True,
-                levels=[2],
             ),
-            name_for_wandb=f"codehop_w_target_level2",
-            generate_max_new_tokens=1024,
+            name_for_wandb=f"codehop_w_ctx",
+            generate_max_new_tokens=64,
             batch_size=16,
             temperature=0.0,
-        )
+        ),
+        # GenerationEvalConfig(
+        #     dataset=CodeHopGenerateDataset.Config(
+        #         make_run_dir=str(dataset_dir), 
+        #         enhance_with_target_file=True,
+        #         enhancing_system_prompt_template=SYSTEM_PROMPT_TEMPLATE,
+        #         thinking=True,
+        #         levels=[2],
+        #     ),
+        #     name_for_wandb=f"codehop_w_target_level2",
+        #     generate_max_new_tokens=1024,
+        #     batch_size=16,
+        #     temperature=0.0,
+        # )
     ],
     distributed_backend="gloo",
 
