@@ -20,6 +20,7 @@ dependencies = [
     "tiktoken",
     "peft",
     "evaluate",
+    "matplotlib",
     "markdown"
 ]
 
