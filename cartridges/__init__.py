@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 import os
 if os.environ.get("CARTRIDGES_DIR") is None:
     raise ValueError("CARTRIDGES_DIR is not set. Please set it to the path to the cartridges directory.")
