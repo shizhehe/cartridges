@@ -250,8 +250,13 @@ def read_conversations_from_wandb(
     # Initialize wandb API
     api = wandb.Api()
     
-    # Build full artifact path
-    full_artifact_id = f"{entity}/{project_name}/{artifact_id}"
+    # Check if artifact_id already contains entity/project (count slashes)
+    if artifact_id.count('/') >= 2:
+        # Full path already provided (entity/project/artifact)
+        full_artifact_id = artifact_id
+    else:
+        # Build full artifact path using defaults
+        full_artifact_id = f"{entity}/{project_name}/{artifact_id}"
     
     if ":" not in full_artifact_id:
         # If no version is specified, get the latest version

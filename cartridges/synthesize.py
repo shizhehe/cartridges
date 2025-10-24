@@ -81,6 +81,7 @@ class SynthesizeConfig(RunConfig):
     
     # whether to synthesize multiple batches separately (for temporal datasets)
     synthesize_batches_separately: bool = False
+    
 
     def run(self):
         assert self.name is not None
@@ -123,7 +124,9 @@ class SynthesizeConfig(RunConfig):
         logger.info(f"Final output saved to {final_output_path}")
 
         if self.upload_to_wandb:
-            artifact = wandb.Artifact(name=self.name, type="dataset")
+            # Sanitize artifact name for wandb (replace '/' with '_')
+            wandb_artifact_name = self.name.replace('/', '_')
+            artifact = wandb.Artifact(name=wandb_artifact_name, type="dataset")
             artifact.add_dir(local_path=str(output_dir.absolute()), name="dataset")
             wandb.log_artifact(artifact)
 
@@ -167,9 +170,6 @@ class SynthesizeConfig(RunConfig):
             batch_resource_config = enron_resource_config.model_copy()
             # Store the target batch ID in the config
             batch_resource_config._target_batch_id = batch_id
-            # Pass the run directory for context saving
-            batch_run_dir = Path(original_run_dir).parent / f"{Path(original_run_dir).name}_batch_{batch_id}"
-            batch_resource_config.synthesis_run_dir = str(batch_run_dir)
             
             # Create a copy of the synthesizer config
             batch_synthesizer_config = self.synthesizer.model_copy()
