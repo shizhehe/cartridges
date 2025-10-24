@@ -59,7 +59,7 @@ class EnronStreamResource(Resource):
         save_full_context: bool = True  # Save complete context across all batches
         save_batch_contexts: bool = True  # Save individual batch contexts
         context_output_dir: Optional[str] = None  # Where to save context files
-        synthesis_output_dir: Optional[str] = None  # Synthesis config output_dir
+        synthesis_run_dir: Optional[str] = None  # Synthesis run_dir (where config.yaml is saved)
         
         # New config option to enable multi-batch synthesis
         synthesize_all_batches: bool = True  # If True, creates separate datasets for each batch
@@ -148,12 +148,12 @@ class EnronStreamResource(Resource):
     
     def _save_contexts(self):
         """Save full context and individual batch contexts to JSON files."""
-        # Determine output directory
+        # Determine output directory - same as where config.yaml is saved
         if self.config.context_output_dir:
             context_dir = Path(self.config.context_output_dir)
-        elif self.config.synthesis_output_dir:
-            # Use synthesis config output_dir
-            context_dir = Path(self.config.synthesis_output_dir)
+        elif self.config.synthesis_run_dir:
+            # Use synthesis run_dir (same directory as config.yaml)
+            context_dir = Path(self.config.synthesis_run_dir)
         else:
             # Fallback to environment variable
             output_base = os.environ.get("CARTRIDGES_OUTPUT_DIR", ".")

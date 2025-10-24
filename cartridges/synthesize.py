@@ -167,6 +167,9 @@ class SynthesizeConfig(RunConfig):
             batch_resource_config = enron_resource_config.model_copy()
             # Store the target batch ID in the config
             batch_resource_config._target_batch_id = batch_id
+            # Pass the run directory for context saving
+            batch_run_dir = Path(original_run_dir).parent / f"{Path(original_run_dir).name}_batch_{batch_id}"
+            batch_resource_config.synthesis_run_dir = str(batch_run_dir)
             
             # Create a copy of the synthesizer config
             batch_synthesizer_config = self.synthesizer.model_copy()
