@@ -4,6 +4,8 @@ from transformers import PreTrainedModel
 from pydrantic import BaseConfig
 from pydantic import Field
 
+from cartridges.models.registry import MODEL_REGISTRY
+
 class ModelConfig(BaseConfig):
     checkpoint_path: Optional[str] = None
 
@@ -125,7 +127,9 @@ class HFModelConfig(ModelConfig):
     attn_implementation: Optional[Literal['einsum', 'sdpa']] = None
 
     def instantiate(self):
-        if self.model_cls is None:
+        if self.model_cls is None and self.pretrained_model_name_or_path in MODEL_REGISTRY:
+            model_cls = MODEL_REGISTRY[self.pretrained_model_name_or_path].model_cls
+        elif self.model_cls is None:
             from transformers import AutoModelForCausalLM
             model_cls = AutoModelForCausalLM
         else:

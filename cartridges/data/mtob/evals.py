@@ -8,7 +8,6 @@ from cartridges.datasets import (
     GenerateEvalDataset,
     GenerateEvalDatasetElement,
 )
-from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE, MODELS_WITH_THINKING
 from cartridges.train import GenerationEvalConfig
 import evaluate
 
@@ -64,10 +63,7 @@ class MTOBGenerateDataset(GenerateEvalDataset):
         row = self.data[index]
 
         # Select prompt based on config
-        kwargs = {}
-        if self.tokenizer.name_or_path in MODELS_WITH_THINKING:
-            kwargs["enable_thinking"] = self.config.use_cot
-
+        kwargs = self.model_helper.get_apply_chat_template_kwargs(self.config.use_cot)
         if self.config.use_cot:
             prompt_func = prompt_cot
         else:
@@ -79,7 +75,7 @@ class MTOBGenerateDataset(GenerateEvalDataset):
             [{"role": "user", "content": user_content}],
             add_generation_prompt=True,
             return_tensors="pt",
-            chat_template=MODEL_TO_CHAT_TEMPLATE.get(self.tokenizer.name_or_path, None),
+            chat_template=self.model_helper.get_chat_template(),
             **kwargs,
         )
 

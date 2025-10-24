@@ -14,11 +14,13 @@ except ImportError:
     print("googleapiclient not found, please install it with `pip install google-api-python-client`")
     raise
 
+from cartridges.utils import get_logger
 
-
+logger = get_logger(__name__)
 
 
 SCOPES = ['https://mail.google.com/']
+
 
 
 class GmailServicePool:
@@ -32,7 +34,7 @@ class GmailServicePool:
     
     def _create_service(self) -> Resource:
         """Create a single Gmail service instance."""
-        secrets_dir = os.path.join(os.environ["CODEMEM_DIR"], "secrets")
+        secrets_dir = os.path.join(os.environ["CARTRIDGES_DIR"], "secrets")
         creds = None
         token_path = os.path.join(secrets_dir, "token.pickle")
         credentials_path = os.path.join(secrets_dir, "credentials.json")
@@ -62,19 +64,19 @@ class GmailServicePool:
             if self._initialized:
                 return
             
-            print(f"🔧 Initializing Gmail service pool with {self.pool_size} connections...")
+            logger.info(f"Initializing Gmail service pool with {self.pool_size} connections")
             
             for i in range(self.pool_size):
                 try:
                     service = self._create_service()
                     self.services.put(service)
-                    print(f"  ✅ Created service {i+1}/{self.pool_size}")
+                    # print(f"  ✅ Created service {i+1}/{self.pool_size}")
                 except Exception as e:
-                    print(f"  ❌ Failed to create service {i+1}: {e}")
+                    logger.error(f"Failed to create service {i+1}: {e}")
                     # Continue with fewer services if some fail
             
             self._initialized = True
-            print(f"📧 Gmail service pool ready with {self.services.qsize()} services")
+            logger.info(f"Gmail service pool ready with {self.services.qsize()} services")
     
     def get_service(self) -> Resource:
         """Get a service from the pool (blocking)."""
@@ -117,14 +119,14 @@ def get_service_pool(pool_size: int = 5) -> GmailServicePool:
 # Then move it to cartridges/secrets/credentials.json
 
 def authenticate_gmail_api() -> Resource:
-    print("🔐 Authenticating Gmail API...")
+    logger.info("Authenticating Gmail API")
     
     # Check for CARTRIDGES_DIR environment variable
     if "CARTRIDGES_DIR" not in os.environ:
         raise ValueError("CARTRIDGES_DIR environment variable not set")
     
     secrets_dir = os.path.join(os.environ["CARTRIDGES_DIR"], "secrets")
-    print(f"📁 Looking for credentials in: {secrets_dir}")
+    logger.info(f"Looking for credentials in: {secrets_dir}")
     
     if not os.path.exists(secrets_dir):
         raise FileNotFoundError(f"Secrets directory not found: {secrets_dir}")
@@ -140,28 +142,28 @@ def authenticate_gmail_api() -> Resource:
     # the file token.pickle stores the user's access and refresh tokens, and is
     # created automatically when the authorization flow completes for the first time
     if os.path.exists(token_path):
-        print("📄 Loading existing token...")
+        logger.info("Loading existing token")
         try:
             with open(token_path, "rb") as token:
                 creds = pickle.load(token)
         except Exception as e:
-            print(f"⚠️  Failed to load token: {e}")
+            logger.warning(f"Failed to load token: {e}")
             creds = None
     
     # if there are no (valid) credentials available, let the user log in.
     if not creds or not creds.valid:
-        print("🔄 Refreshing or creating new credentials...")
+        logger.info("Refreshing or creating new credentials")
         if creds and creds.expired and creds.refresh_token:
-            print("🔄 Refreshing expired token...")
+            logger.info("Refreshing expired token")
             try:
                 creds.refresh(Request())
             except Exception as e:
-                print(f"❌ Token refresh failed: {e}")
-                print("🔄 Starting new OAuth flow...")
+                logger.error(f"Token refresh failed: {e}")
+                logger.info("Starting new OAuth flow")
                 creds = None
         
         if not creds:
-            print("🌐 Starting OAuth flow...")
+            logger.info("Starting OAuth flow")
             try:
                 flow = InstalledAppFlow.from_client_secrets_file(
                     credentials_path, 
@@ -169,25 +171,25 @@ def authenticate_gmail_api() -> Resource:
                 )
                 creds = flow.run_local_server(port=0)
             except Exception as e:
-                print(f"❌ OAuth flow failed: {e}")
+                logger.error(f"OAuth flow failed: {e}")
                 raise
         
         # save the credentials for the next run
-        print("💾 Saving credentials...")
+        logger.info("Saving credentials")
         try:
             with open(token_path, "wb") as token:
                 pickle.dump(creds, token)
         except Exception as e:
-            print(f"⚠️  Failed to save token: {e}")
+            logger.warning(f"Failed to save token: {e}")
     
-    print("✅ Gmail API authentication successful")
+    logger.info("Gmail API authentication successful")
     try:
         service = build('gmail', 'v1', credentials=creds)
         # Test the connection with a simple API call
-        print("🧪 Testing Gmail API connection...")
+        logger.info("Testing Gmail API connection")
         profile = service.users().getProfile(userId='me').execute()
-        print(f"📧 Connected to Gmail account: {profile.get('emailAddress', 'Unknown')}")
+        logger.info(f"Connected to Gmail account: {profile.get('emailAddress', 'Unknown')}")
         return service
     except Exception as e:
-        print(f"❌ Gmail API connection test failed: {e}")
+        logger.error(f"Gmail API connection test failed: {e}")
         raise

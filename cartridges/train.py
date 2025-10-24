@@ -34,7 +34,7 @@ from cartridges.datasets import (
     TrainDataset,
     DataSource,
 )
-from cartridges.models.config import ModelConfig
+from cartridges.models import MODEL_REGISTRY, ModelConfig
 from cartridges.utils import get_logger, seed_everything
 from cartridges.utils.wandb import WandBConfig, prepare_wandb
 
@@ -148,20 +148,21 @@ def train(config: TrainConfig):
     logger.info(f"Num devices: {num_devices}")
 
     logger.info(f"Train outputs will be saved to {config.run_dir}")
-    tokenizer = AutoTokenizer.from_pretrained(config.model.pretrained_model_name_or_path)    
+    model_helper = MODEL_REGISTRY.get_model_helper(config.model.pretrained_model_name_or_path)
+    tokenizer = model_helper.tokenizer
 
     t0 = time.time()
-    dataset = config.dataset.instantiate(tokenizer=tokenizer, seed=config.seed)
+    dataset = config.dataset.instantiate(model_helper=model_helper, seed=config.seed)
     logger.info(
         f"Fininshed loading training dataset from disk, took {(time.time() - t0):.3}s"
     )
 
     ppl_evals: list[tuple[LossEvalConfig, TrainDataset]] = [    
-        (ds_config, ds_config.dataset.instantiate(tokenizer=tokenizer, seed=config.seed))
+        (ds_config, ds_config.dataset.instantiate(model_helper=model_helper, seed=config.seed))
         for ds_config in config.loss_evals
     ]
     generate_evals: list[tuple[GenerationEvalConfig, GenerateEvalDataset]] = [
-        (eval_config, eval_config.dataset.instantiate(tokenizer=tokenizer, seed=config.seed))
+        (eval_config, eval_config.dataset.instantiate(model_helper=model_helper, seed=config.seed))
         for eval_config in config.generate_evals
     ]
     logger.info(
@@ -189,7 +190,7 @@ def train(config: TrainConfig):
 
         initializer = config.kv_cache_initializer.instantiate()
         cache: TrainableCache = initializer.initialize_kv_cache(
-            tokenizer=tokenizer, model=model, attn_config=attn_config,
+            tokenizer=tokenizer, model=model, attn_config=attn_config, model_helper=model_helper,
         )
         logger.info(
             f"Done loading trainable cache, time: {(time.time() - load_start_time):.2f}s"

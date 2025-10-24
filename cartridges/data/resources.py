@@ -4,12 +4,16 @@ import abc
 import asyncio
 import os
 import random
-from typing import Any, List, Optional, Literal, Callable
+import time
+from typing import Any, Dict, List, Optional, Literal, Callable
 from pydantic import BaseModel
 from pydrantic import ObjectConfig
+import aiofiles
 
 from cartridges.data.chunkers import Chunker
+from cartridges.utils import get_logger
 
+logger = get_logger(__name__)
 
 class Resource(abc.ABC):
 
@@ -31,8 +35,8 @@ class Resource(abc.ABC):
         raise NotImplementedError("This resource does not implement a string representation.")
 
 SEED_TYPES = Literal[
-    "structuring", "summarization", "aggregation", "question", "use_case", "creative", 'generic'
-]
+    "structuring", "summarization", "question", "use_case", "creative", 'generic'
+] | Callable[[Any], str]
 
 
 class TextResource(Resource):
@@ -74,52 +78,127 @@ class TextFileResource(TextResource):
         self.text = open(self.config.path).read()
         await super().setup()
 
+async def load_directory_files(path: str, included_extensions: List[str], recursive: bool=True):
+    # Get all files based on recursive setting
+    if recursive:
+        file_paths = []
+        for root, dirs, files in os.walk(path):
+            for file_name in files:
+                if any(file_name.endswith(ext) for ext in included_extensions):
+                    file_paths.append(os.path.join(root, file_name))
+    else:
+        all_files = [f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
+        file_paths = [
+            os.path.join(path, f) for f in all_files 
+            if any(f.endswith(ext) for ext in included_extensions)
+        ]
+    
+    # Load all files in parallel
+    async def load_single_file(file_path: str) -> tuple[str, str]:
+        try:
+            async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
+                content = await f.read()
+        except UnicodeDecodeError:
+            # If file can't be decoded as UTF-8, try with latin-1 or skip
+            try:
+                async with aiofiles.open(file_path, 'r', encoding='latin-1') as f:
+                    content = await f.read()
+            except Exception:
+                content = f"[Unable to read file {os.path.basename(file_path)}]"
+        
+        # Use relative path from base directory as key for consistent naming
+        rel_path = os.path.relpath(file_path, path)
+        return rel_path, content
+    
+    # Load all files concurrently
+    tasks = [load_single_file(file_path) for file_path in file_paths]
+    results = await asyncio.gather(*tasks)
+    
+    return dict(results)
+
+
 class DirectoryResource(Resource):
 
     class Config(Resource.Config):
         path: str
         included_extensions: List[str] = [".py", ".txt", ".json", ".yaml", ".yml", ".toml", ".ini", ".xml"]
+        recursive: bool = False
+        
+        chunker: Optional[Chunker.Config] = None
+        
         seed_prompts: List[SEED_TYPES]
 
     def __init__(self, config: Config):
         self.config = config
-        self.files = []
+        self.file_contents: Dict[str, str | Chunker] = {}
+    
+    async def _load_files(self):
+        # Get all files based on recursive setting
+        return await load_directory_files(
+            path=self.config.path,
+            included_extensions=self.config.included_extensions,
+            recursive=self.config.recursive
+        )
 
     async def setup(self):
-        # Get all files in the directory that match the included extensions
-        all_files = [f for f in os.listdir(self.config.path) if os.path.isfile(os.path.join(self.config.path, f))]
-        self.files = [
-            f for f in all_files 
-            if any(f.endswith(ext) for ext in self.config.included_extensions)
-        ]
+        t0 = time.time()
+        # Preload all file contents
+        self.file_contents = await self._load_files()
+        for file_name, content in self.file_contents.items():
+            if self.config.chunker is not None:
+                self.file_contents[file_name] = self.config.chunker.instantiate(text=content)
+            else:
+                self.file_contents[file_name] = content
+        logger.info(f"Loaded {len(self.file_contents)} files from {self.config.path} in {time.time() - t0:.2f} seconds")
+        
 
     async def sample_prompt(self, batch_size: int) -> tuple[str, List[str]]:
-        if not self.files:
+        if not self.file_contents:
             raise ValueError("No files found in directory. Make sure to call setup() first and check that the directory contains files with the specified extensions.")
         
+        if len(self.file_contents) == 0:
+            raise ValueError("No files found in directory.")
+
         # Select a random file
-        selected_file = random.choice(self.files)
-        file_path = os.path.join(self.config.path, selected_file)
+        selected_file = random.choice(list(self.file_contents.keys()))
         
-        # Read the file content
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-        except UnicodeDecodeError:
-            # If file can't be decoded as UTF-8, try with latin-1 or skip
-            try:
-                with open(file_path, 'r', encoding='latin-1') as f:
-                    content = f.read()
-            except Exception:
-                content = f"[Unable to read file {selected_file}]"
+        # Get preloaded content
+        content = self.file_contents[selected_file]
+
+        if isinstance(content, Chunker):
+            content = content.sample_chunk()
         
         # Create context with file information
-        context = f"File: {selected_file}\n\n{content}"
+        context = self._format_file(selected_file, content)
         
         # Generate seed prompts
         seed_prompts = sample_seed_prompts(self.config.seed_prompts, batch_size)
         
         return context, seed_prompts
+    
+    def _format_file(self, file_name: str, content: str) -> str:
+        if file_name.endswith(".py"):
+            return f"File: {file_name}\n\n```python\n{content}\n```"
+        else:
+            return f"File: {file_name}\n\n{content}"
+    
+    def to_string(self) -> str:
+        if not self.file_contents:
+            raise ValueError("Make sure to call setup() first and check that the directory contains files with the specified extensions.")
+        
+        if len(self.file_contents) == 0:
+            raise ValueError("No files found in directory.")
+        
+        formatted_files = []
+        for file_name, content in self.file_contents.items():
+            if isinstance(content, Chunker):
+                # For chunkers, we'll use the full text representation
+                content_str = content.to_string() if hasattr(content, 'to_string') else str(content)
+            else:
+                content_str = content
+            formatted_files.append(self._format_file(file_name, content_str))
+        
+        return "\n---end of file---\n".join(formatted_files)
 
 class BaseStructuredResource(Resource, ABC):
     """This base class is to be used for resources that can be structured as a nested 

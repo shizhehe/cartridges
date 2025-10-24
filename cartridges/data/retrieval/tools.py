@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from cartridges.data.tools import Tool, ToolInput, ToolOutput
 from cartridges.data.retrieval.retrievers import Retriever
 
-import fitz
+# import fitz # NOTE: DB 9/13/25: removed it, had issues with frontent directory
 import requests
 from bs4 import BeautifulSoup
 
@@ -15,6 +15,7 @@ database_path = "/shared/amdgpu/home/tech_ops_amd_xqh/simran/code-memory/codemem
 def extract_text_from_local_pdf(filepath: str) -> str:
     """Extract full text from a local PDF file."""
     try:
+        import fitz  # lazy import to avoid import issues when not needed
         with fitz.open(filepath) as doc:
             return "\n".join(page.get_text() for page in doc)
     except Exception as e:
@@ -90,27 +91,38 @@ def get_all_resources():
 
 
 class SourceConfig(BaseModel):
-    path: str
-    type: Literal["local_pdf", "url", "isa_manual_section"] = "url"
+    path: Optional[str] = None
+    type: Literal["local_pdf", "url", "isa_manual_section", "raw_strings"] = "url"
     start_marker: Optional[str] = None
     end_marker: Optional[str] = None
+    strings: Optional[List[str]] = None
 
-def load_source(source: SourceConfig) -> str:
+def load_source(source: SourceConfig) -> str | List[str]:
     if source.type == "local_pdf":
+        if source.path is None:
+            raise ValueError("path must be provided for type 'local_pdf'")
         return extract_text_from_local_pdf(source.path)
     elif source.type == "url":
+        if source.path is None:
+            raise ValueError("path must be provided for type 'url'")
         return extract_text_from_url(source.path)
     elif source.type == "isa_manual_section":
+        if source.path is None:
+            raise ValueError("path must be provided for type 'isa_manual_section'")
         if source.start_marker is None or source.end_marker is None:
             raise ValueError("start_marker and end_marker must be provided for isa_manual_section")
         return get_isa_manual_section(source.path, source.start_marker, source.end_marker)
+    elif source.type == "raw_strings":
+        if source.strings is None:
+            raise ValueError("strings must be provided for type 'raw_strings'")
+        return source.strings
     else:
         raise ValueError(f"Invalid source type: {source.type}")
 
 class RetrievalTool(Tool):
     class Config(Tool.Config):
         retriever: Retriever.Config
-        sources: List[SourceConfig]
+        sources: List[SourceConfig | str]
     
     class ToolInput(ToolInput):
         query: str
@@ -120,12 +132,23 @@ class RetrievalTool(Tool):
         super().__init__(config)
 
         print("Loading sources...")
-        sources = [load_source(source) for source in config.sources]
+        loaded_items = []
+        for source in config.sources:
+            if isinstance(source, str):
+                loaded_items.append(source)
+            else:
+                loaded_items.append(load_source(source))
+        # Flatten possible lists and drop empty strings
+        sources: List[str] = []
+        for item in loaded_items:
+            if isinstance(item, list):
+                sources.extend([s for s in item if s])
+            elif isinstance(item, str):
+                if item:
+                    sources.append(item)
         print(f"Loaded {len(sources)} sources")
 
-        self.retriever = config.retriever.instantiate(
-            sources=sources
-        )
+        self.retriever = config.retriever.instantiate(sources=sources)
 
     async def run_tool(self, input: ToolInput) -> ToolOutput:
         return ToolOutput(

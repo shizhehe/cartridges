@@ -123,7 +123,7 @@ VT_PATH = "path/to/your/dataset.json"
 DATA_SOURCE = "path/to/your/synthesized_dataset.pkl"
 config = TrainConfig(
     model=model,
-    kv_cache_initializer=KVFromRandomText.Config(
+    kv_cache_initializer=KVFromText.Config(
         max_tokens=NUM_TOKENS
     ),
     

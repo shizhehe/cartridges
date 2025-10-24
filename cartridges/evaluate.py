@@ -1,5 +1,5 @@
 from __future__ import annotations
-from abc import ABC
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import asyncio
 import itertools
@@ -24,6 +24,7 @@ from cartridges.datasets import GenerateEvalDatasetElement, GenerateEvalDataset
 from cartridges.clients.base import ClientConfig, ClientResponse
 
 from cartridges.models.config import ModelConfig
+from cartridges.models.registry import MODEL_REGISTRY
 from cartridges.train import CacheAndModel, GenerationEvalConfig, LossEvalConfig, evaluate_perplexity
 from cartridges.utils import get_logger, seed_everything
 from cartridges.utils.wandb import WandBConfig, prepare_wandb
@@ -130,7 +131,7 @@ class GenerationEvalRunConfig(pydrantic.RunConfig):
     batch_size: int
     max_num_batches_in_parallel: int = 1
 
-    tokenizer: str = "meta-llama/Llama-3.2-1B-Instruct"
+    model: str = "meta-llama/Llama-3.2-1B-Instruct"
 
     seed: int = 42
     
@@ -148,10 +149,12 @@ async def evaluate_generation(config: GenerationEvalRunConfig):
     logger.info(f"ICL will be saved to {config.run_dir}")
     logger.info("Initializing tokenizer and dataset")
     # download_wandb_artifacts(config)
-    tokenizer = AutoTokenizer.from_pretrained(config.tokenizer)
-    
-    dataset=config.eval.dataset.instantiate(tokenizer=tokenizer, seed=config.seed)
     generator = config.generator.instantiate()
+    model_helper = generator.get_model_helper()
+
+    dataset=config.eval.dataset.instantiate(model_helper=model_helper, seed=config.seed)
+
+    await generator.setup()
 
     if config.wandb is not None:
         config.wandb.name = config.name
@@ -262,6 +265,7 @@ async def _process_batch(
                 "prompt_messages": response.prompt_messages,
                 "convo_id": element.convo_id,
                 "sample_idx": sample_idx,
+                "system_prompt": response.system_prompt,
                 **metrics,
                 **element.metadata,
                 **extras,
@@ -276,6 +280,7 @@ class GenerateBaselineResponse:
     num_system_and_user_tokens: int
     num_assistant_tokens: int
     text: str
+    system_prompt: Optional[str] = None
 
 
 class BaselineGenerator(ABC):
@@ -285,10 +290,17 @@ class BaselineGenerator(ABC):
 
     def __init__(self, config: Config):
         self.config = config
+    
+    async def setup(self):
+        pass
 
     async def generate(
         self, elements: List[GenerateEvalDatasetElement]
     ) -> List[GenerateBaselineResponse]:
+        raise NotImplementedError()
+    
+    @abstractmethod
+    def get_model_helper(self) -> ModelHelper:
         raise NotImplementedError()
 
 
@@ -297,9 +309,6 @@ class ICLBaseline(BaselineGenerator):
     class Config(BaselineGenerator.Config):
         client: ClientConfig
         temperature: float = 0.0
-        # used to count number of tokens in the prompt
-        tokenizer: str = "meta-llama/Llama-3.2-3B-Instruct"
-
         # The user prompt template which should contain {content}
         user_prompt_template: str = "{content}"
 
@@ -318,17 +327,26 @@ class ICLBaseline(BaselineGenerator):
         self.config = config
         self.client = config.client.instantiate()
 
-        self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer)
+        self.model_helper = MODEL_REGISTRY.get_model_helper(config.client.model_name)
+        self.tokenizer = self.model_helper.tokenizer
+       
+        self.metadata = {}
+    
+    def get_model_helper(self) -> ModelHelper:
+        return self.model_helper
 
-
+    async def post_process_system_prompt(self, system_prompt: str, context_text: str) -> str:
+        return system_prompt
+    
+    async def setup(self):
         if isinstance(self.config.context, str):
             ctx_text = self.config.context
         else:
             resource = self.config.context.instantiate()
-            # TODO (SE): Need to properly call the resource setup!
+            await resource.setup()
             ctx_text = resource.to_string()
 
-
+        
         if self.config.max_context_tokens is not None:
             ctx_text = self.tokenizer.decode(
                 self.tokenizer.encode(ctx_text)[: self.config.max_context_tokens],
@@ -337,25 +355,19 @@ class ICLBaseline(BaselineGenerator):
                 # suppresses the truncation error 
                 max_length=999_999_999, 
                 truncation=True
-                
             )
 
-        if config.system_prompt_template is not None:
-            system_prompt = config.system_prompt_template.format(
+        if self.config.system_prompt_template is not None:
+            system_prompt = self.config.system_prompt_template.format(
                 content=ctx_text,
             )
 
-            self.system_prompt = self.post_process_system_prompt(
+            self.system_prompt = await self.post_process_system_prompt(
                 system_prompt,
+                ctx_text,
             )
         else:
             self.system_prompt = None
-
-       
-        self.metadata = {}
-
-    def post_process_system_prompt(self, system_prompt: str) -> str:
-        return system_prompt
 
     async def generate(
         self, elements: List[GenerateEvalDatasetElement]
@@ -410,6 +422,76 @@ class ICLBaseline(BaselineGenerator):
                     num_system_and_user_tokens=num_prompt_tokens,
                     num_assistant_tokens=num_assistant_tokens,
                     text=sample.text,
+                    system_prompt=self.system_prompt,
                 )
             )
         return results
+
+
+
+SUMMARY_SYSTEM_PROMPT = """You are a helpful assistant that is highly skilled at writing accurate and clear summaries of long documents."""
+SUMMARY_USER_PROMPT = """Please summarize the following text in roughly {word_num} words:\n\n{content}"""
+MAX_CONTEXT_LENGTH = 110000
+
+class ICLBaselineSummaryFromLargeModel(ICLBaseline):
+    class Config(ICLBaseline.Config):
+        summary_tokens: int = 1024
+        summary_client: ClientConfig
+
+    def __init__(self, config: Config):
+        self.summary_client = config.summary_client.instantiate()
+        super().__init__(config)
+
+    async def post_process_system_prompt(self, system_prompt: str, context_text: str):
+        # decide if we need to chunk the context
+        context_tokens = self.tokenizer.encode(context_text)
+        if len(context_tokens) > MAX_CONTEXT_LENGTH:
+            # chunk the context
+            num_chunks = math.ceil(len(context_tokens) / MAX_CONTEXT_LENGTH)
+            chunk_size = math.ceil(len(context_tokens) / num_chunks)
+            chunks = [
+                self.tokenizer.decode(
+                    context_tokens[i : i + chunk_size], skip_special_tokens=True
+                )
+                for i in range(0, len(context_tokens), chunk_size)
+            ]
+        else: 
+            chunks = [context_text]
+        # format chats
+       
+        chats = []
+        for chunk in chunks:
+            chats.append(
+                [
+                    {
+                        "role": "system",
+                        "content": SUMMARY_SYSTEM_PROMPT,
+                    },
+                    {
+                        "role": "user",
+                        "content": SUMMARY_USER_PROMPT.format(
+                            word_num=int(self.config.summary_tokens * 0.4),
+                            content=chunk,
+                        ),
+                    },
+                ]
+            )
+
+
+        # OpenAI models only support temperature=1.0
+        from cartridges.clients.openai import OpenAIClient
+        temperature = 1.0 if isinstance(self.summary_client, OpenAIClient) else self.config.temperature
+        
+        # ping client to get summary
+        response: ClientResponse = await self.summary_client.chat(
+            chats=chats,
+            max_completion_tokens=self.config.summary_tokens,
+            temperature=temperature,
+        )
+
+        summary = "\n".join([sample.text for sample in response.samples])
+        print("summary: ", summary)
+        return self.config.system_prompt_template.format(
+            content=summary,
+        )    
+

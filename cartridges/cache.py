@@ -119,7 +119,7 @@ class TrainableCache(nn.Module):
             )
             logger.info(f"num_trainable_tokens: {self._num_trainable_tokens}")
             logger.info(f"num_frozen_tokens: {self._num_frozen_tokens}")
-                
+                    
     def update(
         self, 
         new_keys: torch.Tensor,
@@ -174,7 +174,7 @@ class TrainableCache(nn.Module):
             return self._keys[layer_idx], self._values[layer_idx]
 
         return torch.cat(keys, dim=2), torch.cat(values, dim=2)
-    
+        
     def num_tokens(self) -> int:
         """Get the sequence length of the cache."""
         return self._num_frozen_tokens + self._num_trainable_tokens + self._num_tokens

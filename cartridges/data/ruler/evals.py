@@ -9,10 +9,7 @@ from cartridges.data.ruler.niah import NIAHConfig, NIAHQuery, NIAHSample
 from cartridges.data.ruler.variable_tracking import VariableTrackingConfig, VariableTrackingQuery, VariableTrackingSample
 from cartridges.datasets import GenerateEvalDataset, GenerateEvalDatasetElement
 from cartridges.data.longhealth.utils import LongHealthQuestion, LongHealthPatient, load_longhealth_dataset
-from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE, MODELS_WITH_THINKING
-
-
-
+from cartridges.models.helpers import ModelHelper
 
 
 class NIAHGenerateDataset(GenerateEvalDataset):
@@ -22,9 +19,10 @@ class NIAHGenerateDataset(GenerateEvalDataset):
         sample_idx: int = 0
         thinking: bool = True
 
-    def __init__(self, config: Config, tokenizer: PreTrainedTokenizerFast, seed: int):
+    def __init__(self, config: Config, model_helper: ModelHelper, seed: int):
         self.config = config
-        self.tokenizer = tokenizer
+        self.model_helper = model_helper
+        self.tokenizer = model_helper.tokenizer
 
 
         with open(self.config.niah_path, "r") as f:
@@ -40,8 +38,6 @@ class NIAHGenerateDataset(GenerateEvalDataset):
         self.queries = self.sample.queries
     
 
-        self.tokenizer = tokenizer
-
 
     def __getitem__(
         self, index: int
@@ -49,11 +45,9 @@ class NIAHGenerateDataset(GenerateEvalDataset):
         # convo: ContextConvo = ContextConvo.model_validate(self.data[index])
         queries: NIAHQuery = self.queries[index]
 
-        kwargs = {}
-        if self.tokenizer.name_or_path in MODELS_WITH_THINKING:
-            kwargs["enable_thinking"] = self.config.thinking
-        elif self.config.thinking:
-            cot_prompt = "Think before responding. Put your chain of thought between the <thinking> and </thinking> tags before providing your answer."
+        kwargs = self.model_helper.get_apply_chat_template_kwargs(self.config.thinking)
+        if self.config.thinking:
+            cot_prompt = "Think before responding. Put your chain of thought between the <think> and </think> tags before providing your answer."
         else:
             cot_prompt = ""
 
@@ -70,7 +64,7 @@ class NIAHGenerateDataset(GenerateEvalDataset):
             [{"role": "user", "content": prompt}],
             add_generation_prompt=True,
             return_tensors="pt",
-            chat_template=MODEL_TO_CHAT_TEMPLATE.get(self.tokenizer.name_or_path, None),
+            chat_template=self.model_helper.get_chat_template(),
             **kwargs,  
         )
 
@@ -131,14 +125,12 @@ class VariableTrackingGenerateDataset(GenerateEvalDataset):
     ) -> GenerateEvalDatasetElement:
         query: VariableTrackingQuery = self.queries[index]
 
-        kwargs = {}
-        if self.tokenizer.name_or_path in MODELS_WITH_THINKING:
-            kwargs["enable_thinking"] = self.config.thinking
-        elif self.config.thinking:
+        kwargs = self.model_helper.get_apply_chat_template_kwargs(self.config.thinking)
+        if self.config.thinking:
             cot_prompt = (
                 "The variables are assigned in a chain of length 3."
-                "Think through the chain step by step between <thinking> and </thinking> tags before providing your answer. "
-                "For example, <thinking>12345 is equal to ABC, DEF is equal to ABC, GHI is equal to DEF</thinking>."
+                "Think through the chain step by step between <think> and </think> tags before providing your answer. "
+                "For example, <think>12345 is equal to ABC, DEF is equal to ABC, GHI is equal to DEF</think>."
                 "\n\n"
             )
         else:
@@ -151,7 +143,7 @@ class VariableTrackingGenerateDataset(GenerateEvalDataset):
             [{"role": "user", "content": full_prompt}],
             add_generation_prompt=True,
             return_tensors="pt",
-            chat_template=MODEL_TO_CHAT_TEMPLATE.get(self.tokenizer.name_or_path, None),
+            chat_template=self.model_helper.get_chat_template(),
             **kwargs,  
         )
 

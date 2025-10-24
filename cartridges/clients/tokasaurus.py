@@ -19,12 +19,20 @@ from cartridges.clients.base import (
     CartridgeConfig
 )
 from cartridges.clients.usage import Usage
+from cartridges.models import MODEL_REGISTRY
 from cartridges.utils import get_logger
-from cartridges.utils.thinking import MODEL_TO_THINKING_OVERRIDES, add_thinking_prompt
 
 
 logger = get_logger(__name__)
 
+DEFAULT_URLS = { 
+    k.lower(): v 
+    for k, v in {
+        "Qwen/Qwen3-4B-Instruct-2507": "https://hazyresearch--toka-qwen3-4b-instr-2507-1xh100-cartridges-serve.modal.run",
+        "meta-llama/Llama-3.2-3B-Instruct": "https://hazyresearch--toka-llama-3-2-3b-1xh100-cartridges-serve.modal.run",
+        "meta-llama/Llama-3.1-8B-Instruct": "https://hazyresearch--toka-llama-3-1-8b-instr-1xh100-cartridges-serve.modal.run",
+    }.items()
+}
 
 class TokasaurusClient(Client):
     """Client for Tokasaurus with async gather support for batch calls."""
@@ -33,7 +41,7 @@ class TokasaurusClient(Client):
         """Configuration options for the TokasaurusClient."""
 
         model_name: str = "meta-llama/Llama-3.2-3B-Instruct"
-        url: str
+        url: Optional[str] = None
         
         # we have pretty robust timeout and retry logic in the client because
         # we have found that sometimes requests to the server just hang. 
@@ -46,12 +54,18 @@ class TokasaurusClient(Client):
 
         on_failure: Literal["raise", "continue"] = "raise"
 
+        # This only works on the geoff/cartridges branch of the tokasaurus server. 
         cartridges: Optional[List[CartridgeConfig]] = None
 
     def __init__(self, config: Config):
         """Initialize the Tokasaurus client with the provided config."""
         self.config = config
         self.logger = get_logger("TokasaurusClient")
+
+        if self.config.url is None:
+            if self.config.model_name.lower() not in DEFAULT_URLS:
+                raise ValueError(f"Model {self.config.model_name} not found in DEFAULT_URLS, must provide url.")
+            self.config.url = DEFAULT_URLS[self.config.model_name.lower()]
 
         # Ensure that the Tokasaurus server is running the correct model
         if self.config.model_name != "default":
@@ -71,6 +85,8 @@ class TokasaurusClient(Client):
             self.cartridges = [c.model_dump() for c in self.config.cartridges]
         else:
             self.cartridges = None
+        
+        self.model_helper = MODEL_REGISTRY.get_model_helper(self.config.model_name)
 
     async def _send_requests(self, requests: list[dict], modal_upstream_id: Optional[str] = None, use_cartridge_endpoint: bool = False) -> dict:
         """Send a single request to the server with retries."""
@@ -88,7 +104,7 @@ class TokasaurusClient(Client):
                 import pickle
                 t0 = time.time()
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
-                    endpoint = "/custom/synchronous-batch-completions" if not use_cartridge_endpoint else "/batch/cartridge/chat/completions"
+                    endpoint = "/custom/synchronous-batch-completions" if not use_cartridge_endpoint else "/custom/cartridge/synchronous-batch-completions"
                     async with session.post(
                         f"{self.config.url}{endpoint}",
                         json={"requests": requests},
@@ -201,18 +217,13 @@ class TokasaurusClient(Client):
         t0 = time.time()
         logger.info(f"[batch={modal_upstream_id}] Sending batch chat request")
 
-        if self.config.model_name.lower() in MODEL_TO_THINKING_OVERRIDES:
-            # this provides the kwargs needed for the apply_chat_template to enable
-            # thinking. 
-            thinking_overrides = MODEL_TO_THINKING_OVERRIDES[self.config.model_name.lower()](enable_thinking)
-        elif enable_thinking:
-            # if the model is not in the MODEL_TO_THINKING_OVERRIDES, we add a
-            # thinking prompt to the last message of the chat. 
-            thinking_overrides = {}
+   
+        # if we are enabling thinking, get kwargs for the apply_chat_template and add a
+        # model-specific thinking prompt to the last message of the chat. 
+        chat_template_kwargs = self.model_helper.get_apply_chat_template_kwargs(enable_thinking)
+        if enable_thinking: 
             for chat in chats:
-                chat[-1]["content"] = add_thinking_prompt(chat[-1]["content"])
-        else:
-            thinking_overrides = {}
+                chat[-1]["content"] = self.model_helper.add_thinking_prompt(chat[-1]["content"])
 
 
         def _construct_request(chat: List[Dict[str, Any]]) -> dict:
@@ -221,7 +232,7 @@ class TokasaurusClient(Client):
                 "model": self.config.model_name,
                 "max_completion_tokens": max_completion_tokens,
                 "temperature": temperature,
-                "apply_chat_template_overrides": thinking_overrides,
+                "apply_chat_template_overrides": chat_template_kwargs,
                 "logprobs_in_fingerprint": True,
             }
             all_cartridges = []

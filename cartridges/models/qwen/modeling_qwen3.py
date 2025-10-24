@@ -177,7 +177,7 @@ class Qwen3Attention(nn.Module):
         past_key_value = batch.past_key_values
         if past_key_value is not None:
             key_states, value_states = past_key_value.update(
-                key_states, value_states, batch.seq_ids, self.layer_idx,
+                key_states.clone(), value_states.clone(), batch.seq_ids, self.layer_idx,
                 skip_append=batch.mode == "train"
             )
         

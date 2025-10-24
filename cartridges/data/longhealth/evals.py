@@ -6,8 +6,7 @@ from transformers import PreTrainedTokenizerFast
 
 from cartridges.datasets import GenerateEvalDataset, GenerateEvalDatasetElement
 from cartridges.data.longhealth.utils import LongHealthQuestion, LongHealthPatient, load_longhealth_dataset
-from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE, MODELS_WITH_THINKING
-
+from cartridges.models.helpers import ModelHelper
 
 
 class LongHealthMultipleChoiceGenerateDataset(GenerateEvalDataset):
@@ -19,9 +18,10 @@ class LongHealthMultipleChoiceGenerateDataset(GenerateEvalDataset):
         cot: bool = True
 
 
-    def __init__(self, config: Config, tokenizer: PreTrainedTokenizerFast, seed: int):
+    def __init__(self, config: Config, model_helper: ModelHelper, seed: int):
         self.config = config
-        self.tokenizer = tokenizer
+        self.model_helper = model_helper
+        self.tokenizer = model_helper.tokenizer
         
         self.patients = load_longhealth_dataset(config.patient_ids)
         
@@ -33,8 +33,8 @@ class LongHealthMultipleChoiceGenerateDataset(GenerateEvalDataset):
                 f"{question.answer_d}\n"
                 f"{question.answer_e}"
             )
-            if self.config.cot and self.tokenizer.name_or_path not in MODELS_WITH_THINKING:
-                cot_prompt = "You should first think step by step. Then give your final answer exactly as it appears in the options. Your output should be in the following format: \n<thinking> {{YOUR_THOUGHT_PROCESS}} </thinking> "
+            if self.config.cot:
+                cot_prompt = "You should first think step by step. Then give your final answer exactly as it appears in the options. Your output should be in the following format: \n<think> {{YOUR_THOUGHT_PROCESS}} </think> "
             else:
                 cot_prompt = "Please provide your answer exactly as it appears in the options with the following format:"
             
@@ -85,15 +85,13 @@ class LongHealthMultipleChoiceGenerateDataset(GenerateEvalDataset):
         # convo: ContextConvo = ContextConvo.model_validate(self.data[index])
         question: LongHealthQuestion = self.questions[index]
 
-        kwargs = {}
-        if self.tokenizer.name_or_path in MODELS_WITH_THINKING:
-            kwargs["enable_thinking"] = self.config.cot
+        kwargs = self.model_helper.get_apply_chat_template_kwargs(self.config.cot)
 
         input_ids = self.tokenizer.apply_chat_template(
             [{"role": "user", "content": question.question}],
             add_generation_prompt=True,
             return_tensors="pt",
-            chat_template=MODEL_TO_CHAT_TEMPLATE.get(self.tokenizer.name_or_path, None),
+            chat_template=self.model_helper.get_chat_template(),
             **kwargs,
         )
 

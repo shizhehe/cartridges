@@ -4,7 +4,7 @@ from typing import Literal, Optional
 import torch
 
 from cartridges.cache import AttnConfig, KVCacheFactory, TrainableCache
-from cartridges.initialization.tokenization_utils import MODEL_TO_SYSTEM_PROMPT_TOKENIZER
+from cartridges.models.helpers import ModelHelper
 
 DEFAULT_TEXT_SOURCE = os.path.join(
     os.environ["CARTRIDGES_DIR"], "cartridges/initialization/data/gradient.txt"
@@ -22,19 +22,17 @@ class KVFromText(KVCacheFactory):
         tokenizer,
         model,
         attn_config: AttnConfig,
+        model_helper: ModelHelper,
     ) -> TrainableCache:
         content = Path(self.config.text_source).read_text()
         if self.config.system_prompt_template is not None:
             content = self.config.system_prompt_template.format(text=content)
 
-        tokenize_data_into_system_prompt = MODEL_TO_SYSTEM_PROMPT_TOKENIZER[tokenizer.name_or_path.lower()]
-
-        input_ids = tokenize_data_into_system_prompt(
-            tokenizer=tokenizer,
+        input_ids = model_helper.tokenize_system_prompt_with_max_tokens(
             content=content,
             max_tokens=self.config.max_tokens,
         ).squeeze(0)
-        
+
         init_cache = TrainableCache(config=attn_config)
         
         with torch.no_grad():
@@ -58,7 +56,3 @@ class KVFromText(KVCacheFactory):
                 init_values=init_cache._values,
                 num_frozen_tokens=self.config.num_frozen_tokens,
             )
-
-class KVFromRandomText(KVFromText):
-    # for backwards compatibility
-    pass

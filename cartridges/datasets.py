@@ -1,6 +1,8 @@
 from __future__ import annotations
+from copy import deepcopy
+from functools import partial
 import os
-from typing import Dict, List, Literal, Optional, Any
+from typing import Callable, Dict, List, Literal, Optional, Any, TypedDict
 from abc import abstractmethod
 from collections import deque
 import json
@@ -15,8 +17,8 @@ from transformers import PreTrainedTokenizerFast
 from pydrantic import ObjectConfig, BaseConfig
 import numpy as np
 
-from cartridges.structs import Conversation, MessageDict, read_conversations
-from cartridges.initialization.tokenization_utils import MODEL_TO_CHAT_TEMPLATE, MODELS_WITH_THINKING
+from cartridges.clients.base import FlatTopLogprobs
+from cartridges.structs import Conversation, read_conversations, MessageDict
 from cartridges.utils import get_logger
 from cartridges.utils.hf import read_conversations_from_hf
 from cartridges.utils.wandb import read_conversations_from_wandb
@@ -26,15 +28,6 @@ from cartridges.utils.wandb import read_conversations_from_wandb
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
 logger = get_logger(__name__)
-
-BOS_TOKEN_ID = 128000
-EOS_TOKEN_ID = 128009
-START_HEADER_ID = 128006
-END_HEADER_ID = 128007
-USER_TOKEN_ID = 882
-ASSISTANT_TOKEN_ID = 78191
-
-
 
 @dataclass
 class TokenCounts:
@@ -58,11 +51,15 @@ def _base_convert_messages_to_element_retokenize(
     message_start_tokens: dict[str, list[int]],
     message_end_tokens: dict[str, list[int]],
     message_extra_end_tokens: dict[str, list[int]],
+    drop_thinking_fn:  Callable[[Conversation.Message], Conversation.Message] = lambda x: x,
 ) -> DatasetElement:
     input_ids, topk_token_ids, topk_logprobs, topk_token_idxs = [], [], [], []
     token_counts = TokenCounts()
 
     for i, message in enumerate(messages):
+        if message.role == "assistant":
+            message = drop_thinking_fn(message)
+
         token_ids = tokenizer.encode(message.content, add_special_tokens=False)
         token_ids += message_end_tokens[message.role] + message_extra_end_tokens[message.role]
         msg_input_ids = message_start_tokens[message.role] + token_ids
@@ -97,6 +94,7 @@ def _base_convert_messages_to_element(
     message_end_tokens: dict[str, list[int]],
     message_extra_end_tokens: dict[str, list[int]],
     tokenizer: PreTrainedTokenizerFast,
+    drop_thinking_fn:  Callable[[Conversation.Message], Conversation.Message] = lambda x: x,
 ) -> DatasetElement:
     input_ids, topk_token_ids, topk_logprobs, topk_token_idxs = [], [], [], []
     token_counts = TokenCounts()
@@ -109,7 +107,10 @@ def _base_convert_messages_to_element(
         else:
             msg_token_ids = list(message.token_ids)
         msg_input_ids = message_start_tokens[message.role] + msg_token_ids
-        
+
+        if message.role == "assistant":
+            message = drop_thinking_fn(message)
+
         end_tokens = message_end_tokens[message.role]
         # usually, messages will end with some tokenizer-specific "end" token(s) (e.g. <|endoftext|>)
         ends_with_eot = len(msg_input_ids) >= len(end_tokens) and msg_input_ids[-len(end_tokens):] == end_tokens
@@ -120,13 +121,13 @@ def _base_convert_messages_to_element(
             # Otherwise, we can just leave it as is.
             msg_input_ids += end_tokens + message_extra_end_tokens[message.role]
         elif ends_with_eot and i < len(messages) - 1:
-            # (2) if it does end with the eot tokens, then we need to add the extra end 
-            # then we just need to add any extra end tokens that come after the 
-            # eot tokens and before the next message starts.
+            # (2) if it does end with the eot tokens, then we just need to add any 
+            # extra end tokens that come after the eot tokens and before the next 
+            # message starts.
             msg_input_ids += message_extra_end_tokens[message.role]
         elif ends_with_eot and i == len(messages) - 1:
-            # (3) if we're the last message in the 
-            # conversation, then we don't need to add anything.
+            # (3) if we're the last message in the conversation, then we don't need to 
+            # add anything.
             pass
 
         if message.top_logprobs is not None:
@@ -150,78 +151,6 @@ def _base_convert_messages_to_element(
         metadata=[],
         token_counts=token_counts,
     )
-
-def qwen_messages_to_element(
-    messages: List[Conversation.Message],
-    retokenize: bool = False,
-    tokenizer: PreTrainedTokenizerFast | None = None,
-) -> DatasetElement:
-    fn = _base_convert_messages_to_element_retokenize if retokenize else _base_convert_messages_to_element
-
-    return fn(
-        messages,
-        tokenizer=tokenizer,
-        message_start_tokens={
-            "user": [151644, 872,198],
-            "assistant": [151644, 77091,198],
-            "system": [151644, 8948, 198],
-        },
-        message_end_tokens={
-            "user": [151645],
-            "assistant": [151645],
-            "system": [151645],
-        },
-        message_extra_end_tokens={
-            "user": [198],
-            "assistant": [198],
-            "system": [198],
-        },
-    )
-
-def llama3_messages_to_element(
-    messages: List[Conversation.Message],
-    retokenize: bool = False,
-    tokenizer: PreTrainedTokenizerFast | None = None,
-) -> DatasetElement:
-    fn = _base_convert_messages_to_element_retokenize if retokenize else _base_convert_messages_to_element
-
-    return fn(
-        messages,
-        tokenizer=tokenizer,
-        message_start_tokens={
-            # "<|start_header_id|>", "user", "<|end_header_id|>", "\n\n"
-            "user": [128006, 882, 128007, 271],
-            # "<|start_header_id|>", "assistant", "<|end_header_id|>", "\n\n"
-            "assistant": [128006, 78191, 128007, 271],
-            # "<|start_header_id|>", "system", "<|end_header_id|>", "\n\n"
-            "system": [128006, 9125, 128007, 271],
-        },
-        message_end_tokens={
-            # "<|eot_id|>"
-            "user": [128009],
-            "assistant": [128009],
-            "system": [128009],
-        },
-        message_extra_end_tokens={
-            "user": [],
-            "assistant": [],
-            "system": [],
-        },
-    )
-
-
-MODEL_TO_MESSAGE_CONVERTER = {
-    "Qwen/Qwen3-0.6b": qwen_messages_to_element,
-    "Qwen/Qwen3-1.7b": qwen_messages_to_element,
-    "Qwen/Qwen3-4b": qwen_messages_to_element,
-    "Qwen/Qwen3-8b": qwen_messages_to_element,
-    "Qwen/Qwen3-14b": qwen_messages_to_element,
-    "Qwen/Qwen3-32b": qwen_messages_to_element,
-    "meta-llama/Llama-3.1-8B-Instruct": llama3_messages_to_element,
-    "meta-llama/Llama-3.2-3B-Instruct": llama3_messages_to_element,
-    "meta-llama/Llama-3.2-1B-Instruct": llama3_messages_to_element,
-}
-MODEL_TO_MESSAGE_CONVERTER = {k.lower(): v for k, v in MODEL_TO_MESSAGE_CONVERTER.items()}
 
 
 @dataclass
@@ -300,16 +229,19 @@ class TrainDataset(Dataset):
         top_k_logits: int = 20
         targets: Literal["logits", "tokens"] = "logits"
 
+        prob_drop_thinking: float = 1.0
+
         packing_mode: Literal["truncate", "pad"]="pad"
         packed_seq_length: int = 2048
 
         user_prompt_prefix: list[str] | None = None
 
 
-    def __init__(self, config: Config, tokenizer: PreTrainedTokenizerFast, seed: int):
+    def __init__(self, config: Config, model_helper: ModelHelper, seed: int):
 
         self.config = config
-        self.tokenizer = tokenizer
+        self.model_helper = model_helper
+        self.tokenizer = model_helper.tokenizer
         
         self.elements: List[DatasetElement] = self._prepare_elements()
         # each batch is a list of element indices
@@ -322,10 +254,11 @@ class TrainDataset(Dataset):
 
         elements = []
         for row in data:
-            elements.append(MODEL_TO_MESSAGE_CONVERTER[self.tokenizer.name_or_path.lower()](
+            elements.append(self.model_helper.messages_to_element(
                 row.messages,
                 retokenize=self.config.targets == "tokens",
                 tokenizer=self.tokenizer,
+                prob_drop_thinking=self.config.prob_drop_thinking,
             ))
 
         return elements
@@ -502,7 +435,7 @@ class LossEvalDataset(TrainDataset):
             else:
                 messages = row.messages
 
-            elements.append(MODEL_TO_MESSAGE_CONVERTER[self.tokenizer.name_or_path.lower()](
+            elements.append(self.model_helper.messages_to_element(
                 messages,
                 retokenize=self.config.targets == "tokens",
                 tokenizer=self.tokenizer,
@@ -514,15 +447,13 @@ class LossEvalDataset(TrainDataset):
 @dataclass
 class GenerateEvalDatasetElement:
     input_ids: torch.Tensor
-    prompt: str
+
+    # messages to be used as the prompt
+    prompt: List[Dict[str, str]]
 
     answer: Optional[str]
     metadata: dict[str, Any]
     convo_id: Optional[str] = None
-    
-    # this is needed for some datasets, like MMLU, where the in context examples
-    # are structured as prior messages
-    prompt_messages: Optional[List[Dict[str,str]]] = None
 
 
 @dataclass
@@ -543,9 +474,10 @@ class GenerateEvalDataset(Dataset):
         data_source: Optional[str | DataSource] = None
         cot: bool = False
     
-    def __init__(self, config: Config, tokenizer: PreTrainedTokenizerFast, seed: int):
+    def __init__(self, config: Config, model_helper: ModelHelper, seed: int):
         self.config = config
-        self.tokenizer = tokenizer
+        self.model_helper = model_helper
+        self.tokenizer = model_helper.tokenizer
         self.seed = seed
 
         assert self.config.data_source is not None, "data_source is required for GenerateEvalDataset"
@@ -557,10 +489,8 @@ class GenerateEvalDataset(Dataset):
         assert len(convo.messages) > 1, "Conversation must have at least 2 messages"
         assert convo.messages[-1].role == "assistant", "Last message must be assistant"
 
-        kwargs = {}
-        if self.tokenizer.name_or_path in MODELS_WITH_THINKING:
-            kwargs["enable_thinking"] = self.config.cot
 
+        kwargs = self.model_helper.get_apply_chat_template_kwargs(self.config.cot)
         input_ids = self.tokenizer.apply_chat_template(
             [
                 {"role": msg.role, "content": msg.content}
@@ -568,7 +498,7 @@ class GenerateEvalDataset(Dataset):
             ],
             add_generation_prompt=True,
             return_tensors="pt",
-            chat_template=MODEL_TO_CHAT_TEMPLATE.get(self.tokenizer.name_or_path, None),
+            chat_template=self.model_helper.get_chat_template(),
             **kwargs,
         )
 

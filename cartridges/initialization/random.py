@@ -1,6 +1,7 @@
 
 import torch
 from cartridges.cache import AttnConfig, KVCacheFactory, TrainableCache
+from cartridges.models.helpers import ModelHelper
 
 class KVFromRandomVectors(KVCacheFactory):
     class Config(KVCacheFactory.Config):
@@ -14,6 +15,7 @@ class KVFromRandomVectors(KVCacheFactory):
         tokenizer,
         model,
         attn_config: AttnConfig,
+        model_helper: ModelHelper,
     ) -> TrainableCache:
         rand_vectors = lambda: [
             torch.randn(

@@ -3,34 +3,23 @@ import os
 import random
 import asyncio
 import math
-from typing import List, Optional, Dict
-from dataclasses import dataclass
-from pydantic import BaseModel
+from typing import List, Optional
 from datetime import datetime, timedelta
-from collections import defaultdict
 
+from cartridges.data.gmail.download import GmailDownloader
 from cartridges.data.resources import Resource
+from cartridges.data.gmail.download import EmailThread
 from .utils import get_service_pool
+from cartridges.utils import get_logger
 
-class LabelConfig(BaseModel):
-    name: str
-    weight: float = 1.0
-    
-
-@dataclass
-class ThreadMetadata:
-    id: str
-    label: str
-    date_bucket: str  # Format: "2025-06-01_to_2025-06-30"
-    weight: Optional[float] = None
-
+logger = get_logger(__name__)
 
 class GmailResource(Resource):
 
     class Config(Resource.Config):
 
         # note: use the label as it appears in gmail search query (not the sidebar)
-        labels: Optional[List[LabelConfig]]=None
+        labels: Optional[List[str]]=None
 
         # date format is YYYY/MM/DD
         date_start: Optional[str] = "2025/01/01"
@@ -41,9 +30,23 @@ class GmailResource(Resource):
         temporal_decay_rate: float = 0.1  # Higher = stronger recency bias
         temporal_half_life_days: Optional[int] = None  # Alternative to decay_rate
         
+        # Additional Gmail search query to AND with label/date (e.g., 'from:"Allen Roberts"')
+        search_query: Optional[str] = None
+
+        cache_dir: str = os.path.expanduser("~/.cartridges/data/gmail")
 
     def __init__(self, config: Config):
         self.config = config
+
+        self.downloader = GmailDownloader(
+            cache_dir=self.config.cache_dir,
+            pool_size=16,
+            max_concurrent_downloads=3,
+            batch_size=50,
+            requests_per_minute=250,
+            min_delay_between_requests=0.5,
+        )
+
         # Get service pool for concurrent access
         self.service_pool = get_service_pool(pool_size=16)
         # Limit concurrent API calls to avoid rate limits
@@ -59,7 +62,7 @@ class GmailResource(Resource):
         sampled_thread = await self._sample_thread()
         
         # Get the thread content
-        thread_content = await self._get_thread_content(sampled_thread.id)
+        thread_content = await self._get_thread_content(sampled_thread)
         
         # Sample prompts from the predefined list
         prompts = random.choices(THREAD_PROMPTS, k=batch_size)
@@ -72,52 +75,24 @@ class GmailResource(Resource):
         Fetch the metadata (ids) for all the threads in the user's gmail with 
         the labels specified in the config. Uses separate queries per label and date bucket.
         """
-        print("🔄 Setting up Gmail resource...")
-        self.threads: List[ThreadMetadata] = []
-        self.threads_by_bucket: Dict[str, List[ThreadMetadata]] = {}
-        self.threads_by_label: Dict[str, Dict[str, List[ThreadMetadata]]] = {}
+        self.threads = await self.downloader.get_threads(
+            labels=self.config.labels,
+            date_start=self.config.date_start,
+            date_end=self.config.date_end,
+            date_days_in_bucket=self.config.date_days_in_bucket,
+            search_query=self.config.search_query,
+        )
+
+        # Initialize organization dictionaries
+        self.threads_by_bucket = {}
+        self.threads_by_label = {}
         
-        try:
-            # Generate date buckets
-            date_buckets = self._generate_date_buckets()
-            
-            # Create all fetch tasks concurrently
-            fetch_tasks = []
-            
-            if not self.config.labels:
-                # No labels specified, fetch all threads for each date bucket
-                for bucket_start, bucket_end, bucket_name in date_buckets:
-                    task = self._fetch_threads_for_label_and_date(None, 1.0, bucket_start, bucket_end, bucket_name)
-                    fetch_tasks.append(task)
-            else:
-                # Fetch threads for each label and date bucket combination
-                for label_config in self.config.labels:
-                    for bucket_start, bucket_end, bucket_name in date_buckets:
-                        task = self._fetch_threads_for_label_and_date(
-                            label_config.name, label_config.weight, 
-                            bucket_start, bucket_end, bucket_name
-                        )
-                        fetch_tasks.append(task)
-            
-            # Execute all fetch operations concurrently and collect results
-            print(f"🚀 Starting {len(fetch_tasks)} concurrent fetch operations...")
-            task_results = await asyncio.gather(*fetch_tasks)
-            
-            # Merge all results into main thread list
-            for thread_list in task_results:
-                if thread_list:  # Skip empty results
-                    self.threads.extend(thread_list)
-            
-            print(f"📊 Collected {len(self.threads)} threads from concurrent operations")
-            
-            # Organize threads by bucket for efficient sampling
-            self._organize_threads_by_bucket()
-            
-            print(f"✅ Loaded {len(self.threads)} Gmail threads across {len(date_buckets)} date buckets")
+        # Organize threads by bucket for efficient sampling
+        self._organize_threads_by_bucket()
+        
+        date_buckets = self._generate_date_buckets()
+        logger.info(f"Loaded {len(self.threads)} Gmail threads across {len(date_buckets)} date buckets")
                 
-        except Exception as e:
-            print(f"❌ Error setting up Gmail resource: {e}")
-            raise
     
     def _generate_date_buckets(self) -> List[tuple]:
         """Generate date buckets based on config."""
@@ -151,86 +126,9 @@ class GmailResource(Resource):
             buckets.append((bucket_start_str, bucket_end_str, bucket_name))
             current_date = bucket_end
         
-        print(f"📅 Generated {len(buckets)} date buckets of {bucket_days} days each")
+        logger.info(f"Generated {len(buckets)} date buckets of {bucket_days} days each")
         return buckets
     
-    async def _fetch_threads_for_label_and_date(self, label_name: Optional[str], weight: float, 
-                                               date_start: Optional[str], date_end: Optional[str], 
-                                               bucket_name: str) -> List[ThreadMetadata]:
-        """Fetch all threads for a specific label and date range. Returns list of threads."""
-        query_parts = []
-        
-        if label_name:
-            query_parts.append(f"label:{label_name}")
-        
-        if date_start:
-            query_parts.append(f"after:{date_start}")
-        
-        if date_end:
-            query_parts.append(f"before:{date_end}")
-        
-        query = " ".join(query_parts) if query_parts else ""
-        
-        label_display = label_name if label_name else "ALL"
-        print(f"📧 Fetching threads for {label_display} in bucket {bucket_name}")
-        
-        page_token = None
-        bucket_thread_count = 0
-        collected_threads = []  # Local collection for this task
-        
-        while True:
-            # Use minimal fields to improve performance
-            request_params = {
-                'q': query,
-                'fields': 'threads(id),nextPageToken',
-                'maxResults': 500  # Maximum allowed by API
-            }
-            
-            if page_token:
-                request_params['pageToken'] = page_token
-            
-            # Get service from pool and fetch thread list
-            async with self._api_semaphore:
-                service = await self.service_pool.get_service_async()
-                try:
-                    result = await asyncio.to_thread(
-                        lambda: service.users().threads().list(
-                            userId='me',
-                            **request_params
-                        ).execute()
-                    )
-                finally:
-                    await self.service_pool.return_service_async(service)
-            
-            threads = result.get('threads', [])
-            
-            if threads:
-                for thread in threads:
-                    thread_id = thread['id']
-                    
-                    # Create thread metadata with known label and date bucket
-                    thread_metadata = ThreadMetadata(
-                        id=thread_id,
-                        label=label_name or "ALL",
-                        date_bucket=bucket_name,
-                        weight=weight
-                    )
-                    
-                    # Collect in local list (thread-safe)
-                    collected_threads.append(thread_metadata)
-                    bucket_thread_count += 1
-                    
-                    # Progress logging
-                    if bucket_thread_count % 100 == 0:
-                        print(f"  📊 {label_display}/{bucket_name}: {bucket_thread_count} threads...")
-            
-            # Check for next page
-            page_token = result.get('nextPageToken')
-            if not page_token:
-                break
-        
-        print(f"  ✅ {label_display}/{bucket_name}: {bucket_thread_count} threads loaded")
-        return collected_threads
   
     def _is_more_recent_bucket(self, bucket_a: str, bucket_b: str) -> bool:
         """Check if bucket_a is more recent than bucket_b."""
@@ -264,19 +162,19 @@ class GmailResource(Resource):
                 self.threads_by_label[label][bucket] = []
             self.threads_by_label[label][bucket].append(thread)
         
-        # Print statistics
-        print("📊 Thread organization:")
+        # Log statistics
+        logger.info("Thread organization:")
         for label in sorted(self.threads_by_label.keys()):
             total_in_label = sum(len(buckets) for buckets in self.threads_by_label[label].values())
-            print(f"  🏷️  Label '{label}': {total_in_label} threads")
+            logger.info(f"Label '{label}': {total_in_label} threads")
             for bucket in sorted(self.threads_by_label[label].keys(), reverse=True):
                 count = len(self.threads_by_label[label][bucket])
-                print(f"    📅 {bucket}: {count} threads")
+                logger.info(f"  {bucket}: {count} threads")
         
-        print(f"📊 Organized {len(self.threads)} threads into {len(self.threads_by_label)} labels × {len(self.threads_by_bucket)} date buckets")
+        logger.info(f"Organized {len(self.threads)} threads into {len(self.threads_by_label)} labels × {len(self.threads_by_bucket)} date buckets")
 
     
-    async def _sample_thread(self) -> ThreadMetadata:
+    async def _sample_thread(self) -> EmailThread:
         """Sample a random thread with label and recency bias applied at sampling time."""
         if not self.threads_by_label:
             raise ValueError("No threads loaded. Call setup() first.")
@@ -301,10 +199,10 @@ class GmailResource(Resource):
         labels = []
         weights = []
         
-        for label_config in self.config.labels:
-            if label_config.name in self.threads_by_label:
-                labels.append(label_config.name)
-                weights.append(label_config.weight)
+        for label in self.config.labels:
+            if label in self.threads_by_label:
+                labels.append(label)
+                weights.append(1.0)  # Equal weight since config.labels is now just strings
         
         if not labels:
             # Fallback to any available label
@@ -312,7 +210,7 @@ class GmailResource(Resource):
         
         # Use weighted random selection
         return random.choices(labels, weights=weights)[0]
-    
+
     def _sample_date_bucket_for_label(self, label: str) -> str:
         """Sample a date bucket with exponential temporal decay for a specific label."""
         if label not in self.threads_by_label:
@@ -367,71 +265,16 @@ class GmailResource(Resource):
             # Use decay rate approach: weight = exp(-decay_rate * days_ago)
             return math.exp(-self.config.temporal_decay_rate * days_ago)
 
-    async def _get_thread_content(self, thread_id: str) -> str:
-        """Get the full content of a Gmail thread using minimal fields."""
-        try:
-            # Get service from pool and fetch thread content
-            async with self._api_semaphore:
-                service = await self.service_pool.get_service_async()
-                try:
-                    thread = await asyncio.to_thread(
-                        lambda: service.users().threads().get(
-                            userId='me',
-                            id=thread_id,
-                            fields='messages(payload(headers,parts,body),snippet)'
-                        ).execute()
-                    )
-                finally:
-                    await self.service_pool.return_service_async(service)
+    async def _get_thread_content(self, thread: EmailThread) -> str:
+        """Get the full content of a Gmail thread using minimal fields."""       
+        thread_content = []
+        for message in thread.messages:
+            thread_content.append(f"From: {message.from_addr}\nTo: {message.to_addr}\nSubject: {message.subject}\n\n{message.body}\n" + "="*50)
+        
+        return "\n\n".join(thread_content)
             
-            messages = thread.get('messages', [])
-            thread_content = []
-            
-            for message in messages:
-                # Extract message content
-                payload = message.get('payload', {})
-                
-                # Get headers for subject and sender
-                headers = payload.get('headers', [])
-                subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
-                from_addr = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown Sender')
-                
-                # Get message body
-                body = self._extract_message_body(payload)
-                
-                thread_content.append(f"From: {from_addr}\nSubject: {subject}\n\n{body}\n" + "="*50)
-            
-            return "\n\n".join(thread_content)
-            
-        except Exception as e:
-            return f"Error loading thread {thread_id}: {str(e)}"
     
-    def _extract_message_body(self, payload: dict) -> str:
-        """Extract text from Gmail message payload."""
-        body = ""
-        
-        # Handle different payload structures
-        if 'parts' in payload:
-            # Multi-part message
-            for part in payload['parts']:
-                if part.get('mimeType') == 'text/plain':
-                    part_body = part.get('body', {}).get('data', '')
-                    if part_body:
-                        # Decode base64url
-                        import base64
-                        decoded = base64.urlsafe_b64decode(part_body + '==').decode('utf-8', errors='ignore')
-                        body += decoded
-        else:
-            # Single part message
-            if payload.get('mimeType') == 'text/plain':
-                body_data = payload.get('body', {}).get('data', '')
-                if body_data:
-                    import base64
-                    body = base64.urlsafe_b64decode(body_data + '==').decode('utf-8', errors='ignore')
-        
-        return body.strip() if body else "No readable content"
 
-   
 
 THREAD_PROMPTS = [
     (

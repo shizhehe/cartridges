@@ -49,8 +49,7 @@ logging.basicConfig(level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
 
-CONTEXT_TEMPLATE = """Some special magic keys are hidden within the following text. Make sure to memorize them. I will quiz you about the keys afterwards.
-{context}"""
+CONTEXT_TEMPLATE = """{context}"""
 
 
 QUERY_TEMPLATE = """What are all the special magic {type_needle_v} for {query} mentioned in the provided text?"""
@@ -406,16 +405,17 @@ def generate_samples(config: NIAHConfig, tokenizer: HFTokenizer, incremental: in
 if __name__ == "__main__":
     config = GenerateNIAHConfig(
         niah=NIAHConfig(
+            max_seq_length=128_000,
             seed=42,
             context_template=CONTEXT_TEMPLATE,
             query_template=QUERY_TEMPLATE,
             num_needle_k=128,
-            num_needle_v=(2,2),
+            num_needle_v=(1,1),
             type_haystack='essay',
             type_needle_k='words',
             tokens_to_generate=128,
             num_samples=1,
-            tokenizer="Qwen/Qwen3-4B",
+            tokenizer="meta-llama/Llama-3.2-3B-Instruct",
         ),
     )
     pydrantic.main([config])

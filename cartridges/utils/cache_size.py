@@ -93,10 +93,10 @@ def get_llama_cache_size(
     
 
 MODEL_TO_CACHE_SIZE_FN = {
-    "meta-llama/Llama-3.2-3B-Instruct": lambda num_tokens: get_llama_cache_size(
+    "meta-llama/Llama-3.2-3B-Instruct".lower(): lambda num_tokens: get_llama_cache_size(
         "meta-llama/Llama-3.2-3B-Instruct", num_tokens=num_tokens,
     ),
-    "meta-llama/Llama-3.1-8B-Instruct": lambda num_tokens: get_llama_cache_size(
+    "meta-llama/Llama-3.1-8B-Instruct".lower(): lambda num_tokens: get_llama_cache_size(
         "meta-llama/Llama-3.1-8B-Instruct", num_tokens=num_tokens,
     ),
 }

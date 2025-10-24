@@ -10,6 +10,7 @@ import wandb
 
 from cartridges.cache import AttnConfig, KVCacheFactory, TrainableCache
 from cartridges.utils import get_logger
+from cartridges.models.helpers import ModelHelper
 
 logger = get_logger(__name__)
 
@@ -53,6 +54,7 @@ class KVFromPretrained(KVCacheFactory):
         self,
         tokenizer: Optional[AutoTokenizer]=None,
         model: Optional[torch.nn.Module]=None,
+        model_helper: Optional[ModelHelper]=None,
         attn_config: Optional[AttnConfig]=None,
     ) -> TrainableCache:
         is_ddp = "LOCAL_RANK" in os.environ

@@ -2,6 +2,8 @@ import torch
 
 from typing import Optional, Union, Literal
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention, BlockMask
+from torch.distributed.tensor import DTensor
+from torch.distributed.tensor.placement_types import Replicate
 
 from cartridges.cache import TrainableCache
 
@@ -94,6 +96,16 @@ def flex_attention_forward(
     # layer's query does not require grad.
     if key.requires_grad and not query.requires_grad:
         query.requires_grad = True
+
+    def _localize(x):
+        if isinstance(x, DTensor):
+            x = x.redistribute(x.device_mesh, placements=[Replicate()])
+            return x.to_local()
+        return x
+    
+    q = _localize(query)
+    k = _localize(key)
+    v = _localize(value)
 
     attn_output = attn(
         query,

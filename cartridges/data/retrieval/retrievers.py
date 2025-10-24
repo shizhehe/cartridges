@@ -13,6 +13,11 @@ from pydantic import BaseModel
 from transformers import AutoTokenizer
 from pydrantic import ObjectConfig
 
+import nltk
+nltk.download('punkt')
+nltk.download('punkt_tab')
+nltk.download('stopwords') # for stopwords removal
+
 
 class Retriever(abc.ABC): 
     class Config(ObjectConfig):
