@@ -6,6 +6,7 @@ from datetime import datetime
 
 from cartridges.utils import get_logger
 from cartridges.data.resources import Resource, sample_seed_prompts, SEED_TYPES, Chunker
+from cartridges.data.chunkers import TokenChunker
 from cartridges.data.enron.utils import load_enron_user_data, load_enron_selected_users, create_temporal_batches
 import os
 
@@ -51,12 +52,22 @@ class EnronStreamResource(Resource):
         num_batches: Optional[int] = None  # Total number of batches to create (None = use all data)
         metadata_output_path: Optional[str] = None  # Where to save batch metadata
         
+        # Chunker configuration for temporal context sampling
+        chunker: Optional[Chunker.Config] = None
+        
+        # Context saving options
+        save_full_context: bool = True  # Save complete context across all batches
+        save_batch_contexts: bool = True  # Save individual batch contexts
+        context_output_dir: Optional[str] = None  # Where to save context files
+        synthesis_output_dir: Optional[str] = None  # Synthesis config output_dir
+        
         # New config option to enable multi-batch synthesis
         synthesize_all_batches: bool = True  # If True, creates separate datasets for each batch
         batch_output_dir: Optional[str] = None  # Base directory for batch outputs
         
     def __init__(self, config: Config):
         self.config = config
+        self.chunkers = {}  # Store chunkers for each batch
 
         # Check if a specific batch ID was set for this instance
         if hasattr(config, '_target_batch_id'):
@@ -104,6 +115,14 @@ class EnronStreamResource(Resource):
         if self.config.metadata_output_path:
             self._save_batch_metadata()
         
+        # Initialize chunkers for each batch if chunker config is provided
+        if self.config.chunker:
+            self._initialize_chunkers()
+        
+        # Save contexts if requested
+        if self.config.save_full_context or self.config.save_batch_contexts:
+            self._save_contexts()
+        
         logger.info(f"Created {len(self.batches)} temporal batches for user {self.config.user_id}")
         for i, metadata in enumerate(self.batch_metadata):
             logger.info(f"Batch {i}: {metadata['num_emails']} emails from {metadata['start_date']} to {metadata['end_date']}")
@@ -117,6 +136,87 @@ class EnronStreamResource(Resource):
             json.dump(self.batch_metadata, f, indent=2, default=str)
         
         logger.info(f"Saved batch metadata to {metadata_path}")
+    
+    def _initialize_chunkers(self):
+        """Initialize chunkers for each batch."""
+        logger.info("Initializing chunkers for temporal batches...")
+        for batch_id in range(len(self.batches)):
+            batch_content = self._get_batch_content(batch_id)
+            chunker = self.config.chunker.instantiate(text=batch_content)
+            self.chunkers[batch_id] = chunker
+            logger.info(f"Initialized chunker for batch {batch_id} with {len(batch_content)} characters")
+    
+    def _save_contexts(self):
+        """Save full context and individual batch contexts to JSON files."""
+        # Determine output directory
+        if self.config.context_output_dir:
+            context_dir = Path(self.config.context_output_dir)
+        elif self.config.synthesis_output_dir:
+            # Use synthesis config output_dir
+            context_dir = Path(self.config.synthesis_output_dir)
+        else:
+            # Fallback to environment variable
+            output_base = os.environ.get("CARTRIDGES_OUTPUT_DIR", ".")
+            context_dir = Path(output_base) / "enron" / self.config.user_id
+        
+        context_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save full context across all batches
+        if self.config.save_full_context:
+            logger.info("Saving full context across all batches...")
+            full_context = self._get_all_batches_content()
+            
+            full_context_data = {
+                "user_id": self.config.user_id,
+                "total_batches": len(self.batches),
+                "total_emails": sum(len(batch) for batch in self.batches),
+                "time_range": {
+                    "start": str(min(metadata['start_date'] for metadata in self.batch_metadata)),
+                    "end": str(max(metadata['end_date'] for metadata in self.batch_metadata))
+                },
+                "chunker_config": self.config.chunker.model_dump() if self.config.chunker else None,
+                "full_content": full_context,
+                "content_length_chars": len(full_context),
+                "content_length_tokens": len(self.chunkers[0].tokens) if self.chunkers else None
+            }
+            
+            full_context_path = context_dir / f"full_context-{self.config.user_id}.json"
+            with open(full_context_path, 'w', encoding='utf-8') as f:
+                json.dump(full_context_data, f, indent=2, ensure_ascii=False, default=str)
+            
+            logger.info(f"Saved full context to {full_context_path}")
+        
+        # Save individual batch contexts
+        if self.config.save_batch_contexts:
+            logger.info("Saving individual batch contexts...")
+            batch_contexts = []
+            
+            for batch_id in range(len(self.batches)):
+                batch_content = self._get_batch_content(batch_id)
+                batch_info = self.get_batch_info(batch_id)
+                
+                batch_context_data = {
+                    "batch_id": batch_id,
+                    "user_id": self.config.user_id,
+                    "num_emails": batch_info['num_emails'],
+                    "time_range": {
+                        "start": str(batch_info['start_date']),
+                        "end": str(batch_info['end_date'])
+                    },
+                    "users": batch_info['users'],
+                    "email_paths": batch_info['email_paths'],
+                    "batch_content": batch_content,
+                    "content_length_chars": len(batch_content),
+                    "content_length_tokens": len(self.chunkers[batch_id].tokens) if batch_id in self.chunkers else None
+                }
+                
+                batch_contexts.append(batch_context_data)
+            
+            batch_contexts_path = context_dir / f"batch_contexts-{self.config.user_id}.json"
+            with open(batch_contexts_path, 'w', encoding='utf-8') as f:
+                json.dump(batch_contexts, f, indent=2, ensure_ascii=False, default=str)
+            
+            logger.info(f"Saved {len(batch_contexts)} batch contexts to {batch_contexts_path}")
     
     def get_batch_info(self, batch_id: int) -> Dict[str, Any]:
         """Get information about a specific batch."""
@@ -145,10 +245,15 @@ class EnronStreamResource(Resource):
     async def sample_prompt(self, batch_size: int) -> tuple[str, List[str]]:
         # Get content for the specified batch (set via set_batch_id)
         batch_id = getattr(self, '_current_batch_id', 0)
-        batch_content = self._get_batch_content(batch_id)
+        
+        # Use chunker if available, otherwise fall back to full batch content
+        if self.config.chunker and batch_id in self.chunkers:
+            content = self.chunkers[batch_id].sample_chunk()
+        else:
+            content = self._get_batch_content(batch_id)
         
         seed_prompts = sample_seed_prompts(self.config.seed_prompts, batch_size)
-        return batch_content, seed_prompts
+        return content, seed_prompts
     
     def set_batch_id(self, batch_id: int):
         """Set which batch to use for synthesis."""
@@ -185,6 +290,13 @@ class EnronStreamResource(Resource):
     def get_output_suffix(self) -> str:
         """Get suffix for output naming."""
         return getattr(self, '_batch_suffix', '')
+    
+    async def setup(self):
+        """Async setup method for initializing chunkers if needed."""
+        # This method is called by the synthesis framework
+        # Chunkers are already initialized in __init__, but we provide this for consistency
+        if self.config.chunker and not self.chunkers:
+            self._initialize_chunkers()
     
     
     def _get_batch_content(self, batch_id: int) -> str:
