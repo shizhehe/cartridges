@@ -19,7 +19,7 @@ dependencies = [
     "pydrantic",
     "tiktoken",
     "peft",
-    "evaluate",s
+    "evaluate"
     "matplotlib",
     "markdown",
     "dotenv",
