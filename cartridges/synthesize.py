@@ -78,13 +78,23 @@ class SynthesizeConfig(RunConfig):
     output_dir: Optional[str] = Field(default=os.environ.get("CARTRIDGES_OUTPUT_DIR", "."))
 
     # --- END CONFIGURATIONS FOR LOGGING AND SAVING  ---
-
+    
+    # whether to synthesize multiple batches separately (for temporal datasets)
+    synthesize_batches_separately: bool = False
 
     def run(self):
         assert self.name is not None
         assert not self.upload_to_hf or self.hf_repo_id is not None
 
         os.environ["TOKENIZERS_PARALLELISM"] = "true"
+        
+        # Check if we should synthesize batches separately BEFORE creating run_dir
+        if self.synthesize_batches_separately:
+            assert self.run_dir is not None
+            self.run_dir = Path(self.run_dir)
+            self._run_multi_batch_synthesis()
+            return
+
         assert self.run_dir is not None
         self.run_dir = Path(self.run_dir)
         logger.info(f"Generating dataset with run dir: {self.run_dir}")
@@ -106,7 +116,7 @@ class SynthesizeConfig(RunConfig):
             _save_wandb_preview(all_rows)
 
         output_dir = self.run_dir / "artifact"
-        output_dir.mkdir()
+        output_dir.mkdir(parents=True, exist_ok=True)
         final_output_path = output_dir / "dataset.parquet"
         write_conversations(all_rows, final_output_path)
 
@@ -128,6 +138,56 @@ class SynthesizeConfig(RunConfig):
             upload_run_dir_to_hf(self.run_dir, hf_id)
 
         wandb.finish()
+    
+    def _run_multi_batch_synthesis(self):
+        """Run synthesis for multiple batches separately."""
+        # Check if any resources support multi-batch synthesis
+        enron_resource_config = None
+        for resource_config in self.synthesizer.resources:
+            if hasattr(resource_config, 'user_id') and hasattr(resource_config, 'num_batches'):
+                # This is likely an EnronStreamResource config
+                enron_resource_config = resource_config
+                break
+        
+        if not enron_resource_config:
+            logger.warning("synthesize_batches_separately=True but no EnronStreamResource found")
+            return
+        
+        # Instantiate to get number of batches
+        from cartridges.data.enron.resources import EnronStreamResource
+        temp_resource = EnronStreamResource(enron_resource_config)
+        num_batches = temp_resource.get_num_batches()
+        
+        logger.info(f"Running synthesis for {num_batches} batches separately")
+        
+        for batch_id in range(num_batches):
+            logger.info(f"Synthesizing batch {batch_id}")
+            
+            # Create a copy of the resource config for this batch
+            batch_resource_config = enron_resource_config.model_copy()
+            # Store the target batch ID in the config
+            batch_resource_config._target_batch_id = batch_id
+            
+            # Create a copy of the synthesizer config
+            batch_synthesizer_config = self.synthesizer.model_copy()
+            batch_synthesizer_config.resources = [batch_resource_config]
+            
+            # Create a copy of this config for this batch
+            batch_config = self.model_copy()
+            batch_config.synthesize_batches_separately = False  # Prevent recursion
+            batch_config.synthesizer = batch_synthesizer_config
+            
+            # Update output directory and names for this batch
+            original_run_dir = batch_config.run_dir
+            batch_config.run_dir = Path(original_run_dir).parent / f"{Path(original_run_dir).name}_batch_{batch_id}"
+            batch_config.name = f"{batch_config.name}_batch_{batch_id}"
+            
+            # Run synthesis for this batch
+            batch_config.run()
+            
+            logger.info(f"Completed synthesis for batch {batch_id}")
+        
+        logger.info("Completed synthesis for all batches")
 
     async def _run_async_batches_with_queue(
         self, 

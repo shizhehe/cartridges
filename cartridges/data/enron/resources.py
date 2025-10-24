@@ -5,8 +5,9 @@ from pathlib import Path
 from datetime import datetime
 
 from cartridges.utils import get_logger
-from cartridges.data.resources import Resource, sample_seed_prompts, SEED_TYPES
+from cartridges.data.resources import Resource, sample_seed_prompts, SEED_TYPES, Chunker
 from cartridges.data.enron.utils import load_enron_user_data, load_enron_selected_users, create_temporal_batches
+import os
 
 logger = get_logger(__name__)
 
@@ -50,9 +51,29 @@ class EnronStreamResource(Resource):
         num_batches: Optional[int] = None  # Total number of batches to create (None = use all data)
         metadata_output_path: Optional[str] = None  # Where to save batch metadata
         
+        # New config option to enable multi-batch synthesis
+        synthesize_all_batches: bool = True  # If True, creates separate datasets for each batch
+        batch_output_dir: Optional[str] = None  # Base directory for batch outputs
+        
     def __init__(self, config: Config):
         self.config = config
-        
+
+        # Check if a specific batch ID was set for this instance
+        if hasattr(config, '_target_batch_id'):
+            self._current_batch_id = config._target_batch_id
+
+        # Load folder name mappings if selected_users_file is provided
+        self.folder_name_mapping = {}
+        if self.config.selected_users_file:
+            try:
+                with open(self.config.selected_users_file, 'r') as f:
+                    selected_users_data = json.load(f)
+                    if self.config.user_id in selected_users_data:
+                        self.folder_name_mapping = selected_users_data[self.config.user_id]
+                        logger.info(f"Loaded folder name mappings for {self.config.user_id}: {self.folder_name_mapping}")
+            except Exception as e:
+                logger.warning(f"Could not load folder name mappings: {e}")
+
         # Load single user based on config
         if self.config.selected_users_file:
             # Load from selected users file, but filter to single user
@@ -122,11 +143,49 @@ class EnronStreamResource(Resource):
         return f"... {truncated} ..."
 
     async def sample_prompt(self, batch_size: int) -> tuple[str, List[str]]:
-        # Get all batches content as a single context
-        all_batches_content = self._get_all_batches_content()
+        # Get content for the specified batch (set via set_batch_id)
+        batch_id = getattr(self, '_current_batch_id', 0)
+        batch_content = self._get_batch_content(batch_id)
         
         seed_prompts = sample_seed_prompts(self.config.seed_prompts, batch_size)
-        return all_batches_content, seed_prompts
+        return batch_content, seed_prompts
+    
+    def set_batch_id(self, batch_id: int):
+        """Set which batch to use for synthesis."""
+        if 0 <= batch_id < len(self.batches):
+            self._current_batch_id = batch_id
+            logger.info(f"Set current batch to {batch_id}")
+        else:
+            raise ValueError(f"Batch {batch_id} does not exist. Available batches: 0-{len(self.batches)-1}")
+    
+    def get_num_batches(self) -> int:
+        """Get the total number of batches."""
+        return len(self.batches)
+    
+    def _get_human_readable_folder(self, folder_name: str) -> str:
+        """Get human-readable folder name from mapping, fallback to original."""
+        return self.folder_name_mapping.get(folder_name, folder_name)
+    
+    def get_synthesis_variants(self) -> List['EnronStreamResource']:
+        """Return a list of resource variants for multi-batch synthesis."""
+        if not self.config.synthesize_all_batches:
+            return [self]
+        
+        variants = []
+        for batch_id in range(len(self.batches)):
+            # Create a copy of the resource for this batch
+            batch_resource = EnronStreamResource(self.config)
+            batch_resource.set_batch_id(batch_id)
+            # Add batch identifier for output naming
+            batch_resource._batch_suffix = f"_batch_{batch_id}"
+            variants.append(batch_resource)
+        
+        return variants
+    
+    def get_output_suffix(self) -> str:
+        """Get suffix for output naming."""
+        return getattr(self, '_batch_suffix', '')
+    
     
     def _get_batch_content(self, batch_id: int) -> str:
         """Get all emails in a specific batch as a single formatted context."""
@@ -161,7 +220,7 @@ class EnronStreamResource(Resource):
                 to_addr=email.to_addr,
                 subject=email.subject,
                 date=email.date,
-                folder=email.folder,
+                folder=self._get_human_readable_folder(email.folder),
                 body=truncated_body
             )
             formatted_email += "\n" + "-" * 60 + "\n"
@@ -206,7 +265,7 @@ class EnronStreamResource(Resource):
         for user in self.users:
             formatted_emails = []
             for email_id, email in user.emails.items():
-                formatted_email = f"<{email_id}>\nFrom: {email.from_addr}\nTo: {email.to_addr}\nSubject: {email.subject}\nDate: {email.date}\nFolder: {email.folder}\n\n{email.body}\n</{email_id}>"
+                formatted_email = f"<{email_id}>\nFrom: {email.from_addr}\nTo: {email.to_addr}\nSubject: {email.subject}\nDate: {email.date}\nFolder: {self._get_human_readable_folder(email.folder)}\n\n{email.body}\n</{email_id}>"
                 formatted_emails.append(formatted_email)
             
             emails_text = "\n\n".join(formatted_emails)

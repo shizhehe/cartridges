@@ -288,7 +288,9 @@ def create_temporal_batches(
 
 def load_enron_selected_users(
     selected_users_path: str = "datasets/enron/processed/selected_users.json",
-    dataset_path: str = "datasets/enron"
+    dataset_path: str = "datasets/enron",
+    max_emails_per_batch: Optional[int] = None,
+    num_batches: Optional[int] = None
 ) -> List[EnronUser]:
     """Load data for pre-selected Enron users with their specified folders."""
     
@@ -301,6 +303,11 @@ def load_enron_selected_users(
     
     users = []
     
+    # Calculate max emails per user if batch parameters are provided
+    max_emails_per_user = None
+    if max_emails_per_batch and num_batches:
+        max_emails_per_user = max_emails_per_batch * num_batches
+    
     for user_id, folder_config in users_config.items():
         try:
             # folder_config is a dict like {"inbox": "Inbox", "sent": "Sent", ...}
@@ -310,7 +317,7 @@ def load_enron_selected_users(
                 user_ids=[user_id],
                 dataset_path=dataset_path,
                 folders_to_include=folders_to_include,
-                max_emails_per_user=200  # Reasonable limit
+                max_emails_per_user=max_emails_per_user
             )
             
             if user_data:
