@@ -157,8 +157,18 @@ class SynthesizeConfig(RunConfig):
             return
         
         # Instantiate to get number of batches
-        from cartridges.data.enron.resources import EnronStreamResource
-        temp_resource = EnronStreamResource(enron_resource_config)
+        # Check if this is an EnronStreamEvalResource or EnronStreamResource
+        try:
+            from cartridges.data.enron.eval_resources import EnronStreamEvalResource
+            if isinstance(enron_resource_config, EnronStreamEvalResource.Config):
+                temp_resource = EnronStreamEvalResource(enron_resource_config)
+            else:
+                from cartridges.data.enron.resources import EnronStreamResource
+                temp_resource = EnronStreamResource(enron_resource_config)
+        except ImportError:
+            # Fallback to EnronStreamResource if eval_resources not available
+            from cartridges.data.enron.resources import EnronStreamResource
+            temp_resource = EnronStreamResource(enron_resource_config)
         num_batches = temp_resource.get_num_batches()
         
         logger.info(f"Running synthesis for {num_batches} batches separately")
