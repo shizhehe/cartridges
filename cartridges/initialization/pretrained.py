@@ -14,18 +14,13 @@ from cartridges.models.helpers import ModelHelper
 
 logger = get_logger(__name__)
 
-def _list_cache_files(run_id: str) -> list[str]:
+def _list_cache_files(full_run_path: str) -> list[str]:
     import wandb
     import re
     import os
 
     api = wandb.Api()
     
-    # Construct full run path from run ID
-    wandb_entity = os.environ.get("WANDB_ENTITY", "shizhehe")
-    wandb_project = os.environ.get("WANDB_PROJECT", "dynamic-cartridges")
-    full_run_path = f"{wandb_entity}/{wandb_project}/{run_id}"
-
     # Get all files from the run
     files = [file.name for file in api.run(full_run_path).files()]
 
@@ -66,12 +61,16 @@ class KVFromPretrained(KVCacheFactory):
         print(f"is_ddp: {is_ddp}")
         is_rank_zero = (not is_ddp) or (dist.get_rank() == 0)
 
-        logger.info(f"Restoring cache from wandb run {self.config.wandb_run_id}")
+        wandb_entity = os.environ.get("WANDB_ENTITY", "shizhehe")
+        wandb_project = os.environ.get("WANDB_PROJECT", "dynamic-cartridges")
+        full_run_path = f"{wandb_entity}/{wandb_project}/{self.config.wandb_run_id}"
+
+        logger.info(f"Restoring cache from wandb run {full_run_path}")
         filename = ...
 
-        cache_files = _list_cache_files(self.config.wandb_run_id)
+        cache_files = _list_cache_files(full_run_path)
         if len(cache_files) == 0:
-            raise ValueError(f"No cache checkpoints found for wandb run {self.config.wandb_run_id}")
+            raise ValueError(f"No cache checkpoints found for wandb run {full_run_path}")
         
         if self.config.filename is not None:
             assert self.config.filename in cache_files, f"Cache file {self.config.filename} not found in wandb run {self.config.wandb_run_id}"
@@ -79,16 +78,16 @@ class KVFromPretrained(KVCacheFactory):
         else:
             filename = cache_files[0]
 
-        cache_dir = Path(os.environ["CARTRIDGES_OUTPUT_DIR"]) / "checkpoints" / self.config.wandb_run_id
+        cache_dir = Path(os.environ["CARTRIDGES_OUTPUT_DIR"]) / "checkpoints" / f"{wandb_entity}/{wandb_project}/{self.config.wandb_run_id}"
         cache_dir.mkdir(parents=True, exist_ok=True)
         
         path = cache_dir / filename
         if not path.exists():
-            logger.info(f"Downloading cache from wandb run {self.config.wandb_run_id} to {cache_dir}")
+            logger.info(f"Downloading cache from wandb run {full_run_path} to {cache_dir}")
             if is_rank_zero:
                 out = wandb.restore(
                     filename, 
-                    run_path=self.config.wandb_run_id, 
+                    run_path=full_run_path, 
                     root=cache_dir,
                 )
         if is_ddp:
