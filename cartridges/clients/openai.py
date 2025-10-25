@@ -169,18 +169,55 @@ class OpenAIClient(Client):
         # Create individual async tasks for each chat
         async def process_single_chat(messages: List[Dict[str, Any]]) -> tuple[ChatCompletion, List[Dict[str, Any]]]:
             async def chat_single(m: List[Dict[str, Any]]) -> ChatCompletion:
-                return await self.client.chat.completions.create(
-                    model=self.config.model_name,
-                    messages=m,
-                    max_completion_tokens=max_completion_tokens,
-                    temperature=temperature,
-                    stop=stop if stop else None,
-                    n=1,
-                    top_logprobs=top_logprobs,
-                    logprobs=top_logprobs is not None,
-                    extra_body=extra_body,
-                    **kwargs,
-                )
+                max_retries = 10
+                for attempt in range(max_retries):
+                    try:
+                        return await self.client.chat.completions.create(
+                            model=self.config.model_name,
+                            messages=m,
+                            max_completion_tokens=max_completion_tokens,
+                            temperature=temperature,
+                            stop=stop if stop else None,
+                            n=1,
+                            top_logprobs=top_logprobs,
+                            logprobs=top_logprobs is not None,
+                            extra_body=extra_body,
+                            **kwargs,
+                        )
+                    except openai.RateLimitError as e:
+                        if attempt == max_retries - 1:
+                            self.logger.error(f"Rate limit exceeded after {max_retries} attempts")
+                            raise e
+                        
+                        # Extract retry_after from headers or use exponential backoff
+                        retry_after = None
+                        if hasattr(e, 'response') and e.response and hasattr(e.response, 'headers'):
+                            retry_after = e.response.headers.get('retry-after')
+                            if retry_after:
+                                try:
+                                    retry_after = float(retry_after)
+                                except (ValueError, TypeError):
+                                    retry_after = None
+                        
+                        # If no retry_after header, use exponential backoff
+                        if retry_after is None:
+                            retry_after = min(2 ** attempt, 60)  # Cap at 60 seconds
+                        
+                        self.logger.warning(f"Rate limit hit, sleeping for {retry_after} seconds (attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(retry_after)
+                    except openai.APIError as e:
+                        if "rate limit" in str(e).lower():
+                            if attempt == max_retries - 1:
+                                self.logger.error(f"Rate limit exceeded after {max_retries} attempts")
+                                raise e
+                            
+                            # Use exponential backoff for generic rate limit errors
+                            retry_after = min(2 ** attempt, 60)
+                            self.logger.warning(f"API rate limit hit, sleeping for {retry_after} seconds (attempt {attempt + 1}/{max_retries})")
+                            await asyncio.sleep(retry_after)
+                        else:
+                            # Non-rate-limit API error, re-raise immediately
+                            raise e
             
             # Handle message truncation with retry logic
             error = None
