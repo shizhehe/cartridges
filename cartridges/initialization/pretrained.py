@@ -17,12 +17,17 @@ logger = get_logger(__name__)
 def _list_cache_files(run_id: str) -> list[str]:
     import wandb
     import re
-
+    import os
 
     api = wandb.Api()
+    
+    # Construct full run path from run ID
+    wandb_entity = os.environ.get("WANDB_ENTITY", "shizhehe")
+    wandb_project = os.environ.get("WANDB_PROJECT", "dynamic-cartridges")
+    full_run_path = f"{wandb_entity}/{wandb_project}/{run_id}"
 
     # Get all files from the run
-    files = [file.name for file in api.run(run_id).files()]
+    files = [file.name for file in api.run(full_run_path).files()]
 
     # Filter for cache-*.pt files using regex
     cache_files = [file for file in files if re.match(r"^cache-.*\.pt$", file)]
