@@ -48,9 +48,12 @@ class EnronStreamEvalResource(Resource):
         # Multi-batch synthesis options (similar to EnronStreamResource)
         synthesize_all_batches: bool = True  # If True, creates separate eval datasets for each batch
         
+        # Target batch ID for single batch generation
+        target_batch_id: Optional[int] = None  # If set, only generate for this specific batch
+        
     def __init__(self, config: Config):
         self.config = config
-        self._current_batch_id = 0  # Default to first batch
+        self._current_batch_id = config.target_batch_id if config.target_batch_id is not None else 0
         
         # Load batch contexts if path provided, otherwise create them
         if self.config.batch_contexts_path and Path(self.config.batch_contexts_path).exists():
