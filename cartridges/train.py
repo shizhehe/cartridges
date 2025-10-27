@@ -58,6 +58,23 @@ class GenerationEvalConfig(BaseConfig):
     batch_size: int = 1
     override_max_tokens: int | None = None
 
+class QAEvalConfig(BaseConfig):
+    dataset: GenerateEvalDataset.Config
+    judge_client: str = "gpt-5-mini"  # OpenAI client model for judging
+    
+    name_for_wandb: str
+    generate_max_new_tokens: int = 128
+    dataloader_num_workers: int = 0
+    num_samples: int = 1
+    num_samples_final: Optional[int] = None
+    temperature: float = 0.0
+    batch_size: int = 1
+    override_max_tokens: int | None = None
+    
+    # Judge-specific settings
+    judge_temperature: float = 0.0
+    judge_max_tokens: int = 512
+
 
 class TrainConfig(RunConfig):
     name: str = "default"  # A name for the run for wandb
@@ -81,6 +98,11 @@ class TrainConfig(RunConfig):
     generate_eval_every_n_steps: Optional[int] = None
     generate_before_training: bool = True
     generate_evals: list[GenerationEvalConfig] = field(default_factory=list)
+    
+    # QA evaluation with judge
+    qa_eval_every_n_steps: Optional[int] = None
+    qa_before_training: bool = True
+    qa_evals: list[QAEvalConfig] = field(default_factory=list)
 
     # the `global_batch_size` is the total batch size across all devices and gradient
     # accumulation steps. We will infer the number of gradient accumulation steps from the
@@ -164,6 +186,10 @@ def train(config: TrainConfig):
     generate_evals: list[tuple[GenerationEvalConfig, GenerateEvalDataset]] = [
         (eval_config, eval_config.dataset.instantiate(model_helper=model_helper, seed=config.seed))
         for eval_config in config.generate_evals
+    ]
+    qa_evals: list[tuple[QAEvalConfig, GenerateEvalDataset]] = [
+        (eval_config, eval_config.dataset.instantiate(model_helper=model_helper, seed=config.seed))
+        for eval_config in config.qa_evals
     ]
     logger.info(
         f"Finished loading eval and generate datasets from disk, took {(time.time() - t0):.2}s"
@@ -321,6 +347,20 @@ def train(config: TrainConfig):
                 final=final,
                 log_to_wandb=config.wandb is not None,
             )
+    
+    def do_qa_evaluation(step: int = None, final: bool = False):
+        for eval_config, qa_dataset in qa_evals:
+            evaluate_qa_with_judge(
+                config=eval_config,
+                model=wrapped_model,
+                tokenizer=tokenizer,
+                dataset=qa_dataset,
+                optimizer_step=optimizer_step,
+                local_rank=local_rank,
+                step=step,
+                final=final,
+                log_to_wandb=config.wandb is not None,
+            )
 
     if config.lr_scheduler is not None:
         lr_scheduler: Scheduler = config.lr_scheduler.instantiate()
@@ -359,6 +399,14 @@ def train(config: TrainConfig):
                 and (config.generate_before_training or iter_idx > 0)
             ):
                 do_evaluate_generations(step=iter_idx)
+            
+            if (
+                config.qa_eval_every_n_steps is not None
+                and optimizer_step % config.qa_eval_every_n_steps == 0
+                and iter_idx % accumulate_grad_steps == 0
+                and (config.qa_before_training or iter_idx > 0)
+            ):
+                do_qa_evaluation(step=iter_idx)
 
             # SE (05/02): We are careful to only reduce the loss across processes
             # when we are on the last batch of gradient accumulation before the optimizer
@@ -493,6 +541,7 @@ def train(config: TrainConfig):
     # This is also useful for doing evaluation of a pretrained model without training
     do_evaluation()
     do_evaluate_generations(final=True)
+    do_qa_evaluation(final=True)
 
     if config.save_after_training and is_rank_zero:
         if cache_tuning:
@@ -830,6 +879,214 @@ def evaluate_generations(
     
     return results
 
+
+def evaluate_qa_with_judge(
+    config: QAEvalConfig,
+    model: CacheAndModel,
+    tokenizer: AutoTokenizer,
+    dataset: GenerateEvalDataset,
+    optimizer_step: int,
+    local_rank,
+    step: int = None,
+    final: bool = False,
+    log_to_wandb: bool = True,
+):
+    """Evaluate QA performance using GPT-5-mini as a judge."""
+    from cartridges.generation import flex_generate
+    from cartridges.clients.openai import OpenAIClient
+    
+    is_ddp = "LOCAL_RANK" in os.environ
+    is_rank_zero = (not is_ddp) or (dist.get_rank() == 0)
+    world_size = dist.get_world_size() if is_ddp else 1
+    
+    if is_ddp:
+        cache = model.module.cache
+        model = model.module.model
+    else:
+        cache = model.cache
+        model = model.model
+        
+    logger.info(
+        f"QA Evaluating `{config.name_for_wandb}` (n={len(dataset)}, {len(dataset) // world_size} per device)"
+    )
+    
+    # Set up judge client
+    judge_client = OpenAIClient.Config(model_name=config.judge_client).instantiate()
+    
+    sampler = DistributedSampler(dataset) if is_ddp else None
+    dataloader = DataLoader(
+        dataset,
+        sampler=sampler,
+        batch_size=config.batch_size,
+        num_workers=config.dataloader_num_workers,
+        collate_fn=lambda x: x[0] if len(x) == 1 else x,
+    )
+    
+    all_scores = []
+    all_questions = []
+    all_responses = []
+    all_ground_truths = []
+    
+    # QA Judge prompt template
+    judge_prompt_template = """You are evaluating the correctness of an AI assistant's response to a question about email data.
+
+Question: {question}
+
+AI Response: {response}
+
+Ground Truth Context: {context}
+
+Based on the information available in the Ground Truth Context, is the AI response factually correct?
+
+Answer with either "CORRECT" or "INCORRECT".
+
+Answer:"""
+
+    for batch_idx, batch in enumerate(tqdm(dataloader, desc="QA Evaluation", disable=not is_rank_zero)):
+        if not isinstance(batch, list):
+            batch = [batch]
+            
+        # Extract data from QA evaluation items
+        # For QA evaluation, we expect the dataset to have conversation format
+        # where the last user message is the question and we need to extract context
+        texts = []
+        questions = []
+        contexts = []
+        
+        for item in batch:
+            if hasattr(item, 'messages') and item.messages:
+                # Extract the last user message as the question
+                user_messages = [msg for msg in item.messages if msg.role == "user"]
+                if user_messages:
+                    question = user_messages[-1].content
+                    questions.append(question)
+                    texts.append(question)  # Use question as prompt for generation
+                    
+                    # Extract context from system message or metadata
+                    if hasattr(item, 'system_prompt') and item.system_prompt:
+                        contexts.append(item.system_prompt)
+                    else:
+                        contexts.append("")
+                else:
+                    # Fallback
+                    questions.append("")
+                    texts.append("")
+                    contexts.append("")
+            else:
+                # Fallback for other formats
+                question = getattr(item, 'text', '') or getattr(item, 'question', '')
+                questions.append(question)
+                texts.append(question)
+                contexts.append(getattr(item, 'context', '') or getattr(item, 'system_prompt', ''))
+        
+        try:
+            # Generate model responses
+            responses = flex_generate(
+                model=model,
+                cache=cache,
+                tokenizer=tokenizer,
+                prompts=texts,
+                max_new_tokens=config.generate_max_new_tokens,
+                temperature=config.temperature,
+                num_samples=config.num_samples,
+                override_max_tokens=config.override_max_tokens,
+            )
+            
+            # Judge each response
+            for question, response, context in zip(questions, responses, contexts):
+                if response and question:
+                    judge_prompt = judge_prompt_template.format(
+                        question=question,
+                        response=response,
+                        context=context
+                    )
+                    
+                    try:
+                        # Get judgment from GPT-5-mini
+                        judge_response = judge_client.chat(
+                            [[{"role": "user", "content": judge_prompt}]],
+                            temperature=config.judge_temperature,
+                            max_completion_tokens=config.judge_max_tokens,
+                        )
+                        
+                        # Extract binary correctness from judge response
+                        judge_text = judge_response.samples[0].text.strip().upper()
+                        
+                        # Convert to binary score: 1 for correct, 0 for incorrect
+                        if "CORRECT" in judge_text:
+                            score = 1.0
+                        else:
+                            score = 0.0
+                            
+                        all_scores.append(score)
+                        all_questions.append(question)
+                        all_responses.append(response)
+                        all_ground_truths.append(context)
+                        
+                    except Exception as e:
+                        logger.warning(f"Judge evaluation failed: {e}")
+                        all_scores.append(0.0)  # Default to incorrect if judge fails
+                        all_questions.append(question)
+                        all_responses.append(response)
+                        all_ground_truths.append(context)
+                        
+        except Exception as e:
+            logger.warning(f"Generation failed for batch {batch_idx}: {e}")
+            continue
+    
+    # Aggregate results across processes
+    if is_ddp:
+        # Gather results from all processes
+        import pickle
+        gathered_scores = [None] * world_size
+        gathered_questions = [None] * world_size  
+        gathered_responses = [None] * world_size
+        gathered_ground_truths = [None] * world_size
+        
+        dist.all_gather_object(gathered_scores, all_scores)
+        dist.all_gather_object(gathered_questions, all_questions)
+        dist.all_gather_object(gathered_responses, all_responses)
+        dist.all_gather_object(gathered_ground_truths, all_ground_truths)
+        
+        # Flatten results
+        all_scores = [score for scores in gathered_scores for score in scores]
+        all_questions = [q for questions in gathered_questions for q in questions]
+        all_responses = [r for responses in gathered_responses for r in responses]
+        all_ground_truths = [gt for gts in gathered_ground_truths for gt in gts]
+    
+    if is_rank_zero and all_scores:
+        # Calculate metrics
+        accuracy = sum(all_scores) / len(all_scores)
+        num_correct = sum(all_scores)
+        
+        results = {
+            f"qa/{config.name_for_wandb}/accuracy": accuracy,
+            f"qa/{config.name_for_wandb}/num_correct": num_correct,
+            f"qa/{config.name_for_wandb}/num_samples": len(all_scores),
+        }
+        
+        # Log to wandb
+        if log_to_wandb:
+            import wandb
+            wandb.log(results, step=optimizer_step)
+            
+        logger.info(f"QA Evaluation Results for {config.name_for_wandb}:")
+        logger.info(f"  Accuracy: {accuracy:.3f} ({num_correct}/{len(all_scores)})")
+        logger.info(f"  Number of samples: {len(all_scores)}")
+        
+        # Save detailed results
+        qa_results = {
+            "questions": all_questions,
+            "responses": all_responses,
+            "ground_truths": all_ground_truths, 
+            "scores": all_scores,
+            "accuracy": accuracy,
+            "num_correct": num_correct,
+        }
+        
+        return qa_results
+    
+    return {}
 
 
 # ---- Learning rate scheduler code ----

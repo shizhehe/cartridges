@@ -35,7 +35,7 @@ class Resource(abc.ABC):
         raise NotImplementedError("This resource does not implement a string representation.")
 
 SEED_TYPES = Literal[
-    "structuring", "summarization", "question", "use_case", "creative", 'generic'
+    "structuring", "summarization", "question", "use_case", "creative", 'generic', 'qa'
 ] | Callable[[Any], str]
 
 
@@ -373,6 +373,12 @@ def generic_seed_prompt(**kwargs):
         f"Please generate a single chat message to begin a conversation about the information in the corpus. Ask a question about the corpus or make a request."
     )
 
+def qa_seed_prompt(**kwargs):
+    return (
+        f"Please generate a single chat message to begin a conversation about the information in the corpus. Ask a question about the corpus or make a request."
+        "Answer only with the question, do not include any other text."
+    )
+
 
 
 SEED_PROMPT_REGISTRY: dict[SEED_TYPES, Callable] = {
@@ -382,6 +388,7 @@ SEED_PROMPT_REGISTRY: dict[SEED_TYPES, Callable] = {
     "use_case": use_case_seed_prompt,
     "creative": creative_seed_prompt,
     "generic": generic_seed_prompt,
+    "qa": qa_seed_prompt,
 }
 
 def sample_seed_prompts(seed_types: List[SEED_TYPES], batch_size: int) -> List[str]:

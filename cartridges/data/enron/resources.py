@@ -14,7 +14,7 @@ logger = get_logger(__name__)
 
 SYSTEM_PROMPT_TEMPLATE = """\
 Below is a selection of emails from {name}'s mailbox (User ID: {user_id}).
-This user has {total_emails} emails across {num_folders} folders.
+This user has {total_emails} emails.
 {emails}"""
 
 EMAIL_TEMPLATE = """\
@@ -32,7 +32,7 @@ Folder: {folder}
 FULL_STRING_TEMPLATE = """\
 <user-mailbox-{user_id}>
 Below is the complete email history for {name} (User ID: {user_id}).
-This user has {total_emails} emails across {num_folders} folders.
+This user has {total_emails} emails.
 <emails>
 {emails}
 </emails>
@@ -238,12 +238,24 @@ class EnronStreamResource(Resource):
         
         # Use chunker if available, otherwise fall back to full batch content
         if self.config.chunker and batch_id in self.chunkers:
-            content = self.chunkers[batch_id].sample_chunk()
+            emails_content = self.chunkers[batch_id].sample_chunk()
         else:
-            content = self._get_batch_content(batch_id)
+            emails_content = self._get_batch_content(batch_id)
+        
+        # Get user information for the system prompt
+        user = self.users[0]  # We're processing a single user
+        total_emails = sum(len(batch) for batch in self.batches)
+        
+        # Format with system prompt template
+        ctx = SYSTEM_PROMPT_TEMPLATE.format(
+            name=user.name if hasattr(user, 'name') else self.config.user_id,
+            user_id=self.config.user_id,
+            total_emails=total_emails,
+            emails=emails_content
+        )
         
         seed_prompts = sample_seed_prompts(self.config.seed_prompts, batch_size)
-        return content, seed_prompts
+        return ctx, seed_prompts
     
     def set_batch_id(self, batch_id: int):
         """Set which batch to use for synthesis."""
@@ -377,7 +389,6 @@ class EnronStreamResource(Resource):
                 name=user.name,
                 user_id=user.user_id,
                 total_emails=len(user.emails),
-                num_folders=len(user.folders),
                 emails=emails_text
             )
         

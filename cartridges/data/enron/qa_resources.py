@@ -12,11 +12,21 @@ import os
 
 logger = get_logger(__name__)
 
-
 SYSTEM_PROMPT_TEMPLATE = """\
+You are an expert at creating question-answer pairs about email data for evaluation purposes.
+
 Below is a selection of emails from {name}'s mailbox (User ID: {user_id}).
-This user has {total_emails} emails.
-{emails}"""
+This user has {total_emails} emails in this batch.
+
+{emails}
+
+Your task is to create high-quality question-answer pairs that test understanding of this email data. Focus on:
+1. Factual questions about email content, senders, recipients, dates, subjects
+2. Questions about relationships and communication patterns
+3. Questions about specific details mentioned in the emails
+4. Questions that require understanding context across multiple emails
+
+Generate questions that can ONLY be answered from the provided email context above."""
 
 EMAIL_TEMPLATE = """\
 <email-{email_id}>
@@ -30,7 +40,7 @@ Folder: {folder}
 </email-{email_id}>
 """
 
-class EnronStreamEvalResource(Resource):
+class EnronStreamQAResource(Resource):
     class Config(Resource.Config):
         user_id: str  # Single user ID to process
         max_emails_per_batch: int = 1000
@@ -40,24 +50,25 @@ class EnronStreamEvalResource(Resource):
         selected_users_file: Optional[str] = None  # Path to selected_users.json
         num_batches: Optional[int] = None  # Total number of batches to create (None = use all data)
         
-        
         # Chunker configuration for sampling from current batch
         chunker: Optional[Chunker.Config] = None
         
         # Context paths - can override if contexts already exist
         batch_contexts_path: Optional[str] = None  # Path to existing batch_contexts-{user_id}.json
         
-        # Seed prompts for evaluation (different from training)
-        seed_prompts: List[SEED_TYPES] = ["question", "analytical", "factual"]
+        # QA-specific seed prompts
+        seed_prompts: List[SEED_TYPES] = [
+            "question",        # Direct factual questions
+            "analytical",      # Analysis questions  
+            "factual",         # Factual information extraction
+            "summarization",   # Summary questions
+        ]
         
-        # Multi-batch synthesis options (similar to EnronStreamResource)
-        synthesize_all_batches: bool = True  # If True, creates separate eval datasets for each batch
+        # Multi-batch synthesis options
+        synthesize_all_batches: bool = True  # If True, creates separate QA datasets for each batch
         
         # Target batch ID for single batch generation
         target_batch_id: Optional[int] = None  # If set, only generate for this specific batch
-        
-        # Whether to exclude future batches from generation context
-        exclude_future_batches: bool = False  # If True, excludes future context as distractor
         
     def __init__(self, config: Config):
         self.config = config
@@ -69,16 +80,13 @@ class EnronStreamEvalResource(Resource):
         else:
             self._create_temporal_batches()
         
-        logger.info(f"EnronStreamEvalResource initialized for user {self.config.user_id}")
+        logger.info(f"EnronStreamQAResource initialized for user {self.config.user_id}")
         logger.info(f"Total batches available: {len(self.batch_contexts)}")
         if hasattr(self, '_current_batch_id'):
             logger.info(f"Current batch: {self._current_batch_id}")
             if self._current_batch_id < len(self.batch_contexts):
                 current_chars = len(self.batch_contexts[self._current_batch_id]['batch_content'])
                 logger.info(f"Current batch has {current_chars} chars")
-                if self._current_batch_id < len(self.batch_contexts) - 1:
-                    future_chars = sum(len(ctx['batch_content']) for ctx in self.batch_contexts[self._current_batch_id + 1:])
-                    logger.info(f"Future context has {future_chars} chars")
     
     def _load_existing_contexts(self):
         """Load existing batch contexts from JSON file."""
@@ -88,7 +96,7 @@ class EnronStreamEvalResource(Resource):
         logger.info(f"Loaded {len(self.batch_contexts)} batch contexts")
     
     def _create_temporal_batches(self):
-        """Create temporal batches from Enron data (similar to EnronStreamResource)."""
+        """Create temporal batches from Enron data."""
         logger.info("Creating temporal batches from Enron data...")
         
         # Load folder name mappings if selected_users_file is provided
@@ -157,18 +165,18 @@ class EnronStreamEvalResource(Resource):
         user_names = set(email.user_id for _, email in sorted_emails)
         
         # Create batch header
-        batch_header = f"EMAIL BATCH {batch_metadata.get('batch_id', 'UNKNOWN')}\n"
-        batch_header += f"Time Period: {batch_metadata['start_date']} to {batch_metadata['end_date']}\n"
-        batch_header += f"Total Emails: {len(sorted_emails)}\n"
-        batch_header += f"Users: {', '.join(sorted(user_names))}\n"
-        batch_header += "=" * 80 + "\n\n"
+        batch_header = f"EMAIL BATCH {batch_metadata.get('batch_id', 'UNKNOWN')}\\n"
+        batch_header += f"Time Period: {batch_metadata['start_date']} to {batch_metadata['end_date']}\\n"
+        batch_header += f"Total Emails: {len(sorted_emails)}\\n"
+        batch_header += f"Users: {', '.join(sorted(user_names))}\\n"
+        batch_header += "=" * 80 + "\\n\\n"
         
         # Format all emails in the batch
         formatted_emails = []
         for i, (email_path, email) in enumerate(sorted_emails, 1):
             truncated_body = self._truncate_email(email.body)
             
-            formatted_email = f"EMAIL {i}/{len(sorted_emails)}\n"
+            formatted_email = f"EMAIL {i}/{len(sorted_emails)}\\n"
             formatted_email += EMAIL_TEMPLATE.format(
                 email_id=email.email_id,
                 from_addr=email.from_addr,
@@ -178,12 +186,12 @@ class EnronStreamEvalResource(Resource):
                 folder=self.folder_name_mapping.get(email.folder, email.folder),
                 body=truncated_body
             )
-            formatted_email += "\n" + "-" * 60 + "\n"
+            formatted_email += "\\n" + "-" * 60 + "\\n"
             
             formatted_emails.append(formatted_email)
         
         # Combine everything
-        return batch_header + "\n".join(formatted_emails)
+        return batch_header + "\\n".join(formatted_emails)
     
     def _truncate_email(self, email_body: str) -> str:
         """Truncate email body if too long."""
@@ -195,10 +203,8 @@ class EnronStreamEvalResource(Resource):
         truncated = email_body[start_idx:end_idx]
         return f"... {truncated} ..."
     
-    
-    
     async def sample_prompt(self, batch_size: int) -> tuple[str, List[str]]:
-        """Sample prompts with temporal awareness for evaluation dataset generation."""
+        """Sample prompts for QA generation."""
         # Get current batch content
         current_context = self.batch_contexts[self._current_batch_id]['batch_content']
         
@@ -209,79 +215,41 @@ class EnronStreamEvalResource(Resource):
         else:
             sampled_current_context = current_context
         
-        # Create prompt template for synthesis framework
-        if self.config.exclude_future_batches:
-            # Explicit instruction to exclude future batches with future context provided as distractor
-            # Get future context (all batches after current batch) as distractor
-            future_batches = self.batch_contexts[self._current_batch_id + 1:]
-            if future_batches:
-                future_context = "\n\n".join([
-                    f"Future Context {j+1}:\n{batch_dict['batch_content']}" 
-                    for j, batch_dict in enumerate(future_batches)
-                ])
-            else:
-                future_context = "No future context available."
-            
-            temporal_content = f"""## Instructions for Conversation Generation:
-You are generating conversations about email data with temporal awareness. You have access to two contexts:
-
-### Context A (Distractor - Future Information):
-{future_context}
-
-### Context B (Relevant - Current Information):
-{sampled_current_context}
-
-### Critical Requirements:
-1. Generate conversations that can ONLY be answered or discussed using information from Context B (Current Information)
-2. DO NOT use any information from Context A (Future Information) in your responses
-3. Context A represents information that should not be available at this time period
-4. Focus on understanding, analyzing, and discussing the emails in Context B
-5. Ensure that any questions, analysis, or discussion points can be resolved using only Context B
-
-### Temporal Context:
-This is batch {self._current_batch_id} of the email timeline. When generating conversations, maintain awareness that this represents a specific time period and future information should not influence the discussion.
-"""
-        else:
-            # Normal QA generation using SYSTEM_PROMPT_TEMPLATE like EnronStreamResource
-            # Get user information for the system prompt
-            total_emails = sum(batch_ctx.get('num_emails', 0) for batch_ctx in self.batch_contexts)
-            
-            # Count unique folders - we'll approximate this from the current batch
-            # Since we don't have direct access to folder info in batch_contexts, we'll use a reasonable default
-            
-            # Format with system prompt template
-            temporal_content = SYSTEM_PROMPT_TEMPLATE.format(
-                name=self.config.user_id,  # Use user_id as name since we don't have full name
-                user_id=self.config.user_id,
-                total_emails=total_emails,
-                emails=sampled_current_context
-            )
+        # Get user information for the system prompt
+        total_emails = self.batch_contexts[self._current_batch_id].get('num_emails', 0)
         
-        # Sample seed prompts - these will determine the TYPE of conversations generated
+        # Format with QA-specific system prompt template
+        qa_content = SYSTEM_PROMPT_TEMPLATE.format(
+            name=self.config.user_id,  # Use user_id as name since we don't have full name
+            user_id=self.config.user_id,
+            total_emails=total_emails,
+            emails=sampled_current_context
+        )
+        
+        # Sample seed prompts for QA generation
         seed_prompts = sample_seed_prompts(self.config.seed_prompts, batch_size)
         
-        return temporal_content, seed_prompts
+        return qa_content, seed_prompts
     
     async def setup(self):
         """Setup method called by synthesis framework."""
-        # No need to generate QA pairs - synthesis framework will handle it
         pass
     
-    def get_synthesis_variants(self) -> List['EnronStreamEvalResource']:
-        """Return a list of resource variants for multi-batch eval synthesis."""
+    def get_synthesis_variants(self) -> List['EnronStreamQAResource']:
+        """Return a list of resource variants for multi-batch QA synthesis."""
         if not self.config.synthesize_all_batches:
             return [self]
         
         variants = []
         for batch_id in range(len(self.batch_contexts)):
-            # Create a copy of the resource for this batch (same pattern as EnronStreamResource)
-            batch_resource = EnronStreamEvalResource(self.config)
+            # Create a copy of the resource for this batch
+            batch_resource = EnronStreamQAResource(self.config)
             batch_resource.set_batch_id(batch_id)
             # Add batch identifier for output naming
             batch_resource._batch_suffix = f"_batch_{batch_id}"
             variants.append(batch_resource)
         
-        logger.info(f"Created {len(variants)} eval resource variants for batches 0-{len(variants)-1}")
+        logger.info(f"Created {len(variants)} QA resource variants for batches 0-{len(variants)-1}")
         return variants
     
     def get_output_suffix(self) -> str:
@@ -289,7 +257,7 @@ This is batch {self._current_batch_id} of the email timeline. When generating co
         return getattr(self, '_batch_suffix', '')
     
     def set_batch_id(self, batch_id: int):
-        """Set which batch to use for eval generation."""
+        """Set which batch to use for QA generation."""
         if 0 <= batch_id < len(self.batch_contexts):
             self._current_batch_id = batch_id
             logger.info(f"Set current batch to {batch_id}")
@@ -303,4 +271,3 @@ This is batch {self._current_batch_id} of the email timeline. When generating co
     def get_batch_info(self) -> Dict[str, Any]:
         """Get information about the current batch."""
         return self.batch_contexts[self._current_batch_id]
-    
