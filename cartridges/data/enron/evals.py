@@ -21,9 +21,8 @@ class EnronQAGenerateDataset(GenerateEvalDataset):
         judge_max_tokens: int = 300  # Max tokens for judge response
 
     def __init__(self, config: Config, model_helper: ModelHelper, seed: int):
-        self.config = config
-        self.model_helper = model_helper
-        self.tokenizer = model_helper.tokenizer
+        # Call parent constructor to load data from DataSource
+        super().__init__(config, model_helper, seed)
         
         # Initialize Cartridges OpenAI client for LLM judging
         if self.config.use_llm_judge:
@@ -32,47 +31,27 @@ class EnronQAGenerateDataset(GenerateEvalDataset):
                 api_key=os.getenv("OPENAI_API_KEY")
             ).instantiate()
         
-        # Load the QA data from the data source
-        self.qa_data = []
-        
-        # The data source should point to the wandb artifact with QA data
-        # For now, we'll assume the data is loaded externally and passed in
-        # In practice, this would use the DataSource to load from wandb
-        
-        # Placeholder - in actual usage, this would load from config.data_source
+        # Convert loaded conversations to QA format for easier access
         self.qa_items = []
-        
-    def load_qa_data_from_source(self):
-        """Load QA data from the configured data source."""
-        # This would be implemented to actually load from the wandb artifact
-        # For now, placeholder implementation
-        pass
-        
-    def set_qa_data(self, qa_data: List[Dict]):
-        """Set QA data directly (for testing/manual setup)."""
-        self.qa_items = []
-        
-        for item in qa_data:
-            # Extract question and answer from the data format
-            if 'messages' in item:
+        for i, conversation in enumerate(self.data):
+            if len(conversation.messages) >= 2:
                 question = ""
                 answer = ""
-                for msg in item['messages']:
-                    if msg['role'] == 'user':
-                        question = msg['content']
-                    elif msg['role'] == 'assistant':
-                        answer = msg['content']
-            elif 'question' in item and 'answer' in item:
-                question = item['question']
-                answer = item['answer']
-            else:
-                continue
                 
-            self.qa_items.append({
-                'question': question,
-                'answer': answer,
-                'id': f"qa_{len(self.qa_items)}"
-            })
+                # Extract question and answer from conversation messages
+                for msg in conversation.messages:
+                    if msg.role == "user":
+                        question = msg.content
+                    elif msg.role == "assistant":
+                        answer = msg.content
+                
+                if question and answer:
+                    self.qa_items.append({
+                        'question': question,
+                        'answer': answer,
+                        'id': f"qa_{i}",
+                        'conversation_idx': i
+                    })
 
     def __getitem__(self, index: int) -> GenerateEvalDatasetElement:
         qa_item = self.qa_items[index]
@@ -118,14 +97,18 @@ Task: Determine if the model's answer is semantically equivalent to the referenc
 3. Is the model's answer a reasonable paraphrase or reformulation?
 4. For factual questions, do they provide the same factual information?
 
-Respond with EXACTLY ONE of these three words followed by a brief explanation:
+You must respond with a valid JSON object with the following format:
+{{
+    "judgment": "CORRECT" | "INCORRECT",
+    "explanation": "Your brief explanation (1-2 sentences)"
+}}
+
+Where:
 - "CORRECT" if the answers are semantically equivalent
-- "INCORRECT" if they are not equivalent or the model's answer is wrong  
-- "UNCLEAR" if it's ambiguous or you cannot determine
+- "INCORRECT" if they are not equivalent or the model's answer is wrong
 
-Format: [JUDGMENT] [explanation in 1-2 sentences]
-
-Example: CORRECT The model's answer provides the same factual information as the reference answer."""
+Example:
+{{"judgment": "CORRECT", "explanation": "The model's answer provides the same factual information as the reference answer."}}"""
 
         try:
             # Use Cartridges OpenAI client for judging
@@ -145,32 +128,16 @@ Example: CORRECT The model's answer provides the same factual information as the
             chat_response = asyncio.run(get_judge_response())
             judge_response = chat_response.samples[0].text.strip()
             
-            # Parse the text response
+            # Parse the JSON response
             try:
-                # Extract judgment from the beginning of the response
-                judge_response_upper = judge_response.upper()
+                judge_data = json.loads(judge_response)
                 
-                judgment = "UNCLEAR"  # default
-                explanation = judge_response  # full response as explanation
+                judgment = judge_data.get("judgment", "INCORRECT").upper()
+                explanation = judge_data.get("explanation", "No explanation provided")
                 
-                # Check for judgment at start of response
-                if judge_response_upper.startswith("CORRECT"):
-                    judgment = "CORRECT"
-                    explanation = judge_response[7:].strip()  # Remove "CORRECT" and get explanation
-                elif judge_response_upper.startswith("INCORRECT"):
-                    judgment = "INCORRECT" 
-                    explanation = judge_response[9:].strip()  # Remove "INCORRECT" and get explanation
-                elif judge_response_upper.startswith("UNCLEAR"):
-                    judgment = "UNCLEAR"
-                    explanation = judge_response[7:].strip()  # Remove "UNCLEAR" and get explanation
-                else:
-                    # Try to find the judgment anywhere in the response
-                    if "CORRECT" in judge_response_upper and "INCORRECT" not in judge_response_upper:
-                        judgment = "CORRECT"
-                    elif "INCORRECT" in judge_response_upper:
-                        judgment = "INCORRECT"
-                    else:
-                        judgment = "UNCLEAR"
+                # Validate judgment - only accept CORRECT or INCORRECT
+                if judgment not in ["CORRECT", "INCORRECT"]:
+                    judgment = "INCORRECT"  # Default to incorrect for safety
                 
                 # Determine if correct
                 is_correct = judgment == "CORRECT"
@@ -183,11 +150,22 @@ Example: CORRECT The model's answer provides the same factual information as the
                     "raw_response": judge_response
                 }
                 
-            except Exception as parse_error:
-                print(f"Failed to parse LLM judge response: {parse_error}")
+            except json.JSONDecodeError as json_error:
+                print(f"Failed to parse LLM judge JSON response: {json_error}")
                 print(f"Raw response: {judge_response}")
-                # Fallback to string matching
-                return self._fallback_score(pred, answer)
+                # Try to extract judgment from raw text as fallback
+                judge_response_upper = judge_response.upper()
+                if "CORRECT" in judge_response_upper and "INCORRECT" not in judge_response_upper:
+                    return True, {
+                        "match_type": "llm_judge_text_fallback",
+                        "judgment": "CORRECT",
+                        "explanation": "Extracted from non-JSON response",
+                        "judge_model": self.config.judge_model,
+                        "raw_response": judge_response
+                    }
+                else:
+                    # Final fallback to string matching
+                    return self._fallback_score(pred, answer)
             
         except Exception as e:
             print(f"Error in LLM judge scoring: {e}")
