@@ -418,26 +418,6 @@ def train(config: TrainConfig):
             )
             with ddp_ctx_manager:
                 with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
-                    # === DEBUG LOGGING: Batch data ===
-                    logger.info(f"[NaN DEBUG] Step {iter_idx} - Batch data check:")
-                    logger.info(f"  input_ids shape: {batch.input_ids.shape}, dtype: {batch.input_ids.dtype}")
-                    logger.info(f"  input_ids has_nan: {torch.isnan(batch.input_ids.float()).any()}")
-                    logger.info(f"  input_ids min/max: {batch.input_ids.min()}/{batch.input_ids.max()}")
-                    
-                    logger.info(f"  topk_token_idxs shape: {batch.topk_token_idxs.shape}, dtype: {batch.topk_token_idxs.dtype}")
-                    logger.info(f"  topk_token_idxs has_nan: {torch.isnan(batch.topk_token_idxs.float()).any()}")
-                    logger.info(f"  topk_token_idxs min/max: {batch.topk_token_idxs.min()}/{batch.topk_token_idxs.max()}")
-                    
-                    logger.info(f"  topk_token_ids shape: {batch.topk_token_ids.shape}, dtype: {batch.topk_token_ids.dtype}")
-                    logger.info(f"  topk_token_ids has_nan: {torch.isnan(batch.topk_token_ids.float()).any()}")
-                    logger.info(f"  topk_token_ids min/max: {batch.topk_token_ids.min()}/{batch.topk_token_ids.max()}")
-                    
-                    logger.info(f"  topk_logprobs shape: {batch.topk_logprobs.shape}, dtype: {batch.topk_logprobs.dtype}")
-                    logger.info(f"  topk_logprobs has_nan: {torch.isnan(batch.topk_logprobs).any()}")
-                    logger.info(f"  topk_logprobs has_inf: {torch.isinf(batch.topk_logprobs).any()}")
-                    if not torch.isnan(batch.topk_logprobs).any():
-                        logger.info(f"  topk_logprobs min/max: {batch.topk_logprobs.min():.6f}/{batch.topk_logprobs.max():.6f}")
-
                     t0 = time.time()
                     outputs = wrapped_model(
                         input_ids=batch.input_ids.to(local_rank),
@@ -448,32 +428,6 @@ def train(config: TrainConfig):
                         torch.cuda.synchronize()
                         logger.info(f"Forward pass time: {time.time() - t0:.2f}s")
 
-                    # === DEBUG LOGGING: Model outputs ===
-                    logger.info(f"[NaN DEBUG] Step {iter_idx} - Model outputs check:")
-                    logger.info(f"  logits shape: {outputs.logits.shape}, dtype: {outputs.logits.dtype}")
-                    logger.info(f"  logits has_nan: {torch.isnan(outputs.logits).any()}")
-                    logger.info(f"  logits has_inf: {torch.isinf(outputs.logits).any()}")
-                    if not torch.isnan(outputs.logits).any() and not torch.isinf(outputs.logits).any():
-                        logger.info(f"  logits min/max: {outputs.logits.min():.6f}/{outputs.logits.max():.6f}")
-                        logger.info(f"  logits mean/std: {outputs.logits.mean():.6f}/{outputs.logits.std():.6f}")
-
-                    # === DEBUG LOGGING: Log softmax computation ===
-                    logger.info(f"[NaN DEBUG] Step {iter_idx} - Computing log_softmax...")
-                    log_softmax_result = F.log_softmax(outputs.logits, dim=-1)
-                    logger.info(f"  log_softmax has_nan: {torch.isnan(log_softmax_result).any()}")
-                    logger.info(f"  log_softmax has_inf: {torch.isinf(log_softmax_result).any()}")
-                    if not torch.isnan(log_softmax_result).any() and not torch.isinf(log_softmax_result).any():
-                        logger.info(f"  log_softmax min/max: {log_softmax_result.min():.6f}/{log_softmax_result.max():.6f}")
-
-                    # === DEBUG LOGGING: Index extraction ===
-                    token_idxs_moved = batch.topk_token_idxs.to(local_rank) - 1
-                    token_ids_moved = batch.topk_token_ids.to(local_rank)
-                    logger.info(f"[NaN DEBUG] Step {iter_idx} - Index bounds check:")
-                    logger.info(f"  sequence length: {outputs.logits.shape[1]}")
-                    logger.info(f"  vocab size: {outputs.logits.shape[2]}")
-                    logger.info(f"  token_idxs (0-based) min/max: {token_idxs_moved.min()}/{token_idxs_moved.max()}")
-                    logger.info(f"  token_ids min/max: {token_ids_moved.min()}/{token_ids_moved.max()}")
-                    
                     # Check bounds
                     seq_len = outputs.logits.shape[1]
                     vocab_size = outputs.logits.shape[2]
@@ -488,42 +442,10 @@ def train(config: TrainConfig):
                         token_ids_moved
                     ]
                     
-                    # === DEBUG LOGGING: Predicted logprobs ===
-                    logger.info(f"[NaN DEBUG] Step {iter_idx} - Predicted logprobs check:")
-                    logger.info(f"  topk_pred_logprobs shape: {topk_pred_logprobs.shape}")
-                    logger.info(f"  topk_pred_logprobs has_nan: {torch.isnan(topk_pred_logprobs).any()}")
-                    logger.info(f"  topk_pred_logprobs has_inf: {torch.isinf(topk_pred_logprobs).any()}")
-                    if not torch.isnan(topk_pred_logprobs).any() and not torch.isinf(topk_pred_logprobs).any():
-                        logger.info(f"  topk_pred_logprobs min/max: {topk_pred_logprobs.min():.6f}/{topk_pred_logprobs.max():.6f}")
-
-                    # === DEBUG LOGGING: True probabilities ===
-                    true_logprobs = batch.topk_logprobs.to(local_rank)
-                    true_probs = true_logprobs.exp()
-                    logger.info(f"[NaN DEBUG] Step {iter_idx} - True probabilities check:")
-                    logger.info(f"  true_probs has_nan: {torch.isnan(true_probs).any()}")
-                    logger.info(f"  true_probs has_inf: {torch.isinf(true_probs).any()}")
-                    if not torch.isnan(true_probs).any() and not torch.isinf(true_probs).any():
-                        logger.info(f"  true_probs min/max: {true_probs.min():.6f}/{true_probs.max():.6f}")
-
                     # ce is sum -p(x)logq(x), where p is the true distr and q is the model distr
                     ce_by_token = -true_probs * topk_pred_logprobs
                     
-                    # === DEBUG LOGGING: Cross-entropy computation ===
-                    logger.info(f"[NaN DEBUG] Step {iter_idx} - Cross-entropy check:")
-                    logger.info(f"  ce_by_token has_nan: {torch.isnan(ce_by_token).any()}")
-                    logger.info(f"  ce_by_token has_inf: {torch.isinf(ce_by_token).any()}")
-                    if not torch.isnan(ce_by_token).any() and not torch.isinf(ce_by_token).any():
-                        logger.info(f"  ce_by_token min/max: {ce_by_token.min():.6f}/{ce_by_token.max():.6f}")
-                        logger.info(f"  ce_by_token mean: {ce_by_token.mean():.6f}")
-
                     loss = (ce_by_token.mean() / accumulate_grad_steps)
-                    
-                    # === DEBUG LOGGING: Final loss ===
-                    logger.info(f"[NaN DEBUG] Step {iter_idx} - Final loss check:")
-                    logger.info(f"  accumulate_grad_steps: {accumulate_grad_steps}")
-                    logger.info(f"  loss has_nan: {torch.isnan(loss).any()}")
-                    logger.info(f"  loss has_inf: {torch.isinf(loss).any()}")
-                    logger.info(f"  loss value: {loss.item():.6f}")
                     
                     if torch.isnan(loss) or torch.isinf(loss):
                         logger.error(f"  *** NaN/Inf DETECTED IN LOSS AT STEP {iter_idx} ***")
