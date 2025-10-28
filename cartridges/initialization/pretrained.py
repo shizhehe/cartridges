@@ -61,8 +61,8 @@ class KVFromPretrained(KVCacheFactory):
         print(f"is_ddp: {is_ddp}")
         is_rank_zero = (not is_ddp) or (dist.get_rank() == 0)
 
-        wandb_entity = os.environ.get("WANDB_ENTITY", "shizhehe")
-        wandb_project = os.environ.get("WANDB_PROJECT", "dynamic-cartridges")
+        wandb_entity = os.environ.get("CARTRIDGES_WANDB_ENTITY", "shizhehe")
+        wandb_project = os.environ.get("CARTRIDGES_WANDB_PROJECT", "dynamic-cartridges")
         full_run_path = f"{wandb_entity}/{wandb_project}/{self.config.wandb_run_id}"
 
         logger.info(f"Restoring cache from wandb run {full_run_path}")
