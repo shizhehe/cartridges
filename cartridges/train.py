@@ -911,7 +911,7 @@ def evaluate_qa_with_judge(
     )
     
     # Set up judge client
-    judge_client = OpenAIClient.Config(model_name=config.judge_client).instantiate()
+    judge_client = OpenAIClient.Config(model_name=config.judge_client, api_key=os.environ.get("OPENAI_API_KEY")).instantiate()
     
     sampler = DistributedSampler(dataset) if is_ddp else None
     dataloader = DataLoader(
@@ -981,16 +981,42 @@ Answer:"""
         
         try:
             # Generate model responses
-            responses = flex_generate(
-                model=model,
-                cache=cache,
-                tokenizer=tokenizer,
-                prompts=texts,
-                max_new_tokens=config.generate_max_new_tokens,
-                temperature=config.temperature,
-                num_samples=config.num_samples,
-                override_max_tokens=config.override_max_tokens,
-            )
+            responses = []
+            for text in texts:
+                if not text.strip():
+                    responses.append("")
+                    continue
+                
+                # Tokenize the input text
+                inputs = tokenizer(
+                    text,
+                    return_tensors="pt",
+                    truncation=True,
+                    max_length=2048,  # Reasonable context length
+                    padding=False
+                )
+                
+                input_ids = inputs["input_ids"].to(model.device)
+                seq_ids = torch.zeros_like(input_ids)  # Default sequence IDs
+                position_ids = torch.arange(input_ids.shape[1], device=input_ids.device).unsqueeze(0)
+                
+                # Generate response
+                generated = flex_generate(
+                    model=model,
+                    tokenizer=tokenizer,
+                    input_ids=input_ids,
+                    seq_ids=seq_ids,
+                    position_ids=position_ids,
+                    cache=cache,
+                    max_new_tokens=config.generate_max_new_tokens,
+                    temperature=config.temperature,
+                )
+                
+                # Decode the generated tokens (excluding the input)
+                input_length = input_ids.shape[1]
+                generated_tokens = generated[0, input_length:]  # Remove input tokens
+                response_text = tokenizer.decode(generated_tokens, skip_special_tokens=True)
+                responses.append(response_text)
             
             # Judge each response
             for question, response, context in zip(questions, responses, contexts):
