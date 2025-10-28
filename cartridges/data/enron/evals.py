@@ -3,13 +3,13 @@ import json
 import re
 import random
 import os
-from openai import OpenAI
 
 from pydrantic import ObjectConfig
 from transformers import PreTrainedTokenizerFast
 
 from cartridges.datasets import GenerateEvalDataset, GenerateEvalDatasetElement, DataSource
 from cartridges.models.helpers import ModelHelper
+from cartridges.clients.openai import OpenAIClient
 
 
 class EnronQAGenerateDataset(GenerateEvalDataset):
@@ -17,15 +17,20 @@ class EnronQAGenerateDataset(GenerateEvalDataset):
         _pass_as_config = True
         judge_model: str = "gpt-4o-mini"  # LLM judge model
         use_llm_judge: bool = True  # Whether to use LLM judge or fallback to string matching
+        judge_temperature: float = 0.0  # Temperature for judge model
+        judge_max_tokens: int = 300  # Max tokens for judge response
 
     def __init__(self, config: Config, model_helper: ModelHelper, seed: int):
         self.config = config
         self.model_helper = model_helper
         self.tokenizer = model_helper.tokenizer
         
-        # Initialize OpenAI client for LLM judging
+        # Initialize Cartridges OpenAI client for LLM judging
         if self.config.use_llm_judge:
-            self.openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            self.judge_client = OpenAIClient.Config(
+                model_name=self.config.judge_model,
+                api_key=os.getenv("OPENAI_API_KEY")
+            ).instantiate()
         
         # Load the QA data from the data source
         self.qa_data = []
@@ -113,47 +118,59 @@ Task: Determine if the model's answer is semantically equivalent to the referenc
 3. Is the model's answer a reasonable paraphrase or reformulation?
 4. For factual questions, do they provide the same factual information?
 
-You must respond with a valid JSON object with the following format:
-{{
-    "judgment": "CORRECT" | "INCORRECT" | "UNCLEAR",
-    "explanation": "Your brief explanation (1-2 sentences)",
-    "confidence": 0.0-1.0
-}}
-
-Where:
+Respond with EXACTLY ONE of these three words followed by a brief explanation:
 - "CORRECT" if the answers are semantically equivalent
 - "INCORRECT" if they are not equivalent or the model's answer is wrong  
 - "UNCLEAR" if it's ambiguous or you cannot determine
-- confidence is your confidence level in this judgment (0.0 = no confidence, 1.0 = completely confident)"""
+
+Format: [JUDGMENT] [explanation in 1-2 sentences]
+
+Example: CORRECT The model's answer provides the same factual information as the reference answer."""
 
         try:
-            response = self.openai_client.chat.completions.create(
-                model=self.config.judge_model,
-                messages=[
-                    {"role": "system", "content": "You are an expert evaluator for question-answering tasks. Always respond with valid JSON."},
-                    {"role": "user", "content": judge_prompt}
-                ],
-                temperature=0.0,  # Deterministic scoring
-                max_tokens=300,
-                response_format={"type": "json_object"}  # Ensure JSON response
-            )
+            # Use Cartridges OpenAI client for judging
+            import asyncio
             
-            judge_response = response.choices[0].message.content.strip()
+            async def get_judge_response():
+                return await self.judge_client.chat(
+                    chats=[[
+                        {"role": "system", "content": "You are an expert evaluator for question-answering tasks. Always respond with valid JSON."},
+                        {"role": "user", "content": judge_prompt}
+                    ]],
+                    temperature=self.config.judge_temperature,
+                    max_completion_tokens=self.config.judge_max_tokens
+                )
             
-            # Parse the JSON response
+            # Run the async function
+            chat_response = asyncio.run(get_judge_response())
+            judge_response = chat_response.samples[0].text.strip()
+            
+            # Parse the text response
             try:
-                judge_data = json.loads(judge_response)
+                # Extract judgment from the beginning of the response
+                judge_response_upper = judge_response.upper()
                 
-                judgment = judge_data.get("judgment", "UNCLEAR").upper()
-                explanation = judge_data.get("explanation", "No explanation provided")
-                confidence = float(judge_data.get("confidence", 0.0))
+                judgment = "UNCLEAR"  # default
+                explanation = judge_response  # full response as explanation
                 
-                # Validate judgment
-                if judgment not in ["CORRECT", "INCORRECT", "UNCLEAR"]:
+                # Check for judgment at start of response
+                if judge_response_upper.startswith("CORRECT"):
+                    judgment = "CORRECT"
+                    explanation = judge_response[7:].strip()  # Remove "CORRECT" and get explanation
+                elif judge_response_upper.startswith("INCORRECT"):
+                    judgment = "INCORRECT" 
+                    explanation = judge_response[9:].strip()  # Remove "INCORRECT" and get explanation
+                elif judge_response_upper.startswith("UNCLEAR"):
                     judgment = "UNCLEAR"
-                
-                # Validate confidence
-                confidence = max(0.0, min(1.0, confidence))
+                    explanation = judge_response[7:].strip()  # Remove "UNCLEAR" and get explanation
+                else:
+                    # Try to find the judgment anywhere in the response
+                    if "CORRECT" in judge_response_upper and "INCORRECT" not in judge_response_upper:
+                        judgment = "CORRECT"
+                    elif "INCORRECT" in judge_response_upper:
+                        judgment = "INCORRECT"
+                    else:
+                        judgment = "UNCLEAR"
                 
                 # Determine if correct
                 is_correct = judgment == "CORRECT"
@@ -162,13 +179,12 @@ Where:
                     "match_type": "llm_judge",
                     "judgment": judgment,
                     "explanation": explanation,
-                    "confidence": confidence,
                     "judge_model": self.config.judge_model,
                     "raw_response": judge_response
                 }
                 
-            except json.JSONDecodeError as json_error:
-                print(f"Failed to parse LLM judge JSON response: {json_error}")
+            except Exception as parse_error:
+                print(f"Failed to parse LLM judge response: {parse_error}")
                 print(f"Raw response: {judge_response}")
                 # Fallback to string matching
                 return self._fallback_score(pred, answer)
@@ -244,7 +260,7 @@ Where:
                 question = "Question context not available"
         
         # Use LLM judge if enabled and available
-        if self.config.use_llm_judge and hasattr(self, 'openai_client'):
+        if self.config.use_llm_judge and hasattr(self, 'judge_client'):
             return self._llm_judge_score(pred, answer, question)
         else:
             # Fallback to string matching
