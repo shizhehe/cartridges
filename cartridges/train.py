@@ -427,24 +427,19 @@ def train(config: TrainConfig):
                     if config.log_time:
                         torch.cuda.synchronize()
                         logger.info(f"Forward pass time: {time.time() - t0:.2f}s")
-
-                    # Check bounds
-                    seq_len = outputs.logits.shape[1]
-                    vocab_size = outputs.logits.shape[2]
-                    if token_idxs_moved.min() < 0 or token_idxs_moved.max() >= seq_len:
-                        logger.error(f"  TOKEN INDEX OUT OF BOUNDS! min={token_idxs_moved.min()}, max={token_idxs_moved.max()}, seq_len={seq_len}")
-                    if token_ids_moved.min() < 0 or token_ids_moved.max() >= vocab_size:
-                        logger.error(f"  TOKEN ID OUT OF BOUNDS! min={token_ids_moved.min()}, max={token_ids_moved.max()}, vocab_size={vocab_size}")
-
-                    topk_pred_logprobs = log_softmax_result[
+                    
+                    topk_pred_logprobs = F.log_softmax(outputs.logits, dim=-1)[
                         0, 
-                        token_idxs_moved, 
-                        token_ids_moved
+                        batch.topk_token_idxs.to(local_rank) - 1, 
+                        batch.topk_token_ids.to(local_rank)
                     ]
                     
                     # ce is sum -p(x)logq(x), where p is the true distr and q is the model distr
-                    ce_by_token = -true_probs * topk_pred_logprobs
-                    
+                    ce_by_token = (
+                        -batch.topk_logprobs.to(local_rank).exp()  # p(x), true distr
+                        * topk_pred_logprobs  # q(x), model distr
+                    )
+
                     loss = (ce_by_token.mean() / accumulate_grad_steps)
                     
                     if torch.isnan(loss) or torch.isinf(loss):
