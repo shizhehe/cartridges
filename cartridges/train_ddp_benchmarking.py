@@ -659,6 +659,22 @@ def evaluate_perplexity(
                     * topk_pred_logprobs  # q(x), model distr
                 )
 
+                # Collect per-sample results with metadata
+                for i, metadata in enumerate(batch.metadata):
+                    sample_loss = ce_by_token.sum().item() / ce_by_token.shape[0]  # Average loss per token for this sample
+                    sample_perplexity = math.exp(sample_loss)
+                    
+                    # Create result with metadata for this sample
+                    sample_result = {
+                        "loss": sample_loss,
+                        "perplexity": sample_perplexity,
+                        "num_tokens": ce_by_token.shape[0],
+                        "optimizer_step": optimizer_step,
+                        "epoch": epoch,
+                        **metadata  # Include all metadata fields
+                    }
+                    results.append(sample_result)
+
                 epoch_loss += (ce_by_token.sum())
                 epoch_denom += ce_by_token.shape[0]
 

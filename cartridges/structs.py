@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Literal, Optional, TypedDict
+import json
 
 from cartridges.clients.base import FlatTopLogprobs
 from cartridges.utils import get_logger
@@ -113,7 +114,10 @@ def _conversations_to_parquet(conversations: list[Conversation], path: str):
 
 def _conversations_from_parquet(path: str) -> list[Conversation]:
     import pandas as pd 
+    print(f"Reading parquet file: {path}")
     rows = pd.read_parquet(path).to_dict(orient="records")
+    for row in rows:
+        metadata = row["metadata"]
     return [Conversation.from_dict(row) for row in rows]
 
 def _conversations_to_pkl(conversations: list[Conversation], path: str):

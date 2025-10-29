@@ -18,6 +18,7 @@ class Llama3Helper(ModelHelper):
         retokenize: bool = False,
         tokenizer: PreTrainedTokenizerFast | None = None,
         prob_drop_thinking: float = 1.0,
+        metadata: dict[str, Any] = {},
     ) -> DatasetElement:
         from cartridges.datasets import _base_convert_messages_to_element_retokenize, _base_convert_messages_to_element
         fn = _base_convert_messages_to_element_retokenize if retokenize else _base_convert_messages_to_element
@@ -47,6 +48,7 @@ class Llama3Helper(ModelHelper):
 
             # TODO(SE): Look into what is happening here. 
             drop_thinking_fn=lambda x: x,
+            metadata=metadata,
         )
 
     def get_apply_chat_template_kwargs(

@@ -232,7 +232,7 @@ class EnronStreamResource(Resource):
         truncated = email_body[start_idx:end_idx]
         return f"... {truncated} ..."
 
-    async def sample_prompt(self, batch_size: int) -> tuple[str, List[str]]:
+    async def sample_prompt(self, batch_size: int) -> tuple[str, List[str], List[str]]:
         # Get content for the specified batch (set via set_batch_id)
         batch_id = getattr(self, '_current_batch_id', 0)
         
@@ -254,8 +254,8 @@ class EnronStreamResource(Resource):
             emails=emails_content
         )
         
-        seed_prompts = sample_seed_prompts(self.config.seed_prompts, batch_size)
-        return ctx, seed_prompts
+        seed_prompts, seed_prompt_types = sample_seed_prompts(self.config.seed_prompts, batch_size)
+        return ctx, seed_prompts, seed_prompt_types
     
     def set_batch_id(self, batch_id: int):
         """Set which batch to use for synthesis."""

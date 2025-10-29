@@ -24,6 +24,7 @@ class QwenHelper(ModelHelper):
         retokenize: bool = False,
         tokenizer: PreTrainedTokenizerFast | None = None,
         prob_drop_thinking: float = 1.0,
+        metadata: dict[str, Any] = {},
     ) -> DatasetElement:
         from cartridges.datasets import _base_convert_messages_to_element_retokenize, _base_convert_messages_to_element
         fn = _base_convert_messages_to_element_retokenize if retokenize else _base_convert_messages_to_element
@@ -50,6 +51,7 @@ class QwenHelper(ModelHelper):
                 "system": [198],
             },
             drop_thinking_fn=drop_thinking_fn,
+            metadata=metadata,
         )
 
     def get_apply_chat_template_kwargs(

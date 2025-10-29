@@ -52,6 +52,7 @@ def _base_convert_messages_to_element_retokenize(
     message_end_tokens: dict[str, list[int]],
     message_extra_end_tokens: dict[str, list[int]],
     drop_thinking_fn:  Callable[[Conversation.Message], Conversation.Message] = lambda x: x,
+    metadata: dict[str, Any] = {},
 ) -> DatasetElement:
     input_ids, topk_token_ids, topk_logprobs, topk_token_idxs = [], [], [], []
     token_counts = TokenCounts()
@@ -82,7 +83,7 @@ def _base_convert_messages_to_element_retokenize(
         topk_token_ids=torch.from_numpy(np.concatenate(topk_token_ids)),
         topk_logprobs=torch.from_numpy(np.concatenate(topk_logprobs)),
         topk_token_idxs=torch.from_numpy(np.concatenate(topk_token_idxs)),
-        metadata=[],
+        metadata=[metadata],
         token_counts=token_counts,
     )
 
@@ -95,6 +96,7 @@ def _base_convert_messages_to_element(
     message_extra_end_tokens: dict[str, list[int]],
     tokenizer: PreTrainedTokenizerFast,
     drop_thinking_fn:  Callable[[Conversation.Message], Conversation.Message] = lambda x: x,
+    metadata: dict[str, Any] = {},
 ) -> DatasetElement:
     input_ids, topk_token_ids, topk_logprobs, topk_token_idxs = [], [], [], []
     token_counts = TokenCounts()
@@ -148,7 +150,7 @@ def _base_convert_messages_to_element(
         topk_token_ids=torch.from_numpy(np.concatenate(topk_token_ids)),
         topk_logprobs=torch.from_numpy(np.concatenate(topk_logprobs)),
         topk_token_idxs=torch.from_numpy(np.concatenate(topk_token_idxs)),
-        metadata=[],
+        metadata=[metadata],
         token_counts=token_counts,
     )
 
@@ -190,9 +192,11 @@ class DataSource(BaseConfig):
 
 def _prepare_data_source(source: str | DataSource) -> list[Conversation]:
     if isinstance(source, str):
+        print(f"Source is a string: {source}")
         is_local = ".pkl" in source or ".parquet" in source
         source = DataSource(path=source, type="local" if is_local else "wandb")
     
+    print(f"Preparing data source: {source.path} from ")
     if source.type == "local":
         data = read_conversations(source.path)
     elif source.type == "wandb":
@@ -259,6 +263,7 @@ class TrainDataset(Dataset):
                 retokenize=self.config.targets == "tokens",
                 tokenizer=self.tokenizer,
                 prob_drop_thinking=self.config.prob_drop_thinking,
+                metadata=row.metadata,
             ))
 
         return elements
@@ -439,6 +444,7 @@ class LossEvalDataset(TrainDataset):
                 messages,
                 retokenize=self.config.targets == "tokens",
                 tokenizer=self.tokenizer,
+                metadata=row.metadata,
             ))
         
         return elements

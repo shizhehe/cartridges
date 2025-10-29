@@ -126,11 +126,11 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
         # --- begin prompt sampling ---
         t0 = time.time()
         resource = random.choice(self.resources)
-        ctx, seed_prompts = await resource.sample_prompt(batch_size=batch_size)
+        ctx, seed_prompts, seed_prompt_types = await resource.sample_prompt(batch_size=batch_size)
 
         is_enhancing_ctx = random.random() < self.config.prob_enhancing_ctx
         if self.enhancing_resources is not None and is_enhancing_ctx:
-            enhancing_ctx, _ = await random.choice(self.enhancing_resources).sample_prompt(batch_size=1)
+            enhancing_ctx, _, _ = await random.choice(self.enhancing_resources).sample_prompt(batch_size=1)
             enhancing_system_prompt = self.config.system_prompt_template.format(subcorpus=enhancing_ctx)
             enhancing_msgs_b = [system(enhancing_system_prompt)] 
             enhancing_msgs_a = enhancing_msgs_b if self.config.a_sees_enhancing_ctx else []
@@ -153,10 +153,11 @@ class SelfStudySynthesizer(AsyncConvoSynthesizer):
             {
                 "tool_calls": [],
                 "seed_prompt": seed_prompt,
+                "seed_prompt_type": seed_prompt_type,
                 "initial_system_prompt": initial_system_prompt,
                 "enhancing_system_prompt": enhancing_system_prompt,
             }
-            for seed_prompt in seed_prompts
+            for seed_prompt, seed_prompt_type in zip(seed_prompts, seed_prompt_types)
         ]
 
         logger.info(f"[batch={batch_id}] Initialization of convos took {time.time() - t0} seconds")

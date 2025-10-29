@@ -281,7 +281,7 @@ def read_conversations_from_wandb(
                     conversations.extend(file_conversations)
                 except Exception as e:
                     # Skip files that can't be read as conversations
-                    continue
+                    print(f"Error reading file {file_path}: {e}")
     
     if not conversations:
         raise ValueError(f"No conversation files found in artifact {artifact_id}")

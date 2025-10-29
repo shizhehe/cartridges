@@ -27,7 +27,12 @@ class Resource(abc.ABC):
         pass
     
     @abc.abstractmethod
-    async def sample_prompt(self, batch_size: int) -> tuple[str, List[str]]:
+    async def sample_prompt(self, batch_size: int) -> tuple[str, List[str], List[str]]:
+        """Sample prompts for synthesis.
+        
+        Returns:
+            tuple: (context, seed_prompts, seed_prompt_types)
+        """
         raise NotImplementedError()
     
     
@@ -55,13 +60,13 @@ class TextResource(Resource):
     async def setup(self):
         self.chunker = self.config.chunker.instantiate(text=self.text)
     
-    async def sample_prompt(self, batch_size: int) -> tuple[str, List[str]]:
+    async def sample_prompt(self, batch_size: int) -> tuple[str, List[str], List[str]]:
         if self.chunker is None:
             raise ValueError("Chunker not initialized. Call setup() first.")
         
         chunk = self.chunker.sample_chunk()
-        seed_prompts = sample_seed_prompts(self.config.seed_prompts, batch_size)
-        return chunk, seed_prompts
+        seed_prompts, seed_prompt_types = sample_seed_prompts(self.config.seed_prompts, batch_size)
+        return chunk, seed_prompts, seed_prompt_types
 
 class TextFileResource(TextResource):
 
@@ -172,9 +177,9 @@ class DirectoryResource(Resource):
         context = self._format_file(selected_file, content)
         
         # Generate seed prompts
-        seed_prompts = sample_seed_prompts(self.config.seed_prompts, batch_size)
+        seed_prompts, seed_prompt_types = sample_seed_prompts(self.config.seed_prompts, batch_size)
         
-        return context, seed_prompts
+        return context, seed_prompts, seed_prompt_types
     
     def _format_file(self, file_name: str, content: str) -> str:
         if file_name.endswith(".py"):
@@ -255,11 +260,11 @@ class BaseStructuredResource(Resource, ABC):
         
         return result
         
-    async def sample_prompt(self, batch_size: int) -> tuple[str, List[str]]:
+    async def sample_prompt(self, batch_size: int) -> tuple[str, List[str], List[str]]:
         path, obj_str = random.choice(self.ctxs)
         ctx = f"The following is located at {path}: {obj_str}"
-        seed_prompts = sample_seed_prompts(self.config.seed_prompts, batch_size)
-        return ctx, seed_prompts
+        seed_prompts, seed_prompt_types = sample_seed_prompts(self.config.seed_prompts, batch_size)
+        return ctx, seed_prompts, seed_prompt_types
 
 class JSONResource(BaseStructuredResource):
     class Config(BaseStructuredResource.Config):
@@ -391,8 +396,14 @@ SEED_PROMPT_REGISTRY: dict[SEED_TYPES, Callable] = {
     "qa": qa_seed_prompt,
 }
 
-def sample_seed_prompts(seed_types: List[SEED_TYPES], batch_size: int) -> List[str]:
-    seed_types = random.choices(seed_types, k=batch_size)
-    return [SEED_PROMPT_REGISTRY[seed_type]() for seed_type in seed_types]
+def sample_seed_prompts(seed_types: List[SEED_TYPES], batch_size: int) -> tuple[List[str], List[str]]:
+    """Sample seed prompts and return both the prompts and their types.
+    
+    Returns:
+        tuple: (prompts, prompt_types)
+    """
+    sampled_types = random.choices(seed_types, k=batch_size)
+    prompts = [SEED_PROMPT_REGISTRY[seed_type]() for seed_type in sampled_types]
+    return prompts, sampled_types
 
 # --- end generators for 

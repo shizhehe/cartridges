@@ -258,9 +258,9 @@ This is batch {self._current_batch_id} of the email timeline. When generating co
             )
         
         # Sample seed prompts - these will determine the TYPE of conversations generated
-        seed_prompts = sample_seed_prompts(self.config.seed_prompts, batch_size)
+        seed_prompts, seed_prompt_types = sample_seed_prompts(self.config.seed_prompts, batch_size)
         
-        return temporal_content, seed_prompts
+        return temporal_content, seed_prompts, seed_prompt_types
     
     async def setup(self):
         """Setup method called by synthesis framework."""

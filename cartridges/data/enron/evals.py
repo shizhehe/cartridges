@@ -15,7 +15,7 @@ from cartridges.clients.openai import OpenAIClient
 class EnronQAGenerateDataset(GenerateEvalDataset):
     class Config(GenerateEvalDataset.Config):
         _pass_as_config = True
-        judge_model: str = "gpt-4o-mini"  # LLM judge model
+        judge_model: str = "gpt-5-mini"  # LLM judge model
         use_llm_judge: bool = True  # Whether to use LLM judge or fallback to string matching
         judge_temperature: float = 0.0  # Temperature for judge model
         judge_max_tokens: int = 300  # Max tokens for judge response

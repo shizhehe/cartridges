@@ -203,7 +203,7 @@ class EnronStreamQAResource(Resource):
         truncated = email_body[start_idx:end_idx]
         return f"... {truncated} ..."
     
-    async def sample_prompt(self, batch_size: int) -> tuple[str, List[str]]:
+    async def sample_prompt(self, batch_size: int) -> tuple[str, List[str], List[str]]:
         """Sample prompts for QA generation."""
         # Get current batch content
         current_context = self.batch_contexts[self._current_batch_id]['batch_content']
@@ -227,9 +227,9 @@ class EnronStreamQAResource(Resource):
         )
         
         # Sample seed prompts for QA generation
-        seed_prompts = sample_seed_prompts(self.config.seed_prompts, batch_size)
+        seed_prompts, seed_prompt_types = sample_seed_prompts(self.config.seed_prompts, batch_size)
         
-        return qa_content, seed_prompts
+        return qa_content, seed_prompts, seed_prompt_types
     
     async def setup(self):
         """Setup method called by synthesis framework."""

@@ -50,6 +50,7 @@ class ModelHelper(ABC):
         retokenize: bool = False,
         tokenizer: PreTrainedTokenizerFast | None = None,
         prob_drop_thinking: float = 1.0,
+        metadata: dict[str, Any] = {},
     ) -> DatasetElement:
         raise NotImplementedError("ModelHelper.messages_to_element is not implemented.")
     
