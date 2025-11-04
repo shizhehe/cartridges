@@ -193,7 +193,9 @@ class HFModelConfig(ModelConfig):
 
         if self.tuning_method == 'peft' and self.wandb_peft is not None:
             peft_dir = self._resolve_local_peft_dir()
-            model = load_peft_into_model(base_model, peft_dir)
+            model = load_peft_into_model(base_model, peft_dir, is_trainable=True)
+            assert isinstance(model, PeftModel), f"Loaded model is not a PEFT model: {type(model)}s"
+            assert any(p.requires_grad for p in model.parameters()), "Loaded adapter is frozen; set train=True."
             model.print_trainable_parameters()
             return model
 

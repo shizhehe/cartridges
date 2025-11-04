@@ -9,6 +9,7 @@ import wandb
 def load_peft_into_model(
     base_model: PreTrainedModel,
     peft_dir: Path,
+    is_trainable: bool = True,
 ) -> PeftModel:
     """
     Given a base HF model and a local directory with PEFT adapter files,
@@ -19,5 +20,5 @@ def load_peft_into_model(
     if not (peft_dir / "adapter_config.json").exists():
         raise FileNotFoundError(f"adapter_config.json not found in {peft_dir}")
 
-    model = PeftModel.from_pretrained(base_model, str(peft_dir))
+    model = PeftModel.from_pretrained(base_model, str(peft_dir), is_trainable=is_trainable)
     return model
