@@ -1004,11 +1004,13 @@ def save_peft_adapter(config: TrainConfig, model: nn.Module, optimizer_step: int
         logger.info(f"Saving PEFT adapter to wandb: {save_path}")
         # by passing base_path, we save the files to the root of the wandb run
         # instead of duplicating the full path including the run directory
-        wandb.save(str(save_path), base_path=config.run_dir, policy="now")
-
-    # confirm that we saved the files to wandb
-    wandb.restore(str(save_path), base_path=config.run_dir, policy="now")
-    assert os.path.exists(str(save_path)), f"PEFT adapter not saved to wandb: {save_path}"
+        for file in save_path.rglob("*"):   # recursively walk subdirs
+            if file.is_file():
+                wandb.save(
+                    str(file),
+                    base_path=str(config.run_dir),
+                    policy="now"
+                )
 
     # retention: keep last N by step number
     # pattern = r"^peft-step(\d+)$"  # folder names we created above
