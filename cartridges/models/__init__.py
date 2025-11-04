@@ -1,4 +1,4 @@
-from .config import HFModelConfig, PeftConfig, ModelConfig
+from .config import HFModelConfig, PeftConfig, ModelConfig, WandbPeftSource
 from .llama.modeling_llama import FlexLlamaForCausalLM
 from .llama.helpers import Llama3Helper
 from .qwen.modeling_qwen3 import FlexQwen3ForCausalLM
@@ -8,6 +8,7 @@ __all__ = [
     "HFModelConfig",
     "PeftConfig",
     "ModelConfig",
+    "WandbPeftSource",
     "FlexLlamaForCausalLM",
     "FlexQwen3ForCausalLM",
     "MODEL_REGISTRY",
