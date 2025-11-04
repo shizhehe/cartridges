@@ -586,12 +586,12 @@ def download_peft_from_run(
         step = steps[-1]
 
     # pull both adapter files
-    dest = _ensure_dir(dest_dir / f"peft-step{step}")
+    dest = _ensure_dir(dest_dir / f"peft-step{step}")s
     for fname in ("adapter_model.safetensors", "adapter_config.json"):
         wandb.restore(
+            f"peft-step{step}/{fname}"
             root=str(dest_dir),
             run_path=full_run_path,
-            filename=f"peft-step{step}/{fname}",
         )
         # wandb.restore puts the exact relative path under dest_dir; move into dest
         src = dest_dir / f"peft-step{step}" / fname
