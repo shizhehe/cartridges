@@ -687,7 +687,7 @@ def evaluate_perplexity(
 def evaluate_generations(
     config: GenerationEvalConfig,
     
-    model: CacheAndModel,
+    model: CacheAndModel, # Can be either CacheAndModel or a PEFT model
     tokenizer: AutoTokenizer,
     dataset: GenerateEvalDataset,
     optimizer_step: int,
@@ -703,12 +703,13 @@ def evaluate_generations(
     world_size = dist.get_world_size() if is_ddp else 1
 
     
-    if is_ddp:
-        cache = model.module.cache
-        model = model.module.model
-    else:
-        cache = model.cache
-        model = model.model
+    if isinstance(model, CacheAndModel):
+        if is_ddp:
+            cache = model.module.cache
+            model = model.module.model
+        else:
+            cache = model.cache
+            model = model.model
 
     logger.info(
         f"Generating `{config.name_for_wandb}` (n={len(dataset)}, {len(dataset) // world_size} per device)"
@@ -759,7 +760,7 @@ def evaluate_generations(
                 input_ids=input_ids,
                 seq_ids=seq_ids,
                 position_ids=position_ids,
-                cache=cache,
+                cache=cache if isinstance(model, CacheAndModel) else None,
                 model=model,
                 tokenizer=tokenizer,
                 max_new_tokens=(

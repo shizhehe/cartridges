@@ -133,7 +133,7 @@ def flex_generate(
     
     return generated_tokens
     
-    
+
 
 if __name__ == "__main__":
     import argparse
