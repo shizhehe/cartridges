@@ -340,6 +340,7 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
         inputs_embeds: Optional[torch.FloatTensor] = None,
         use_cache: Optional[bool] = None,
         mode: Literal["train", "generate"] = "train",
+        attention_mask: Optional[torch.Tensor] = None,
     ) -> BaseModelOutputWithPast:
         """
         seq_ids (`torch.LongTensor` of shape `(sequence_length,)`):
@@ -356,11 +357,21 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
         position_ids = position_ids + cartridge_len
         
         # Build the block mask
+        # Normalize attention_mask to a 1D bool "key is padded" mask (True = padded)
+        key_padding_mask = None
+        if attention_mask is not None:
+            if attention_mask.dim() == 2:
+                attention_mask = attention_mask[0]  # (1, L) -> (L,)
+            # Convert 1/0 to False/True (keep -> False, pad -> True)
+            key_padding_mask = (attention_mask == 0)
+
+
         # --- begin build block mask ---
         block_mask = create_block_mask_w_cache(
             cache=past_key_values,
             seq_ids=seq_ids,
             device=inputs_embeds.device,
+            key_padding_mask=key_padding_mask,
         )
         # --- end build block mask ---
 
@@ -436,6 +447,7 @@ class FlexQwen3ForCausalLM(FlexQwen3PreTrainedModel, GenerationMixin):
         use_cache: Optional[bool] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
         mode: Literal["train", "generate"] = "train",
+        attention_mask: Optional[torch.Tensor] = None,
     ) -> CausalLMOutputWithPast:
         r"""
         seq_ids (`torch.LongTensor` of shape `(sequence_length,)`):
@@ -471,6 +483,7 @@ class FlexQwen3ForCausalLM(FlexQwen3PreTrainedModel, GenerationMixin):
             inputs_embeds=inputs_embeds,
             use_cache=use_cache,
             mode=mode,
+            attention_mask=attention_mask,
         )
 
         hidden_states = outputs.last_hidden_state

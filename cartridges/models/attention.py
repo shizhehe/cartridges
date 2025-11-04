@@ -35,6 +35,7 @@ def create_block_mask_w_cache(
     cache: Optional[TrainableCache],
     seq_ids: torch.LongTensor, # [sum(seq_lens)]
     device: torch.device,
+    key_padding_mask: Optional[torch.Tensor] = None,  # (L,) bool; True means PAD (mask out)
 ):
     cache_len = cache.num_tokens() if cache is not None else 0
 
@@ -45,7 +46,16 @@ def create_block_mask_w_cache(
         kv_seq_ids = torch.cat([cache.seq_ids(), kv_seq_ids])
 
     def mask_func(_, _h, q_idx, kv_idx):
-        return (kv_seq_ids[kv_idx] == -1) | ((seq_ids[q_idx] == kv_seq_ids[kv_idx]) & (q_idx + cache_len >= kv_idx))
+        # 1) Disallow padded keys in the *current* (non-cache) KV region.
+        if key_padding_mask is not None and kv_idx >= cache_len:
+            k_local = kv_idx - cache_len
+            if bool(key_padding_mask[k_local]):  # True = pad -> block it
+                return False
+        # 2) Original segmentation + causal rule.
+        return (kv_seq_ids[kv_idx] == -1) | (
+            (seq_ids[q_idx] == kv_seq_ids[kv_idx]) & (q_idx + cache_len >= kv_idx)
+        )
+
     
     block_mask = create_block_mask(
         mask_func, B=1, H=1, Q_LEN=len(seq_ids), KV_LEN=len(seq_ids) + cache_len, 
