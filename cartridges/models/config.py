@@ -186,7 +186,7 @@ class HFModelConfig(ModelConfig):
         if self.tuning_method == 'peft' and self.peft.enabled and self.wandb_peft is None:
             from peft import get_peft_model
             peft_config = self.peft.get_peft_config()
-            base_model = get_peft_model(model, peft_config)
+            base_model = get_peft_model(base_model, peft_config)
             base_model.print_trainable_parameters()
             return base_model
 
