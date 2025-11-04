@@ -554,7 +554,6 @@ class FlexQwen3ForCausalLM(FlexQwen3PreTrainedModel, GenerationMixin):
             loss=loss,
             logits=logits,
             past_key_values=outputs.past_key_values,
-            hidden_states=outputs.hidden_states,
             last_hidden_state=final_h,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
