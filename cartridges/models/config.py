@@ -7,7 +7,8 @@ from pathlib import Path
 import os
 
 from cartridges.models.registry import MODEL_REGISTRY
-from cartridges.models.peft import load_peft_into_model, download_peft_from_artifact, download_peft_from_run
+from cartridges.models.peft import load_peft_into_model
+from cartridges.utils.wandb import download_peft_from_artifact, download_peft_from_run
 
 class WandbPeftSource(BaseConfig):
     # Choose exactly one of these:

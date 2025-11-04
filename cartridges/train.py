@@ -989,26 +989,22 @@ def save_peft_adapter(config: TrainConfig, model: nn.Module, optimizer_step: int
     run_dir.mkdir(exist_ok=True, parents=True)
 
     # save folder (adapter_config.json + adapter_model.safetensors)
-    save_dir = run_dir / f"peft-step{optimizer_step}"
-    save_dir.mkdir(exist_ok=True, parents=True)
-    model.save_pretrained(str(save_dir), safe_serialization=True)
+    save_path = run_dir / f"peft-step{optimizer_step}.pt"
+    save_path.mkdir(exist_ok=True, parents=True)
+    model.save_pretrained(str(save_path), safe_serialization=True)
 
     # Create/update symlink to latest checkpoint
-    symlink_path = run_dir / "peft_last"
-    try:
-        if symlink_path.exists() or symlink_path.is_symlink():
-            symlink_path.unlink()
-        symlink_path.symlink_to(save_dir, target_is_directory=True)
-    except Exception:
-        # Windows or restricted FS fallback: ignore symlink errors
-        pass
+    symlink_path = os.path.join(config.run_dir, "peft_last.pt")
+    if os.path.exists(symlink_path) or os.path.islink(symlink_path):
+        os.remove(symlink_path)
+    os.symlink(save_path, symlink_path)
 
     # Save to wandb if configured
     if config.save_to_wandb and config.wandb is not None:
-        logger.info(f"Saving PEFT adapter to wandb: {save_dir}")
+        logger.info(f"Saving PEFT adapter to wandb: {save_path}")
         # by passing base_path, we save the files to the root of the wandb run
         # instead of duplicating the full path including the run directory
-        wandb.save(save_dir, base_path=config.run_dir, policy="now")
+        wandb.save(save_path, base_path=config.run_dir, policy="now")
 
     # retention: keep last N by step number
     pattern = r"^peft-step(\d+)$"  # folder names we created above
