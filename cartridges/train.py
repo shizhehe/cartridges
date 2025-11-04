@@ -322,6 +322,7 @@ def train(config: TrainConfig):
                 step=step,
                 final=final,
                 log_to_wandb=config.wandb is not None,
+                is_peft=use_peft,
             )
     
 
@@ -695,6 +696,7 @@ def evaluate_generations(
     step: int = None,
     final: bool = False,
     log_to_wandb: bool = True,
+    is_peft: bool = False,
 ):
     from cartridges.generation import flex_generate
 
