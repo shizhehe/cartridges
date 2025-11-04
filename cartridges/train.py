@@ -760,7 +760,7 @@ def evaluate_generations(
                 input_ids=input_ids,
                 seq_ids=seq_ids,
                 position_ids=position_ids,
-                cache=cache if isinstance(model, CacheAndModel) else None,
+                cache=cache if not is_peft else None,
                 model=model,
                 tokenizer=tokenizer,
                 max_new_tokens=(
@@ -769,7 +769,8 @@ def evaluate_generations(
                     else config.override_max_tokens
                 ),
                 temperature=config.temperature,
-                show_progress=is_rank_zero
+                show_progress=is_rank_zero,
+                is_peft=is_peft,
             )
             
             pred = tokenizer.batch_decode(pred_ids, skip_special_tokens=True)

@@ -22,6 +22,7 @@ def flex_generate(
     max_new_tokens: int = 32,
     temperature: float = 0.0,
     show_progress: bool = False,
+    is_peft: bool = False,
 ) -> Dict[int, List[int]]:
     """Autoregressive generation with FlexAttention (e.g. FlexLlamaModel, FlexQwen3Model).
     
@@ -46,7 +47,7 @@ def flex_generate(
     if stop_token_ids is None:
         stop_token_ids = [tokenizer.eos_token_id] if tokenizer.eos_token_id is not None else []
     
-    if cache is None and isinstance(model, CacheAndModel):
+    if cache is None and not is_peft:
         cache = TrainableCache(
             config=AttnConfig(
                 n_layers=model.config.num_hidden_layers,
@@ -71,8 +72,8 @@ def flex_generate(
                 input_ids=current_input_ids,
                 seq_ids=current_seq_ids,
                 position_ids=current_position_ids,
-                past_key_values=cache if isinstance(model, CacheAndModel) else None,
-                use_cache=True if isinstance(model, CacheAndModel) else False,
+                past_key_values=cache if not is_peft else None,
+                use_cache=True if not is_peft else False,
                 mode="generate",
             )
         
@@ -129,7 +130,7 @@ def flex_generate(
     # This issue is silent when training on a single GPU, but becomes apparent when
     # training on multiple GPUs. We get a crash on flex attention I guess because the 
     # cache sizes differ between GPUs.
-    if isinstance(model, CacheAndModel):
+    if not is_peft:
         cache.clear()
     
     return generated_tokens
