@@ -370,6 +370,7 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
         mode: Literal["train", "generate"] = "train",
         attention_mask: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
+        output_hidden_states: bool = False,
     ) -> BaseModelOutputWithPast:
         """
         seq_ids (`torch.LongTensor` of shape `(sequence_length,)`):
@@ -410,6 +411,8 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
         # create position embeddings to be shared across the decoder layers
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
 
+        all_hidden_states = () if output_hidden_states else None
+
         batch = Qwen3Batch(
             hidden_states=hidden_states,
             input_ids=input_ids,
@@ -423,13 +426,23 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
         )
 
         for decoder_layer in self.layers[: self.config.num_hidden_layers]:
+            if output_hidden_states:
+                # append the layer input (matches LLaMA)
+                all_hidden_states += (batch.hidden_states,)
+
             batch = decoder_layer(batch)
+
+        final_hidden = self.norm(batch.hidden_states)
+
+        if output_hidden_states:
+            all_hidden_states += (final_hidden,)
 
         hidden_states = self.norm(batch.hidden_states)
         return BaseModelOutputWithPast(
-            last_hidden_state=hidden_states,
+            last_hidden_state=final_hidden,
             past_key_values=past_key_values if use_cache else None,
             attentions=batch.attentions if output_attentions else None,
+            hidden_states=all_hidden_states,
         )
 
 
@@ -481,6 +494,8 @@ class FlexQwen3ForCausalLM(FlexQwen3PreTrainedModel, GenerationMixin):
         mode: Literal["train", "generate"] = "train",
         attention_mask: Optional[torch.Tensor] = None,
         output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
     ) -> CausalLMOutputWithPast:
         r"""
         seq_ids (`torch.LongTensor` of shape `(sequence_length,)`):
@@ -518,21 +533,29 @@ class FlexQwen3ForCausalLM(FlexQwen3PreTrainedModel, GenerationMixin):
             mode=mode,
             attention_mask=attention_mask,
             output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states
         )
 
-        hidden_states = outputs.last_hidden_state
+        final_h = outputs.last_hidden_state
         # Only compute necessary logits, and do not upcast them to float if we are not computing the loss
         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
-        logits = self.lm_head(hidden_states[:, slice_indices, :])
+        logits = self.lm_head(final_h[:, slice_indices, :])
 
         loss = None
         if labels is not None:
             loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size)
 
+        if not return_dict:
+            # Tuple parity: (logits, past_key_values, hidden_states, attentions)
+            out = (logits, outputs.past_key_values, outputs.hidden_states, outputs.attentions)
+            return ((loss,) + out) if loss is not None else out
+
         return CausalLMOutputWithPast(
             loss=loss,
             logits=logits,
             past_key_values=outputs.past_key_values,
+            hidden_states=outputs.hidden_states,
+            last_hidden_state=final_h,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
