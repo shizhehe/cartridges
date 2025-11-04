@@ -484,7 +484,7 @@ def train(config: TrainConfig):
                     logger.info(
                         f"Saving PEFT model at step {optimizer_step} to {config.run_dir}/peft_model_{optimizer_step}"
                     )
-                    save_peft_adapter(config, model, optimizer_step)
+                    save_peft_adapter(config, wrapped_model, optimizer_step)
 
             if cache_tuning:
                 cache.clear()
