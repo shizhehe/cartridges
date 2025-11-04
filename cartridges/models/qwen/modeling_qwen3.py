@@ -545,10 +545,10 @@ class FlexQwen3ForCausalLM(FlexQwen3PreTrainedModel, GenerationMixin):
         if labels is not None:
             loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size)
 
-        if not return_dict:
-            # Tuple parity: (logits, past_key_values, hidden_states, attentions)
-            out = (logits, outputs.past_key_values, outputs.hidden_states, outputs.attentions)
-            return ((loss,) + out) if loss is not None else out
+        # if not return_dict:
+        #     # Tuple parity: (logits, past_key_values, hidden_states, attentions)
+        #     out = (logits, outputs.past_key_values, outputs.hidden_states, outputs.attentions)
+        #     return ((loss,) + out) if loss is not None else out
 
         return CausalLMOutputWithPast(
             loss=loss,
