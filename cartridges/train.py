@@ -26,6 +26,7 @@ from torch.utils.data.distributed import DistributedSampler
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer
 import wandb
+from safetensors.torch import safe_open
 
 from cartridges.cache import AttnConfig, KVCacheFactory, TrainableCache
 from cartridges.datasets import (
@@ -980,6 +981,9 @@ def save_peft_adapter(config: TrainConfig, model: nn.Module, optimizer_step: int
     Keeps only the most recent config.keep_last_n_saved.
     """
 
+    if isinstance(model, DDP):
+        model = model.module
+
     assert isinstance(model, PeftModel), (
         "Expected a PEFT-wrapped model. If your ModelConfig.instantiate() returns "
         "a base HF model, wrap it with get_peft_model(...) before training."
@@ -992,6 +996,14 @@ def save_peft_adapter(config: TrainConfig, model: nn.Module, optimizer_step: int
     save_path = run_dir / f"peft-step{optimizer_step}"
     save_path.mkdir(exist_ok=True, parents=True)
     model.save_pretrained(str(save_path), safe_serialization=True)
+
+    # integrity check
+    single = save_path / "adapter_model.safetensors"
+    if single.exists():
+        with safe_open(single, framework="pt", device="cpu") as f:
+            _ = list(f.keys())
+    else:
+        raise FileNotFoundError(f"PEFT adapter not saved to {save_path}")
 
     # Create/update symlink to latest checkpoint
     symlink_path = os.path.join(config.run_dir, "peft_last")
@@ -1011,25 +1023,6 @@ def save_peft_adapter(config: TrainConfig, model: nn.Module, optimizer_step: int
                     base_path=str(config.run_dir),
                     policy="now"
                 )
-
-    # retention: keep last N by step number
-    # pattern = r"^peft-step(\d+)$"  # folder names we created above
-    # all_dirs = [d for d in os.listdir(run_dir) if re.match(pattern, d)]
-    # def parse_step(dirname: str) -> int:
-    #     m = re.match(pattern, dirname)
-    #     return int(m.group(1)) if m else -1
-    # all_dirs.sort(key=parse_step)
-    # while len(all_dirs) > config.keep_last_n_saved:
-    #     oldest = all_dirs.pop(0)
-    #     full = run_dir / oldest
-    #     # remove folder recursively
-    #     for root, dirs, files in os.walk(full, topdown=False):
-    #         for name in files:
-    #             os.remove(Path(root) / name)
-    #         for name in dirs:
-    #             os.rmdir(Path(root) / name)
-    #     os.rmdir(full)
-
 
 def save_cache(config: TrainConfig, cache: TrainableCache, optimizer_step: int):
     """
