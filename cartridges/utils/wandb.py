@@ -589,7 +589,7 @@ def download_peft_from_run(
     dest = _ensure_dir(dest_dir / f"peft-step{step}")
     for fname in ("adapter_model.safetensors", "adapter_config.json"):
         wandb.restore(
-            f"peft-step{step}/{fname}"
+            f"peft-step{step}/{fname}",
             root=str(dest_dir),
             run_path=full_run_path,
         )
