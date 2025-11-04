@@ -5,6 +5,7 @@ from pydrantic import BaseConfig
 from pydantic import Field
 from pathlib import Path
 import os
+from peft import PeftModel
 
 from cartridges.models.registry import MODEL_REGISTRY
 from cartridges.models.peft import load_peft_into_model
