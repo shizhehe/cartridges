@@ -11,6 +11,7 @@ import time
 from typing import Dict, List, Literal, Optional
 
 import pandas as pd
+from peft import PeftModel
 from pydantic import Field
 from pydrantic import BaseConfig, ObjectConfig, RunConfig
 import torch
@@ -483,9 +484,7 @@ def train(config: TrainConfig):
                     logger.info(
                         f"Saving PEFT model at step {optimizer_step} to {config.run_dir}/peft_model_{optimizer_step}"
                     )
-                    model.save_pretrained(
-                        f"{config.run_dir}/peft_model_{optimizer_step}"
-                    )
+                    save_peft_adapter(config, model, optimizer_step)
 
             if cache_tuning:
                 cache.clear()
@@ -507,7 +506,7 @@ def train(config: TrainConfig):
         else:
             # Save PEFT model
             logger.info(f"Saving PEFT model to {config.run_dir}/peft_model")
-            model.save_pretrained(f"{config.run_dir}/peft_model")
+            save_peft_adapter(config, model, optimizer_step)
     
     logger.info(f"Done training waiting for final barrier.")
 
@@ -971,6 +970,64 @@ class CacheAndModel(nn.Module):
         )
 
         return out
+
+
+def save_peft_adapter(config: TrainConfig, model: nn.Module, optimizer_step: int):
+    """
+    Saves the PEFT (LoRA) adapter to {config.run_dir}/peft-step{step}
+    Creates/updates a 'peft_last' symlink.
+    Optionally logs to Weights & Biases (as files or an Artifact).
+    Keeps only the most recent config.keep_last_n_saved.
+    """
+
+    assert isinstance(model, PeftModel), (
+        "Expected a PEFT-wrapped model. If your ModelConfig.instantiate() returns "
+        "a base HF model, wrap it with get_peft_model(...) before training."
+    )
+
+    run_dir = Path(config.run_dir)
+    run_dir.mkdir(exist_ok=True, parents=True)
+
+    # save folder (adapter_config.json + adapter_model.safetensors)
+    save_dir = run_dir / f"peft-step{optimizer_step}"
+    save_dir.mkdir(exist_ok=True, parents=True)
+    model.save_pretrained(str(save_dir), safe_serialization=True)
+
+    # Create/update symlink to latest checkpoint
+    symlink_path = run_dir / "peft_last"
+    try:
+        if symlink_path.exists() or symlink_path.is_symlink():
+            symlink_path.unlink()
+        symlink_path.symlink_to(save_dir, target_is_directory=True)
+    except Exception:
+        # Windows or restricted FS fallback: ignore symlink errors
+        pass
+
+    # Save to wandb if configured
+    if config.save_to_wandb and config.wandb is not None:
+        logger.info(f"Saving PEFT adapter to wandb: {save_dir}")
+        # by passing base_path, we save the files to the root of the wandb run
+        # instead of duplicating the full path including the run directory
+        wandb.save(save_dir, base_path=config.run_dir, policy="now")
+
+    # retention: keep last N by step number
+    pattern = r"^peft-step(\d+)$"  # folder names we created above
+    all_dirs = [d for d in os.listdir(run_dir) if re.match(pattern, d)]
+    def parse_step(dirname: str) -> int:
+        m = re.match(pattern, dirname)
+        return int(m.group(1)) if m else -1
+    all_dirs.sort(key=parse_step)
+    while len(all_dirs) > config.keep_last_n_saved:
+        oldest = all_dirs.pop(0)
+        full = run_dir / oldest
+        # remove folder recursively
+        for root, dirs, files in os.walk(full, topdown=False):
+            for name in files:
+                os.remove(Path(root) / name)
+            for name in dirs:
+                os.rmdir(Path(root) / name)
+        os.rmdir(full)
+
 
 def save_cache(config: TrainConfig, cache: TrainableCache, optimizer_step: int):
     """

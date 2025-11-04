@@ -46,12 +46,12 @@ def create_block_mask_w_cache(
         kv_seq_ids = torch.cat([cache.seq_ids(), kv_seq_ids])
 
     def mask_func(_, _h, q_idx, kv_idx):
-        # 1) Disallow padded keys in the *current* (non-cache) KV region.
+        # Disallow padded keys in the *current* (non-cache) KV region.
         if key_padding_mask is not None and kv_idx >= cache_len:
             k_local = kv_idx - cache_len
             if bool(key_padding_mask[k_local]):  # True = pad -> block it
                 return False
-        # 2) Original segmentation + causal rule.
+        # Original segmentation + causal rule.
         return (kv_seq_ids[kv_idx] == -1) | (
             (seq_ids[q_idx] == kv_seq_ids[kv_idx]) & (q_idx + cache_len >= kv_idx)
         )

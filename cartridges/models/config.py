@@ -5,6 +5,19 @@ from pydrantic import BaseConfig
 from pydantic import Field
 
 from cartridges.models.registry import MODEL_REGISTRY
+from cartridges.models.peft import load_peft_into_model, download_peft_from_artifact, download_peft_from_run
+
+class WandbPeftSource(BaseConfig):
+    # Choose exactly one of these:
+    run_id: Optional[str] = None              # e.g., "abc123def456"
+    artifact: Optional[str] = None            # e.g., "entity/project/llama3-lora-adapter:latest"
+
+    # Only for run files:
+    step: Optional[int] = None                # if None, latest peft-step is used
+
+    # Optional local staging root:
+    local_cache_root: Optional[str] = None    # defaults to CARTRIDGES_OUTPUT_DIR/checkpoints/wandb_peft
+
 
 class ModelConfig(BaseConfig):
     checkpoint_path: Optional[str] = None
@@ -43,7 +56,7 @@ class PeftConfig(BaseConfig):
     dropout: float = 0.0
     bias: Literal['none', 'all', 'lora_only'] = 'none'
     task_type: Literal['CAUSAL_LM', 'SEQ_CLS', 'SEQ_2_SEQ_LM'] = 'CAUSAL_LM'
-    
+
     # Prefix Tuning parameters
     num_virtual_tokens: int = 20  # number of virtual tokens for prefix tuning
     encoder_hidden_size: Optional[int] = None  # hidden size for the encoder
@@ -119,12 +132,40 @@ class HFModelConfig(ModelConfig):
     
     # PEFT configuration
     peft: PeftConfig = Field(default_factory=PeftConfig)
+    wandb_peft: Optional[WandbPeftSource] = None
 
     # Whether to use the custom TrainableCache (prefix-tuning) or PEFT
     tuning_method: Literal['custom_prefix', 'peft'] = 'custom_prefix'
 
     model_cls: Optional[Type[PreTrainedModel]] = None
     attn_implementation: Optional[Literal['einsum', 'sdpa']] = None
+
+    def _resolve_local_peft_dir(self) -> Optional[Path]:
+        if not self.wandb_peft:
+            return None
+
+        entity = os.environ.get("CARTRIDGES_WANDB_ENTITY")
+        project = os.environ.get("CARTRIDGES_WANDB_PROJECT")
+
+        if entity is None or project is None:
+            raise ValueError("CARTRIDGES_WANDB_ENTITY and CARTRIDGES_WANDB_PROJECT must be set")
+
+        cache_root = Path(
+            self.wandb_peft.local_cache_root
+            or os.environ.get("CARTRIDGES_OUTPUT_DIR", ".")
+        ) / "checkpoints" / "wandb_peft"
+        cache_root.mkdir(parents=True, exist_ok=True)
+
+        if self.wandb_peft.artifact:
+            # artifact path wins if provided
+            return download_peft_from_artifact(self.wandb_peft.artifact, cache_root)
+
+        if self.wandb_peft.run_id:
+            full_run = f"{entity}/{project}/{self.wandb_peft.run_id}"
+            return download_peft_from_run(full_run, cache_root, step=self.wandb_peft.step)
+
+        return None
+
 
     def instantiate(self):
         if self.model_cls is None and self.pretrained_model_name_or_path in MODEL_REGISTRY:
@@ -135,17 +176,24 @@ class HFModelConfig(ModelConfig):
         else:
             model_cls = self.model_cls
 
-        model = model_cls.from_pretrained(
+        base_model: PreTrainedModel = model_cls.from_pretrained(
             self.pretrained_model_name_or_path,
             **self.load_kwargs
         )
 
-        if self.tuning_method == 'peft' and self.peft.enabled:
+        if self.tuning_method == 'peft' and self.peft.enabled and self.wandb_peft is None:
             from peft import get_peft_model
             peft_config = self.peft.get_peft_config()
-            if peft_config is not None:
-                model = get_peft_model(model, peft_config)
-                model.print_trainable_parameters()
+            base_model = get_peft_model(model, peft_config)
+            base_model.print_trainable_parameters()
+            return base_model
+
+        if self.tuning_method == 'peft' and self.wandb_peft is not None:
+            peft_dir = self._resolve_local_peft_dir()
+            model = load_peft_into_model(base_model, peft_dir)
+            model.print_trainable_parameters()
+            return model
+
         
-        return model
+        return base_model
     
