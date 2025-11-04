@@ -51,6 +51,7 @@ class Qwen3Batch:
     attention_mask: Optional[torch.Tensor] = None
     use_cache: Optional[bool] = None
     mode: Literal["train", "generate"] = "train"
+    output_attentions: bool = False
 
     def update(self, **kwargs) -> "Qwen3Batch":
         return Qwen3Batch(
@@ -180,8 +181,6 @@ class Qwen3Attention(nn.Module):
                 key_states.clone(), value_states.clone(), batch.seq_ids, self.layer_idx,
                 skip_append=batch.mode == "train"
             )
-        
-
 
         attn_output = flex_attention_forward(
             self,
@@ -195,6 +194,35 @@ class Qwen3Attention(nn.Module):
 
         attn_output = attn_output.reshape(*input_shape, -1).contiguous()
         attn_output = self.o_proj(attn_output)
+
+        # manually compute attention weights
+        if batch.output_attentions:
+            cache_len = batch.past_key_values.num_tokens() if batch.past_key_values is not None else 0
+            kv_seq_ids = batch.seq_ids
+            if cache_len > 0:
+                kv_seq_ids = torch.cat([batch.past_key_values.seq_ids(), kv_seq_ids])
+
+            Q = batch.seq_ids.numel()
+            KV = kv_seq_ids.numel()
+            device = attn_output.device
+
+            q_idx = torch.arange(Q, device=device).unsqueeze(1)              # (Q,1)
+            kv_idx = torch.arange(KV, device=device).unsqueeze(0)            # (1,KV)
+            same_seq = (batch.seq_ids.unsqueeze(1) == kv_seq_ids.unsqueeze(0))
+            causal_ok = (q_idx + cache_len) >= kv_idx
+            allow = (kv_seq_ids.unsqueeze(0) == -1) | (same_seq & causal_ok) # (Q,KV)
+
+            # Compute probs with the same scale as the main path
+            q = query_states.to(torch.float32)                                # (1,H,Q,D)
+            k = key_states.to(torch.float32)                                  # (1,H,KV,D)
+            scores = torch.matmul(q, k.transpose(-1, -2))
+            if self.scaling is not None:
+                scores = scores * self.scaling
+            scores = scores.masked_fill(~allow.unsqueeze(0).unsqueeze(0), float("-inf"))
+            attn_probs = scores.softmax(dim=-1).to(query_states.dtype)        # (1,H,Q,KV)
+
+            # Append to per-layer list
+            batch = batch.update(attentions=(batch.attentions or []) + [attn_probs.detach()])
         
         return batch.update(hidden_states=attn_output)
 
@@ -341,6 +369,7 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
         use_cache: Optional[bool] = None,
         mode: Literal["train", "generate"] = "train",
         attention_mask: Optional[torch.Tensor] = None,
+        output_attentions: bool = False,
     ) -> BaseModelOutputWithPast:
         """
         seq_ids (`torch.LongTensor` of shape `(sequence_length,)`):
@@ -364,7 +393,8 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
                 attention_mask = attention_mask[0]  # (1, L) -> (L,)
             # Convert 1/0 to False/True (keep -> False, pad -> True)
             key_padding_mask = (attention_mask == 0)
-
+            # additional sanity check
+            assert attention_mask.numel() == seq_ids.numel(), "attention_mask length must equal seq_ids length"
 
         # --- begin build block mask ---
         block_mask = create_block_mask_w_cache(
@@ -389,6 +419,7 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
             position_embeddings=position_embeddings,
             attention_mask=block_mask,
             mode=mode,
+            output_attentions=output_attentions,
         )
 
         for decoder_layer in self.layers[: self.config.num_hidden_layers]:
@@ -398,6 +429,7 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
         return BaseModelOutputWithPast(
             last_hidden_state=hidden_states,
             past_key_values=past_key_values if use_cache else None,
+            attentions=batch.attentions if output_attentions else None,
         )
 
 
@@ -448,6 +480,7 @@ class FlexQwen3ForCausalLM(FlexQwen3PreTrainedModel, GenerationMixin):
         logits_to_keep: Union[int, torch.Tensor] = 0,
         mode: Literal["train", "generate"] = "train",
         attention_mask: Optional[torch.Tensor] = None,
+        output_attentions: Optional[bool] = None,
     ) -> CausalLMOutputWithPast:
         r"""
         seq_ids (`torch.LongTensor` of shape `(sequence_length,)`):
@@ -484,6 +517,7 @@ class FlexQwen3ForCausalLM(FlexQwen3PreTrainedModel, GenerationMixin):
             use_cache=use_cache,
             mode=mode,
             attention_mask=attention_mask,
+            output_attentions=output_attentions,
         )
 
         hidden_states = outputs.last_hidden_state
