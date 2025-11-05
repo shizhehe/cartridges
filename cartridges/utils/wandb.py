@@ -572,6 +572,7 @@ def download_peft_from_run(
     full_run_path: str,
     dest_dir: Path,
     step: Optional[int] = None,
+    is_ddp: bool = False,
 ) -> Path:
     """
     Download a PEFT adapter folder from a W&B run (logged via wandb.save).
@@ -602,6 +603,10 @@ def download_peft_from_run(
                 raise FileNotFoundError(f"Missing {fname} after restore from {full_run_path}")
             src = alt
         shutil.move(str(src), str(dest / fname))
+
+    # if we have multiple ranks, we need to sync the files
+    if is_ddp:
+        dist.barrier()
 
     return dest
 

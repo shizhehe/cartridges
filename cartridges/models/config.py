@@ -143,6 +143,7 @@ class HFModelConfig(ModelConfig):
 
     model_cls: Optional[Type[PreTrainedModel]] = None
     attn_implementation: Optional[Literal['einsum', 'sdpa']] = None
+    is_ddp: bool = False
 
     def _resolve_local_peft_dir(self) -> Optional[Path]:
         if not self.wandb_peft:
@@ -166,7 +167,8 @@ class HFModelConfig(ModelConfig):
 
         if self.wandb_peft.run_id:
             full_run = f"{entity}/{project}/{self.wandb_peft.run_id}"
-            return download_peft_from_run(full_run, cache_root, step=self.wandb_peft.step)
+            logger.info(f"Downloading PEFT adapter from {full_run}")
+            return download_peft_from_run(full_run, cache_root, step=self.wandb_peft.step, is_ddp=self.is_ddp)
 
         return None
 
@@ -194,6 +196,7 @@ class HFModelConfig(ModelConfig):
 
         if self.tuning_method == 'peft' and self.wandb_peft is not None:
             peft_dir = self._resolve_local_peft_dir()
+            logger.info(f"Loading PEFT adapter from {peft_dir}")
             model = load_peft_into_model(base_model, peft_dir, is_trainable=True)
             assert isinstance(model, PeftModel), f"Loaded model is not a PEFT model: {type(model)}s"
             assert any(p.requires_grad for p in model.parameters()), "Loaded adapter is frozen; set train=True."
