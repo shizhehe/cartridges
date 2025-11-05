@@ -6,11 +6,13 @@ from pydantic import Field
 from pathlib import Path
 import os
 from peft import PeftModel
-from loguru import logger
+from cartridges.utils import get_logger
 
 from cartridges.models.registry import MODEL_REGISTRY
 from cartridges.models.peft import load_peft_into_model
 from cartridges.utils.wandb import download_peft_from_artifact, download_peft_from_run
+
+logger = get_logger(__name__)
 
 class WandbPeftSource(BaseConfig):
     # Choose exactly one of these:
