@@ -6,6 +6,7 @@ from pydantic import Field
 from pathlib import Path
 import os
 from peft import PeftModel
+from loguru import logger
 
 from cartridges.models.registry import MODEL_REGISTRY
 from cartridges.models.peft import load_peft_into_model
