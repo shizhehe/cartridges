@@ -154,12 +154,13 @@ class EnronQAGenerateDataset(GenerateEvalDataset):
                 return {"perplexity": None}, {"error": "No prediction tokens found in logprobs"}
             
             # Extract only the logprobs for the prediction tokens
+            print("Prediction:", pred)
             prediction_logprobs = input_logprobs[num_context_tokens:]
             prediction_tokens = tokens[num_context_tokens:]
             print(f"Prediction tokens: {prediction_tokens}")
             
             # Filter out any invalid logprobs (NaN, -inf, etc.)
-            valid_logprobs = prediction_logprobs[~np.isnan(prediction_logprobs) & ~np.isinf(prediction_logprobs)]
+            valid_logprobs = [lp for lp in prediction_logprobs if not np.isnan(lp) and not np.isinf(lp)]
             
             if len(valid_logprobs) == 0:
                 return {"perplexity": None}, {"error": "No valid logprobs found"}
