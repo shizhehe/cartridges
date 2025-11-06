@@ -66,7 +66,7 @@ class ClientSample:
     tokens: Optional[Sequence[str]] = None
     log_prob: Optional[Sequence[float]] = None
     input_log_prob: Optional[Sequence[float]] = None
-    stop_reason: Literal["max_tokens", "stop", "length", "error"]
+    stop_reason: Literal["max_tokens", "stop", "length", "error"] = "stop"
     top_logprobs: Optional[TopLogprobs] = None
 
 
