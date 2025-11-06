@@ -216,7 +216,7 @@ Example:
             import asyncio
             
             async def get_judge_response():
-                return await self.judge_client.chat(
+                return await self.perplexity_judge_client.chat(
                     chats=[[
                         {"role": "system", "content": "You are an expert evaluator for question-answering tasks. Always respond with valid JSON."},
                         {"role": "user", "content": judge_prompt}
@@ -266,14 +266,14 @@ Example:
                     }
                 else:
                     # Final fallback to string matching
-                    return self._fallback_score(pred, answer, perplexity)
+                    return self._fallback_score(pred, answer)
             
         except Exception as e:
             print(f"Error in LLM judge scoring: {e}")
             # Fallback to string matching
-            return self._fallback_score(pred, answer, perplexity)
+            return self._fallback_score(pred, answer)
     
-    def _fallback_score(self, pred: str, answer: str, perplexity: float) -> Tuple[Dict[str, Optional[float]], Dict[str, Optional[str]]]:
+    def _fallback_score(self, pred: str, answer: str) -> Tuple[Dict[str, Optional[float]], Dict[str, Optional[str]]]:
         """Fallback scoring using string matching when LLM judge fails."""
         
         # Clean up the strings
@@ -282,15 +282,15 @@ Example:
         
         # Exact match
         if pred_clean == answer_clean:
-            return {"accuracy": True, "perplexity": perplexity}, {"match_type": "exact_fallback", "pred_clean": pred_clean}
+            return {"accuracy": True}, {"match_type": "exact_fallback", "pred_clean": pred_clean}
         
         # Substring match (answer in prediction)
         if answer_clean in pred_clean:
-            return {"accuracy": True, "perplexity": perplexity}, {"match_type": "substring_fallback", "pred_clean": pred_clean}
+            return {"accuracy": True}, {"match_type": "substring_fallback", "pred_clean": pred_clean}
         
         # Reverse substring match (prediction in answer, for short predictions)
         if len(pred_clean) > 5 and pred_clean in answer_clean:
-            return {"accuracy": True, "perplexity": perplexity}, {"match_type": "reverse_substring_fallback", "pred_clean": pred_clean}
+            return {"accuracy": True}, {"match_type": "reverse_substring_fallback", "pred_clean": pred_clean}
         
         # Token overlap similarity (for more flexible matching)
         pred_tokens = set(pred_clean.split())
@@ -302,14 +302,14 @@ Example:
             
             # Consider it correct if significant overlap (>= 0.6)
             if similarity >= 0.6:
-                return {"accuracy": True, "perplexity": perplexity}, {
+                return {"accuracy": True}, {
                     "match_type": "token_overlap_fallback", 
                     "pred_clean": pred_clean,
                     "similarity": similarity,
                 }
         
         # No match found
-        return {"accuracy": False, "perplexity": perplexity}, {
+        return {"accuracy": False}, {
             "match_type": "no_match_fallback", 
             "pred_clean": pred_clean,
             "similarity": 0.0,
@@ -356,6 +356,7 @@ Example:
             return accuracy_scores, accuracy_metadata
         else:
             # Fallback to string matching
-            accuracy_scores, accuracy_metadata = self._fallback_score(pred, answer, perplexity_scores.get("perplexity", None))
+            accuracy_scores, accuracy_metadata = self._fallback_score(pred, answer)
+            accuracy_scores.update(perplexity_scores)
             accuracy_metadata.update(perplexity_metadata)
             return accuracy_scores, accuracy_metadata
