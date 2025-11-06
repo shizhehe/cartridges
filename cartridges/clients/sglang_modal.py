@@ -18,9 +18,9 @@ from sglang import (
 )
 from sglang.lang.interpreter import ProgramState
 
-from mfactory.clients.base import ClientConfig, Client, ClientSample, ClientResponse
-from mfactory.clients.mixins import ServerMixin
-from mfactory.clients.usage import Usage
+from cartridges.clients.base import Client, ClientSample, ClientConfig, ClientResponse, TopLogprobs
+from cartridges.clients.mixins import ServerMixin
+from cartridges.clients.usage import Usage
 
 
 class SGLangClient(Client, ServerMixin):
