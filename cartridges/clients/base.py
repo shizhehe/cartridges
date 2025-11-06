@@ -1,17 +1,20 @@
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Literal, Optional, Union
+from dataclasses import asdict, dataclass
+from typing import Any, Dict, List, Literal, Optional, Sequence
 
 import numpy as np
 from pydrantic import BaseConfig, ObjectConfig
-from pydantic import BaseModel
+
 from cartridges.clients.usage import Usage
-from dataclasses import dataclass, asdict
+
 
 class CartridgeConfig(BaseConfig):
     id: str
     source: Literal["huggingface", "wandb"]
     force_redownload: bool = False
+
 
 class ClientConfig(ObjectConfig):
     _pass_as_config: bool = True
@@ -30,16 +33,18 @@ class Client(ABC):
 
     @abstractmethod
     async def chat(
-        self, 
-        chats: List[List[Dict[str, Any]]], 
-        temperature: float = 0.6, 
-        stop: List[str] = [], 
+        self,
+        chats: List[List[Dict[str, Any]]],
+        temperature: float = 0.6,
+        stop: List[str] | None = None,
         max_completion_tokens: Optional[int] = None,
         frequency_penalty: float = 0.0,
         top_logprobs: int = 1,
         logprobs_start_message: Optional[int] = None,
         modal_upstream_id: Optional[str] = None,
     ) -> ClientResponse:
+        if stop is None:
+            stop = []
         raise NotImplementedError
 
 
@@ -47,8 +52,9 @@ class Client(ABC):
 class ClientResponse:
     samples: List[ClientSample]
     usage: Usage
-    
+
     timings: Optional[List[Dict[str, Any]]] = None
+
     def to_dict(self):
         return asdict(self)
 
@@ -57,9 +63,11 @@ class ClientResponse:
 class ClientSample:
     text: str
     token_ids: Optional[List[int]] = None
-
+    tokens: Optional[Sequence[str]]  # Includes eos_token
+    log_prob: Optional[Sequence[float]] = None
+    input_log_prob: Optional[Sequence[float]] = None
+    stop_reason: Literal["max_tokens", "stop", "length", "error"]
     top_logprobs: Optional[TopLogprobs] = None
-
 
 
 @dataclass(slots=True)
@@ -72,10 +80,11 @@ class FlatTopLogprobs:
     logprobs   – 1-D  [N]   natural-log probabilities
     shape      – tuple(int,int) – (num_tokens , num_top_logprobs)
     """
+
     token_idx: np.ndarray
-    token_id:  np.ndarray
-    logprobs:  np.ndarray
-    shape:     tuple[int, int]
+    token_id: np.ndarray
+    logprobs: np.ndarray
+    shape: tuple[int, int]
 
     # ──────────────────────────────────────────────────────────
     # Inflate the sparse view back to dense [T , K] tensors.
@@ -84,18 +93,18 @@ class FlatTopLogprobs:
     def reconstruct(self) -> "TopLogprobs":
         T, K = self.shape
         dense_logp = np.full((T, K), -1000.0, dtype=self.logprobs.dtype)
-        dense_ids  = np.full((T, K), -1,      dtype=self.token_id.dtype)
+        dense_ids = np.full((T, K), -1, dtype=self.token_id.dtype)
 
         # The kept entries for each row always occupy the first *n*
         # columns, where n = (token_idx == row).sum().
         # We fill the matrix row-by-row (vectorised per row, tiny loop
         # over T only – negligible cost).
         for row in range(T):
-            row_mask = self.token_idx == row          # boolean mask
-            n_keep   = row_mask.sum()
-            if n_keep:                                # skip empty rows
+            row_mask = self.token_idx == row  # boolean mask
+            n_keep = row_mask.sum()
+            if n_keep:  # skip empty rows
                 dense_logp[row, :n_keep] = self.logprobs[row_mask]
-                dense_ids [row, :n_keep] = self.token_id[row_mask]
+                dense_ids[row, :n_keep] = self.token_id[row_mask]
 
         return TopLogprobs(logprobs=dense_logp, token_ids=dense_ids)
 
@@ -106,7 +115,8 @@ class TopLogprobs:
     logprobs  – [num_tokens , num_top_logprobs]  (sorted, ln p)
     token_ids – [num_tokens , num_top_logprobs]
     """
-    logprobs:  np.ndarray
+
+    logprobs: np.ndarray
     token_ids: np.ndarray
 
     # ──────────────────────────────────────────────────────────
@@ -124,19 +134,19 @@ class TopLogprobs:
         T, K = self.logprobs.shape
 
         # 1. cumulative probability mass (rows already sorted)
-        probs      = np.exp(self.logprobs)                 # [T , K]
-        cum_mass   = np.cumsum(probs, axis=1)              # [T , K]
+        probs = np.exp(self.logprobs)  # [T , K]
+        cum_mass = np.cumsum(probs, axis=1)  # [T , K]
 
         # 2. per-row cut-off index (inclusive)
-        cut_idx    = (cum_mass >= threshold).argmax(axis=1)   # [T]
+        cut_idx = (cum_mass >= threshold).argmax(axis=1)  # [T]
 
         # 3. build a boolean mask: keep columns 0 … cut_idx[row]
-        mask       = np.arange(K) < (cut_idx[:, None] + 1)    # [T , K]
+        mask = np.arange(K) < (cut_idx[:, None] + 1)  # [T , K]
 
         # 4. flatten
-        token_idx  = np.repeat(np.arange(T), K)[mask.ravel()]  # [N]
-        token_id   = self.token_ids[mask]                      # [N]
-        logprobs   = self.logprobs[mask]                       # [N]
+        token_idx = np.repeat(np.arange(T), K)[mask.ravel()]  # [N]
+        token_id = self.token_ids[mask]  # [N]
+        logprobs = self.logprobs[mask]  # [N]
 
         return FlatTopLogprobs(
             token_idx=token_idx,
