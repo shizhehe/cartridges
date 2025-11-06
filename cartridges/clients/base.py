@@ -63,7 +63,7 @@ class ClientResponse:
 class ClientSample:
     text: str
     token_ids: Optional[List[int]] = None
-    tokens: Optional[Sequence[str]]  # Includes eos_token
+    tokens: Optional[Sequence[str]] = None
     log_prob: Optional[Sequence[float]] = None
     input_log_prob: Optional[Sequence[float]] = None
     stop_reason: Literal["max_tokens", "stop", "length", "error"]
