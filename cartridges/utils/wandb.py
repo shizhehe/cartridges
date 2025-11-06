@@ -248,7 +248,7 @@ def read_conversations_from_wandb(
     """
     from cartridges.structs import read_conversations
     # Initialize wandb API
-    api = wandb.Api(timeout=29)
+    api = wandb.Api(timeout=59)
     
     # Check if artifact_id already contains entity/project (count slashes)
     if artifact_id.count('/') >= 2:
