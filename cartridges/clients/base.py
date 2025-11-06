@@ -52,6 +52,7 @@ class Client(ABC):
 class ClientResponse:
     samples: List[ClientSample]
     usage: Usage
+    usages: Optional[List[Usage]] = None
 
     timings: Optional[List[Dict[str, Any]]] = None
 
