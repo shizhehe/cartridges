@@ -90,6 +90,12 @@ def evaluate_loss(config: LossEvalRunConfig):
 
     eval_dataset = config.eval.dataset.instantiate(tokenizer=tokenizer, seed=config.seed)
 
+    # Log baseline metrics if available  
+    if hasattr(eval_dataset, 'baselines') and eval_dataset.baselines and config.wandb is not None and is_rank_zero:
+        for i, baseline in enumerate(eval_dataset.baselines):
+            for metric, value in baseline.items():
+                wandb.summary[f"baseline_{metric}"] = value
+
     # Only set up W&B if rank 0 or running single-process
     if config.wandb is not None and is_rank_zero:
         config.wandb.name = config.name
@@ -153,6 +159,12 @@ async def evaluate_generation(config: GenerationEvalRunConfig):
     model_helper = generator.get_model_helper()
 
     dataset=config.eval.dataset.instantiate(model_helper=model_helper, seed=config.seed)
+
+    # Log baseline metrics if available
+    if hasattr(dataset, 'baselines') and dataset.baselines and config.wandb is not None:
+        for i, baseline in enumerate(dataset.baselines):
+            for metric, value in baseline.items():
+                wandb.summary[f"baseline_{metric}"] = value
 
     await generator.setup()
 

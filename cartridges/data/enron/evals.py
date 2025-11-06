@@ -61,11 +61,23 @@ class EnronQAGenerateDataset(GenerateEvalDataset):
 
         # baseline perplexity scores, what is log likelihood of ground-truth answer
         self.baselines = []
-        baseline_perplexity_scores = []
-        for qa_item in self.qa_items:
-            perplexity_scores, perplexity_metadata = self._perplexity_judge_score(qa_item['answer'], qa_item['question'], qa_item['system_prompt'])
-            baseline_perplexity_scores.append(perplexity_scores['perplexity'])
-        self.baselines.append({'perplexity': np.mean(baseline_perplexity_scores)})
+        if hasattr(self, 'perplexity_judge_client') and self.perplexity_judge_client:
+            baseline_perplexity_scores = []
+            for qa_item in self.qa_items:
+                perplexity_scores, perplexity_metadata = self._perplexity_judge_score(qa_item['answer'], qa_item['question'], qa_item['system_prompt'])
+                baseline_perplexity_scores.append(perplexity_scores['perplexity'])
+            
+            # Filter out None values
+            valid_baseline_scores = [score for score in baseline_perplexity_scores if score is not None]
+            
+            if valid_baseline_scores:
+                baseline_perplexity_mean = np.mean(valid_baseline_scores)
+                self.baselines.append({'perplexity': baseline_perplexity_mean})
+                print(f"Calculated baseline perplexity: {baseline_perplexity_mean} from {len(valid_baseline_scores)} valid samples")
+            else:
+                print("No valid baseline perplexity scores calculated")
+        else:
+            print("No perplexity judge client configured, skipping baseline calculation")
 
     def __getitem__(self, index: int) -> GenerateEvalDatasetElement:
         qa_item = self.qa_items[index]
@@ -174,15 +186,16 @@ class EnronQAGenerateDataset(GenerateEvalDataset):
             
             return {"perplexity": float(perplexity)}, {
                 "method": "sglang_prediction_logprobs", 
-                "model": self.config.perplexity_judge_model.model_name,
+                "perplexity_judge_model": self.config.perplexity_judge_model.model_name,
                 "num_prediction_tokens": len(valid_logprobs),
-                "num_context_tokens": num_context_tokens,
-                "mean_logprob": float(mean_logprob)
+                "mean_logprob": float(mean_logprob),
+                "prediction_tokens": [str(token) for token in prediction_tokens],
+                "prediction_logprobs": [float(lp) for lp in prediction_logprobs],
             }
             
         except Exception as e:
             print(f"Error in perplexity calculation: {traceback.format_exc()}")
-            return {"perplexity": None}, {"error": f"Perplexity calculation failed: {str(e)}"}
+            return {"perplexity": None}, {"perplexity_error": f"Perplexity calculation failed: {str(e)}"}
 
     def _llm_judge_score(self, pred: str, answer: str, question: str) -> Tuple[Dict[str, Optional[float]], Dict[str, Optional[str]]]:
         """Use LLM as a judge to score the prediction against the correct answer."""
