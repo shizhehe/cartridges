@@ -1,5 +1,7 @@
 from typing import List, Optional, Tuple, Dict
 import json
+import numpy as np
+import traceback
 import re
 import random
 import os
@@ -175,7 +177,8 @@ class EnronQAGenerateDataset(GenerateEvalDataset):
             }
             
         except Exception as e:
-            return {"perplexity": None}, {"error": f"Perplexity calculation failed: {str(e)}"}}
+            print(f"Error in perplexity calculation: {traceback.format_exc()}")
+            return {"perplexity": None}, {"error": f"Perplexity calculation failed: {str(e)}"}
 
     def _llm_judge_score(self, pred: str, answer: str, question: str) -> Tuple[Dict[str, Optional[float]], Dict[str, Optional[str]]]:
         """Use LLM as a judge to score the prediction against the correct answer."""
