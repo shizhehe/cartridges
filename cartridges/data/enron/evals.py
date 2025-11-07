@@ -131,21 +131,15 @@ Example:
 {{"judgment": "CORRECT", "explanation": "The model's answer provides the same factual information as the reference answer."}}"""
 
         try:
-            # Use Cartridges OpenAI client for judging
-            import asyncio
-            
-            async def get_judge_response():
-                return await self.perplexity_judge_client.chat(
-                    chats=[[
-                        {"role": "system", "content": "You are an expert evaluator for question-answering tasks. Always respond with valid JSON."},
-                        {"role": "user", "content": judge_prompt}
-                    ]],
-                    temperature=self.config.qa_judge_temperature,
-                    max_completion_tokens=self.config.qa_judge_max_tokens
-                )
-            
-            # Run the async function
-            chat_response = asyncio.run(get_judge_response())
+            # Use SGLang client for judging (synchronous call)
+            chat_response = self.perplexity_judge_client.chat(
+                chats=[[
+                    {"role": "system", "content": "You are an expert evaluator for question-answering tasks. Always respond with valid JSON."},
+                    {"role": "user", "content": judge_prompt}
+                ]],
+                temperature=self.config.qa_judge_temperature,
+                max_completion_tokens=self.config.qa_judge_max_tokens
+            )
             judge_response = chat_response.samples[0].text.strip()
             
             # Parse the JSON response
