@@ -176,22 +176,6 @@ Example:
                 "qa_judge_model": str(self.config.qa_judge_model.model_name) if self.config.qa_judge_model else "unknown",
                 "qa_raw_response": judge_response
             }
-            except json.JSONDecodeError as json_error:
-                print(f"Failed to parse LLM judge JSON response: {json_error}")
-                print(f"Raw response: {judge_response}")
-                # Try to extract judgment from raw text as fallback
-                judge_response_upper = judge_response.upper()
-                if "CORRECT" in judge_response_upper and "INCORRECT" not in judge_response_upper:
-                    return {"accuracy": True}, {
-                        "match_type": "llm_judge_text_fallback",
-                        "judgment": "CORRECT",
-                        "explanation": "Extracted from non-JSON response",
-                        "qa_judge_model": str(self.config.qa_judge_model.model_name) if self.config.qa_judge_model else "unknown",
-                        "qa_raw_response": judge_response
-                    }
-                else:
-                    # Final fallback to string matching
-                    return self._fallback_score(pred, answer)
             
         except Exception as e:
             print(f"Error in LLM judge scoring: {e}")
