@@ -25,6 +25,7 @@ class EnronQAGenerateDataset(GenerateEvalDataset, PerplexityMixin):
         qa_judge_temperature: float = 0.0  # Temperature for judge model
         qa_judge_max_tokens: int = 300  # Max tokens for judge response
         perplexity_judge_model: Optional[SGLangClient.Config] = None
+        compute_baseline: bool = False
 
     def __init__(self, config: Config, model_helper: ModelHelper, seed: int):
         # Call parent constructor to load data from DataSource
@@ -62,15 +63,16 @@ class EnronQAGenerateDataset(GenerateEvalDataset, PerplexityMixin):
 
         # baseline perplexity scores, what is log likelihood of ground-truth answer
         self.baselines = []
-        if hasattr(self, 'perplexity_judge_client') and self.perplexity_judge_client:
-            baseline_stats = self._calculate_baseline_perplexities(self.qa_items)
-            if baseline_stats["perplexity"] is not None:
-                self.baselines.append(baseline_stats)
-                print(f"Calculated baseline perplexity: {baseline_stats['perplexity']:.3f} ± {baseline_stats['perplexity_std']:.3f} from {baseline_stats['count']} valid samples")
+        if self.config.compute_baseline:
+            if hasattr(self, 'perplexity_judge_client') and self.perplexity_judge_client:
+                baseline_stats = self._calculate_baseline_perplexities(self.qa_items)
+                if baseline_stats["perplexity"] is not None:
+                    self.baselines.append(baseline_stats)
+                    print(f"Calculated baseline perplexity: {baseline_stats['perplexity']:.3f} ± {baseline_stats['perplexity_std']:.3f} from {baseline_stats['count']} valid samples")
+                else:
+                    print("No valid baseline perplexity scores calculated")
             else:
-                print("No valid baseline perplexity scores calculated")
-        else:
-            print("No perplexity judge client configured, skipping baseline calculation")
+                print("No perplexity judge client configured, skipping baseline calculation")
 
     def __getitem__(self, index: int) -> GenerateEvalDatasetElement:
         qa_item = self.qa_items[index]
