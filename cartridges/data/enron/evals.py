@@ -100,7 +100,7 @@ class EnronQAGenerateDataset(GenerateEvalDataset, PerplexityMixin):
         return len(self.qa_items)
 
 
-    def _llm_judge_score(self, pred: str, answer: str, question: str) -> Tuple[Dict[str, Optional[float]], Dict[str, Optional[str]]]:
+    async def _llm_judge_score(self, pred: str, answer: str, question: str) -> Tuple[Dict[str, Optional[float]], Dict[str, Optional[str]]]:
         """Use LLM as a judge to score the prediction against the correct answer."""
         
         judge_prompt = f"""You are evaluating whether a model's answer to a question is correct or equivalent to the reference answer.
@@ -236,6 +236,18 @@ Example:
         Uses LLM judge (GPT-4o-mini) for semantic evaluation, with fallback to string matching.
         Also calculates perplexity if perplexity judge model is configured.
         """
+        import asyncio
+        
+        # Run the async scoring logic
+        return asyncio.run(self._async_score(pred, answer, convo_id))
+    
+    async def _async_score(
+        self,
+        pred: str,
+        answer: str,
+        convo_id: str
+    ) -> Tuple[bool, Dict[str, Optional[str]]]:
+        """Async implementation of scoring logic."""
         
         # Get the question and system prompt for context
         question = ""
@@ -258,7 +270,7 @@ Example:
         
         # Use LLM judge if enabled and available
         if self.config.qa_use_llm_judge and hasattr(self, 'qa_judge_client'):
-            accuracy_scores, accuracy_metadata = self._llm_judge_score(pred, answer, question)
+            accuracy_scores, accuracy_metadata = await self._llm_judge_score(pred, answer, question)
             # Merge perplexity into the accuracy scores
             accuracy_scores.update(perplexity_scores)
             accuracy_metadata.update(perplexity_metadata)
