@@ -63,8 +63,38 @@ class KVFromPretrained(KVCacheFactory):
 
         wandb_entity = os.environ.get("CARTRIDGES_WANDB_ENTITY", "shizhehe")
         wandb_project = os.environ.get("CARTRIDGES_WANDB_PROJECT", "dynamic-cartridges")
-        full_run_path = f"{wandb_entity}/{wandb_project}/{self.config.wandb_run_id}"
+        
+        # Ensure all ranks use the same wandb_run_id by broadcasting from rank 0
+        wandb_run_id = self.config.wandb_run_id
+        if is_ddp:
+            # Broadcast wandb_run_id from rank 0 to ensure consistency
+            if is_rank_zero:
+                run_id_bytes = wandb_run_id.encode('utf-8')
+                run_id_len = len(run_id_bytes)
+            else:
+                run_id_len = 0
+            
+            # First broadcast the length
+            run_id_len_tensor = torch.tensor(run_id_len, dtype=torch.int64, device='cuda')
+            dist.broadcast(run_id_len_tensor, src=0)
+            run_id_len = run_id_len_tensor.item()
+            
+            # Then broadcast the run_id
+            if is_rank_zero:
+                run_id_tensor = torch.frombuffer(run_id_bytes, dtype=torch.uint8).cuda()
+            else:
+                run_id_tensor = torch.zeros(run_id_len, dtype=torch.uint8, device='cuda')
+            
+            dist.broadcast(run_id_tensor, src=0)
+            
+            if not is_rank_zero:
+                wandb_run_id = run_id_tensor.cpu().numpy().tobytes().decode('utf-8')
+            
+            logger.info(f"[Rank {dist.get_rank()}] Using wandb run ID: {wandb_run_id}")
+        else:
+            logger.info(f"Using wandb run ID: {wandb_run_id}")
 
+        full_run_path = f"{wandb_entity}/{wandb_project}/{wandb_run_id}"
         logger.info(f"Restoring cache from wandb run {full_run_path}")
 
         # Only rank 0 should query WandB API to ensure consistent file selection across ranks
@@ -74,7 +104,7 @@ class KVFromPretrained(KVCacheFactory):
                 raise ValueError(f"No cache checkpoints found for wandb run {full_run_path}")
             
             if self.config.filename is not None:
-                assert self.config.filename in cache_files, f"Cache file {self.config.filename} not found in wandb run {self.config.wandb_run_id}"
+                assert self.config.filename in cache_files, f"Cache file {self.config.filename} not found in wandb run {wandb_run_id}"
                 filename = self.config.filename
             else:
                 filename = cache_files[0]
@@ -110,7 +140,7 @@ class KVFromPretrained(KVCacheFactory):
         else:
             logger.info(f"Using cache file: {filename}")
 
-        cache_dir = Path(os.environ["CARTRIDGES_OUTPUT_DIR"]) / "checkpoints" / f"{wandb_entity}/{wandb_project}/{self.config.wandb_run_id}"
+        cache_dir = Path(os.environ["CARTRIDGES_OUTPUT_DIR"]) / "checkpoints" / f"{wandb_entity}/{wandb_project}/{wandb_run_id}"
         cache_dir.mkdir(parents=True, exist_ok=True)
         
         path = cache_dir / filename
@@ -122,6 +152,8 @@ class KVFromPretrained(KVCacheFactory):
                     run_path=full_run_path, 
                     root=cache_dir,
                 )
+        
+        # Ensure all ranks wait for rank 0 to finish downloading
         if is_ddp:
             dist.barrier()
 
