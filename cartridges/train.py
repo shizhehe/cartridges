@@ -705,13 +705,21 @@ def evaluate_generations(
     world_size = dist.get_world_size() if is_ddp else 1
 
     
-    if isinstance(model, CacheAndModel):
-        if is_ddp:
-            cache = model.module.cache
-            model = model.module.model
+    if is_ddp:
+        module = model.module
+        if isinstance(module, CacheAndModel):
+            cache = module.cache
+            model = module.model
         else:
+            cache = None
+            model = module
+    else:
+        if isinstance(model, CacheAndModel):
             cache = model.cache
             model = model.model
+        else:
+            cache = None
+            model = model
 
     logger.info(
         f"Generating `{config.name_for_wandb}` (n={len(dataset)}, {len(dataset) // world_size} per device)"

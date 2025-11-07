@@ -132,7 +132,7 @@ Example:
 
         try:
             # Use SGLang client for judging (synchronous call)
-            chat_response = self.qa_judge_client.chat(
+            chat_response = await self.qa_judge_client.chat(
                 chats=[[
                     {"role": "system", "content": "You are an expert evaluator for question-answering tasks. Always respond with valid JSON."},
                     {"role": "user", "content": judge_prompt}
