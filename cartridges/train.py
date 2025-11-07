@@ -297,6 +297,13 @@ def train(config: TrainConfig):
 
         logger.info(f"Setup wandb with model stats: {wandb_log_dict}")
 
+        # write generation dataset baselines
+        for eval_config, generate_dataset in generate_evals:
+            if hasattr(generate_dataset, 'baselines') and generate_dataset.baselines and config.wandb is not None and is_rank_zero:
+                for i, baseline in enumerate(generate_dataset.baselines):
+                    for metric, value in baseline.items():
+                        wandb.summary[eval_config.name_for_wandb + f"_baseline_{metric}"] = value
+
 
     def do_evaluation():
         for ds_config, dataset in ppl_evals:
