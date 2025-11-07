@@ -132,7 +132,7 @@ Example:
 
         try:
             # Use SGLang client for judging (synchronous call)
-            chat_response = self.perplexity_judge_client.chat(
+            chat_response = self.qa_judge_client.chat(
                 chats=[[
                     {"role": "system", "content": "You are an expert evaluator for question-answering tasks. Always respond with valid JSON."},
                     {"role": "user", "content": judge_prompt}
@@ -142,28 +142,40 @@ Example:
             )
             judge_response = chat_response.samples[0].text.strip()
             
-            # Parse the JSON response
+            # Parse the JSON response (handle extra characters)
             try:
+                # First try direct parsing
                 judge_data = json.loads(judge_response)
-                
-                judgment = judge_data.get("judgment", "INCORRECT").upper()
-                explanation = judge_data.get("explanation", "No explanation provided")
-                
-                # Validate judgment - only accept CORRECT or INCORRECT
-                if judgment not in ["CORRECT", "INCORRECT"]:
-                    judgment = "INCORRECT"  # Default to incorrect for safety
-                
-                # Determine if correct
-                is_correct = judgment == "CORRECT"
-                
-                return {"accuracy":is_correct}, {
-                    "match_type": "llm_judge",
-                    "judgment": judgment,
-                    "explanation": explanation,
-                    "qa_judge_model": str(self.config.qa_judge_model.model_name) if self.config.qa_judge_model else "unknown",
-                    "qa_raw_response": judge_response
-                }
-                
+            except json.JSONDecodeError:
+                # Try to extract JSON from the response by finding the JSON object
+                import re
+                json_match = re.search(r'\{.*\}', judge_response, re.DOTALL)
+                if json_match:
+                    try:
+                        judge_data = json.loads(json_match.group())
+                    except json.JSONDecodeError:
+                        raise
+                else:
+                    raise
+            
+            # Process the successfully parsed JSON
+            judgment = judge_data.get("judgment", "INCORRECT").upper()
+            explanation = judge_data.get("explanation", "No explanation provided")
+            
+            # Validate judgment - only accept CORRECT or INCORRECT
+            if judgment not in ["CORRECT", "INCORRECT"]:
+                judgment = "INCORRECT"  # Default to incorrect for safety
+            
+            # Determine if correct
+            is_correct = judgment == "CORRECT"
+            
+            return {"accuracy":is_correct}, {
+                "match_type": "llm_judge",
+                "judgment": judgment,
+                "explanation": explanation,
+                "qa_judge_model": str(self.config.qa_judge_model.model_name) if self.config.qa_judge_model else "unknown",
+                "qa_raw_response": judge_response
+            }
             except json.JSONDecodeError as json_error:
                 print(f"Failed to parse LLM judge JSON response: {json_error}")
                 print(f"Raw response: {judge_response}")
