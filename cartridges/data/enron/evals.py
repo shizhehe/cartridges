@@ -14,9 +14,10 @@ from cartridges.models.helpers import ModelHelper
 from cartridges.clients.openai import OpenAIClient
 from cartridges.clients.tokasaurus import TokasaurusClient
 from cartridges.clients.sglang_modal import SGLangClient
+from cartridges.metrics import PerplexityMixin
 
 
-class EnronQAGenerateDataset(GenerateEvalDataset):
+class EnronQAGenerateDataset(GenerateEvalDataset, PerplexityMixin):
     class Config(GenerateEvalDataset.Config):
         _pass_as_config = True
         qa_judge_model: Optional[OpenAIClient.Config] = None
@@ -62,18 +63,10 @@ class EnronQAGenerateDataset(GenerateEvalDataset):
         # baseline perplexity scores, what is log likelihood of ground-truth answer
         self.baselines = []
         if hasattr(self, 'perplexity_judge_client') and self.perplexity_judge_client:
-            baseline_perplexity_scores = []
-            for qa_item in self.qa_items:
-                perplexity_scores, perplexity_metadata = self._perplexity_judge_score(qa_item['answer'], qa_item['question'], qa_item['system_prompt'])
-                baseline_perplexity_scores.append(perplexity_scores['perplexity'])
-            
-            # Filter out None values
-            valid_baseline_scores = [score for score in baseline_perplexity_scores if score is not None]
-            
-            if valid_baseline_scores:
-                baseline_perplexity_mean = np.mean(valid_baseline_scores)
-                self.baselines.append({'perplexity': baseline_perplexity_mean})
-                print(f"Calculated baseline perplexity: {baseline_perplexity_mean} from {len(valid_baseline_scores)} valid samples")
+            baseline_stats = self._calculate_baseline_perplexities(self.qa_items)
+            if baseline_stats["perplexity"] is not None:
+                self.baselines.append(baseline_stats)
+                print(f"Calculated baseline perplexity: {baseline_stats['perplexity']:.3f} ± {baseline_stats['perplexity_std']:.3f} from {baseline_stats['count']} valid samples")
             else:
                 print("No valid baseline perplexity scores calculated")
         else:
@@ -106,96 +99,6 @@ class EnronQAGenerateDataset(GenerateEvalDataset):
     def __len__(self):
         return len(self.qa_items)
 
-    def _perplexity_judge_score(self, pred: str, question: str, system_prompt: str) -> Tuple[Dict[str, Optional[float]], Dict[str, Optional[str]]]:
-        """Use SGLang to calculate perplexity of the prediction given the context."""
-        if not hasattr(self, 'perplexity_judge_client'):
-            return {"perplexity": None}, {"error": "No perplexity judge client configured"}
-        
-        try:
-            import numpy as np
-            
-            # Construct the conversation with system prompt, question, and prediction
-            conversation = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": question},
-                {"role": "assistant", "content": pred}
-            ]
-            
-            # Use SGLangClient to get detailed logprobs including input logprobs
-            # Set max_completion_tokens=1 to minimize generation, focus on the logprobs of existing conversation
-            response = self.perplexity_judge_client.chat(
-                chats=[conversation],
-                max_completion_tokens=1,
-                temperature=0.0,
-                return_logprob=True,
-            )
-            
-            if not response.samples or len(response.samples) == 0:
-                return {"perplexity": None}, {"error": "No response samples returned"}
-                
-            sample = response.samples[0]
-            
-            # SGLangClient provides input_log_prob which is what we need for perplexity calculation
-            if not hasattr(sample, 'input_log_prob') or sample.input_log_prob is None:
-                return {"perplexity": None}, {"error": "No input logprobs available"}
-            
-            # Convert input_log_prob to numpy array if it isn't already
-            if isinstance(sample.input_log_prob, (list, tuple)):
-                input_logprobs = np.array(sample.input_log_prob)
-                tokens = sample.tokens
-            else:
-                input_logprobs = sample.input_log_prob
-                tokens = sample.tokens
-            
-            # Extract logprobs for only the prediction tokens
-            context_conversation = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": question}
-            ]
-            context_tokens = self.perplexity_judge_client.tokenizer.apply_chat_template(
-                context_conversation,
-                add_generation_prompt=True,
-                return_tensors=None,
-                tokenize=True
-            )
-            num_context_tokens = len(context_tokens)
-            
-            # The prediction logprobs start after the context tokens
-            # Note: there might be some special tokens for role transitions
-            if len(input_logprobs) <= num_context_tokens:
-                return {"perplexity": None}, {"error": "No prediction tokens found in logprobs"}
-            
-            # Extract only the logprobs for the prediction tokens
-            prediction_logprobs = input_logprobs[num_context_tokens:]
-            prediction_tokens = tokens[num_context_tokens:]
-            # tokenize prediction to get the end
-            prediction_token_length = len(self.perplexity_judge_client.tokenizer.tokenize(pred))
-            prediction_logprobs = prediction_logprobs[:prediction_token_length]
-            prediction_tokens = prediction_tokens[:prediction_token_length]
-            print("Prediction:", pred)
-            print(f"Prediction tokens: {prediction_tokens}")
-            
-            valid_logprobs = [lp for lp in prediction_logprobs if not np.isnan(lp) and not np.isinf(lp)]
-            
-            if len(valid_logprobs) == 0:
-                return {"perplexity": None}, {"error": "No valid logprobs found"}
-            
-            # Calculate perplexity: exp(-mean(log_probs))
-            mean_logprob = np.mean(valid_logprobs)
-            perplexity = np.exp(-mean_logprob)
-            
-            return {"perplexity": float(perplexity)}, {
-                "method": "sglang_prediction_logprobs", 
-                "perplexity_judge_model": self.config.perplexity_judge_model.model_name,
-                "num_prediction_tokens": len(valid_logprobs),
-                "mean_logprob": float(mean_logprob),
-                "prediction_tokens": [str(token) for token in prediction_tokens],
-                "prediction_logprobs": [float(lp) for lp in prediction_logprobs],
-            }
-            
-        except Exception as e:
-            print(f"Error in perplexity calculation: {traceback.format_exc()}")
-            return {"perplexity": None}, {"perplexity_error": f"Perplexity calculation failed: {str(e)}"}
 
     def _llm_judge_score(self, pred: str, answer: str, question: str) -> Tuple[Dict[str, Optional[float]], Dict[str, Optional[str]]]:
         """Use LLM as a judge to score the prediction against the correct answer."""
@@ -237,8 +140,8 @@ Example:
                         {"role": "system", "content": "You are an expert evaluator for question-answering tasks. Always respond with valid JSON."},
                         {"role": "user", "content": judge_prompt}
                     ]],
-                    temperature=self.config.judge_temperature,
-                    max_completion_tokens=self.config.judge_max_tokens
+                    temperature=self.config.qa_judge_temperature,
+                    max_completion_tokens=self.config.qa_judge_max_tokens
                 )
             
             # Run the async function
