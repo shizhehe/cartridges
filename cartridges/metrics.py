@@ -124,11 +124,11 @@ def calculate_perplexity_sglang(
         mean_logprob = np.mean(valid_logprobs)
         perplexity = np.exp(-mean_logprob)
         
-        # Build metadata
+        # Build metadata (ensure all values are JSON serializable)
         metadata = {
             "method": "sglang_prediction_logprobs",
-            "perplexity_judge_model": client.model_name,
-            "num_prediction_tokens": len(valid_logprobs),
+            "perplexity_judge_model": str(client.model_name),
+            "num_prediction_tokens": int(len(valid_logprobs)),
             "mean_logprob": float(mean_logprob),
         }
         

@@ -160,7 +160,7 @@ Example:
                     "match_type": "llm_judge",
                     "judgment": judgment,
                     "explanation": explanation,
-                    "qa_judge_model": self.config.qa_judge_model,
+                    "qa_judge_model": str(self.config.qa_judge_model.model_name) if self.config.qa_judge_model else "unknown",
                     "qa_raw_response": judge_response
                 }
                 
@@ -174,7 +174,7 @@ Example:
                         "match_type": "llm_judge_text_fallback",
                         "judgment": "CORRECT",
                         "explanation": "Extracted from non-JSON response",
-                        "qa_judge_model": self.config.qa_judge_model,
+                        "qa_judge_model": str(self.config.qa_judge_model.model_name) if self.config.qa_judge_model else "unknown",
                         "qa_raw_response": judge_response
                     }
                 else:
