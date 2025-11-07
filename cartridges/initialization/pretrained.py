@@ -66,17 +66,49 @@ class KVFromPretrained(KVCacheFactory):
         full_run_path = f"{wandb_entity}/{wandb_project}/{self.config.wandb_run_id}"
 
         logger.info(f"Restoring cache from wandb run {full_run_path}")
-        filename = ...
 
-        cache_files = _list_cache_files(full_run_path)
-        if len(cache_files) == 0:
-            raise ValueError(f"No cache checkpoints found for wandb run {full_run_path}")
-        
-        if self.config.filename is not None:
-            assert self.config.filename in cache_files, f"Cache file {self.config.filename} not found in wandb run {self.config.wandb_run_id}"
-            filename = self.config.filename
+        # Only rank 0 should query WandB API to ensure consistent file selection across ranks
+        if is_rank_zero:
+            cache_files = _list_cache_files(full_run_path)
+            if len(cache_files) == 0:
+                raise ValueError(f"No cache checkpoints found for wandb run {full_run_path}")
+            
+            if self.config.filename is not None:
+                assert self.config.filename in cache_files, f"Cache file {self.config.filename} not found in wandb run {self.config.wandb_run_id}"
+                filename = self.config.filename
+            else:
+                filename = cache_files[0]
         else:
-            filename = cache_files[0]
+            filename = None
+
+        # Broadcast the filename from rank 0 to all other ranks
+        if is_ddp:
+            # Create tensor for filename on all ranks
+            if is_rank_zero:
+                filename_bytes = filename.encode('utf-8')
+                filename_len = len(filename_bytes)
+            else:
+                filename_len = 0
+            
+            # First broadcast the length
+            filename_len_tensor = torch.tensor(filename_len, dtype=torch.int64, device='cuda')
+            dist.broadcast(filename_len_tensor, src=0)
+            filename_len = filename_len_tensor.item()
+            
+            # Then broadcast the filename
+            if is_rank_zero:
+                filename_tensor = torch.frombuffer(filename_bytes, dtype=torch.uint8).cuda()
+            else:
+                filename_tensor = torch.zeros(filename_len, dtype=torch.uint8, device='cuda')
+            
+            dist.broadcast(filename_tensor, src=0)
+            
+            if not is_rank_zero:
+                filename = filename_tensor.cpu().numpy().tobytes().decode('utf-8')
+            
+            logger.info(f"[Rank {dist.get_rank()}] Using cache file: {filename}")
+        else:
+            logger.info(f"Using cache file: {filename}")
 
         cache_dir = Path(os.environ["CARTRIDGES_OUTPUT_DIR"]) / "checkpoints" / f"{wandb_entity}/{wandb_project}/{self.config.wandb_run_id}"
         cache_dir.mkdir(parents=True, exist_ok=True)
