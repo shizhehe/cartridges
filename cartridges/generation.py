@@ -41,6 +41,21 @@ def flex_generate(
     This implementation relies on the PackedCache above.
     """
     print(tokenizer.decode(input_ids))
+    
+    # Debug: Check model state in generation function
+    logger.info(f"flex_generate called with model type: {type(model)}")
+    logger.info(f"is_peft flag: {is_peft}")
+    logger.info(f"cache provided: {cache is not None}")
+    logger.info(f"temperature: {temperature}")
+    logger.info(f"max_new_tokens: {max_new_tokens}")
+    
+    if is_peft:
+        from peft import PeftModel
+        logger.info(f"Using PEFT model: {isinstance(model, PeftModel)}")
+        if hasattr(model, 'active_adapters'):
+            logger.info(f"PEFT active adapters: {model.active_adapters}")
+        if hasattr(model, 'peft_config'):
+            logger.info(f"PEFT config: {model.peft_config}")
             
     device = input_ids.device
     model.eval()

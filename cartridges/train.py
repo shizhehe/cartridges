@@ -847,7 +847,26 @@ def evaluate_generations(
             model = model.model
         else:
             cache = None
-            model = model
+            # Don't unwrap model here - keep PEFT wrapper if present
+    
+    # Debug: Check model type after unwrapping
+    logger.info(f"Model type after unwrapping: {type(model)}")
+    logger.info(f"Is PEFT model: {isinstance(model, PeftModel)}")
+    logger.info(f"is_peft flag: {is_peft}")
+    
+    # Verify PEFT model is preserved when expected
+    if is_peft and not isinstance(model, PeftModel):
+        logger.error("PEFT model was unwrapped incorrectly!")
+        logger.error(f"Expected PeftModel, got {type(model)}")
+    elif is_peft and isinstance(model, PeftModel):
+        logger.info("PEFT model correctly preserved")
+        if hasattr(model, 'print_trainable_parameters'):
+            logger.info("PEFT trainable parameters:")
+            model.print_trainable_parameters()
+        if hasattr(model, 'active_adapters'):
+            logger.info(f"PEFT active adapters: {model.active_adapters}")
+    elif not is_peft:
+        logger.info("Not using PEFT - model type is expected to be base model")
 
     logger.info(
         f"Generating `{config.name_for_wandb}` (n={len(dataset)}, {len(dataset) // world_size} per device)"
