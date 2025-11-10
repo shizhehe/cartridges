@@ -23,6 +23,7 @@ def flex_generate(
     temperature: float = 0.0,
     show_progress: bool = False,
     is_peft: bool = False,
+    max_repetitions: int = 5,
 ) -> Dict[int, List[int]]:
     """Autoregressive generation with FlexAttention (e.g. FlexLlamaModel, FlexQwen3Model).
     
@@ -37,6 +38,7 @@ def flex_generate(
         max_new_tokens: maximum number of new tokens to generate.
         temperature: temperature for sampling
         show_progress: whether to show a progress bar during generation
+        max_repetitions: maximum number of consecutive identical tokens before stopping generation
     
     This implementation relies on the PackedCache above.
     """
@@ -73,6 +75,10 @@ def flex_generate(
         
     # Initialize generated sequences
     generated_tokens: Dict[int, List[int]] = defaultdict(list)
+    
+    # Track repetitions per sequence
+    repetition_counts: Dict[int, int] = defaultdict(int)
+    last_tokens: Dict[int, Optional[int]] = defaultdict(lambda: None)
     
     # Current state
     current_input_ids = input_ids
@@ -122,13 +128,26 @@ def flex_generate(
             else:
                 next_token = token_logits.argmax().item()
             
-            # Check if this sequence should continue
-            if next_token not in stop_token_ids:
+            # Check for repetition
+            seq_id_int = seq_id.item() if hasattr(seq_id, 'item') else seq_id
+            if last_tokens[seq_id_int] == next_token:
+                repetition_counts[seq_id_int] += 1
+            else:
+                repetition_counts[seq_id_int] = 0
+                last_tokens[seq_id_int] = next_token
+            
+            # Check if this sequence should continue (stop tokens or max repetitions)
+            should_stop = (next_token in stop_token_ids or 
+                          repetition_counts[seq_id_int] >= max_repetitions)
+            
+            if not should_stop:
                 next_tokens.append(next_token)
                 next_seq_ids.append(seq_id)
                 next_position_ids.append(current_position_ids[last_token_idx] + 1)
-                generated_tokens[seq_id].append(next_token)
+                generated_tokens[seq_id_int].append(next_token)
                 active_sequences.append(seq_id)
+            elif repetition_counts[seq_id_int] >= max_repetitions:
+                logger.info(f"Stopping sequence {seq_id_int} due to {max_repetitions} consecutive repetitions of token {next_token} ({tokenizer.decode([next_token])})")
         
         # If no sequences are active, break
         if not next_tokens:
@@ -245,6 +264,7 @@ if __name__ == "__main__":
         max_new_tokens=128,  # Reduce for testing
         show_progress=True,
         cache=cache,
+        max_repetitions=5, 
     )
     print("Generated tokens:", output)
     

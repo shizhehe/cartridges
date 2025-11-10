@@ -61,6 +61,7 @@ class GenerationEvalConfig(BaseConfig):
     temperature: float = 0.0
     batch_size: int = 1
     override_max_tokens: int | None = None
+    max_repetitions: int = 3
 
 
 
@@ -928,6 +929,7 @@ def evaluate_generations(
                 temperature=config.temperature,
                 show_progress=is_rank_zero,
                 is_peft=is_peft,
+                max_repetitions=config.max_repetitions,
             )
             
             pred = tokenizer.batch_decode(pred_ids, skip_special_tokens=True)

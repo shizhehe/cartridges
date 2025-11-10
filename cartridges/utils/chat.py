@@ -80,6 +80,7 @@ class ChatSession:
             max_new_tokens=256,
             temperature=0.0,
             show_progress=True,
+            max_repetitions=3,  # Default repetition threshold for chat
         )
         
         # Decode the response
