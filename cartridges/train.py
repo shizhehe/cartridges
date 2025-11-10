@@ -47,6 +47,8 @@ logger = get_logger(__name__)
 class LossEvalConfig(BaseConfig):
     dataset: LossEvalDataset.Config | TrainDataset.Config
     name_for_wandb: str
+    max_table_rows: int = 64  # Maximum number of rows to save in wandb table
+    save_top_k: Optional[int] = None  # If None, don't save top-k predictions. Otherwise, save top K predictions per token
 
 class GenerationEvalConfig(BaseConfig):
     dataset: GenerateEvalDataset.Config
@@ -600,23 +602,94 @@ def evaluate_perplexity(
                     * topk_pred_logprobs  # q(x), model distr
                 )
 
+                # Convert token IDs to text for readability
+                target_tokens_text = [eval_dataset.tokenizer.decode([token_id]) for token_id in batch.topk_token_ids.cpu().tolist()]
+                
+                # Extract top-k predictions if requested
+                top_k_data = None
+                if ds_config.save_top_k is not None:
+                    # Get logits for target token positions
+                    target_logits = outputs.logits[0, batch.topk_token_idxs.to(local_rank) - 1, :]
+                    
+                    # Get top-k predictions for each target token position
+                    top_k_logprobs, top_k_token_ids = torch.topk(
+                        F.log_softmax(target_logits, dim=-1), 
+                        k=ds_config.save_top_k, 
+                        dim=-1
+                    )
+                    
+                    # Convert to lists for storage
+                    top_k_logprobs_list = top_k_logprobs.cpu().tolist()  # Shape: [num_tokens, k]
+                    top_k_token_ids_list = top_k_token_ids.cpu().tolist()  # Shape: [num_tokens, k]
+                    
+                    # Decode the top-k token IDs to text
+                    top_k_tokens_text = []
+                    for token_pos in range(len(top_k_token_ids_list)):
+                        pos_tokens = [eval_dataset.tokenizer.decode([tok_id]) for tok_id in top_k_token_ids_list[token_pos]]
+                        top_k_tokens_text.append(pos_tokens)
+                    
+                    top_k_data = {
+                        'tokens': top_k_tokens_text,
+                        'logprobs': top_k_logprobs_list,
+                        'token_ids': top_k_token_ids_list
+                    }
+                
                 # Aggregate by seed_prompt_type directly
                 batch_loss = ce_by_token.sum().item()
                 batch_num_tokens = ce_by_token.shape[0]
                 
-                for metadata_list in batch.metadata:
+                # Collect per-sample data for DataFrame
+                for i, metadata_list in enumerate(batch.metadata):
                     # metadata_list is a list containing the actual metadata dict
                     metadata = metadata_list[0] if metadata_list else {}
                     seed_prompt_type = metadata.get("seed_prompt_type", "unknown")
+                    
+                    # Calculate per-sample token ranges (assuming equal distribution)
+                    tokens_per_sample = batch_num_tokens // len(batch.metadata) if len(batch.metadata) > 0 else batch_num_tokens
+                    sample_start_idx = i * tokens_per_sample
+                    sample_end_idx = min((i + 1) * tokens_per_sample, batch_num_tokens)
+                    
+                    # Extract per-sample data
+                    sample_tokens = target_tokens_text[sample_start_idx:sample_end_idx]
+                    sample_pred_logprobs = topk_pred_logprobs[sample_start_idx:sample_end_idx].cpu().tolist()
+                    sample_true_logprobs = batch.topk_logprobs[sample_start_idx:sample_end_idx].cpu().tolist()
+                    sample_ce_loss = ce_by_token[sample_start_idx:sample_end_idx].sum().item()
+                    sample_num_tokens = len(sample_tokens)
+                    
+                    # Extract per-sample top-k data if available
+                    sample_result = {
+                        'conversation_id': metadata.get('conversation_id', f'sample_{len(results)}'),
+                        'seed_prompt_type': seed_prompt_type,
+                        'target_tokens_list': sample_tokens,
+                        'predicted_logprobs': sample_pred_logprobs,
+                        'true_logprobs': sample_true_logprobs,
+                        'loss': sample_ce_loss,
+                        'perplexity': math.exp(sample_ce_loss / sample_num_tokens) if sample_num_tokens > 0 else float('inf'),
+                        'num_target_tokens': sample_num_tokens,
+                        'mean_predicted_logprob': sum(sample_pred_logprobs) / len(sample_pred_logprobs) if sample_pred_logprobs else 0.0,
+                        'mean_true_logprob': sum(sample_true_logprobs) / len(sample_true_logprobs) if sample_true_logprobs else 0.0,
+                        'optimizer_step': optimizer_step,
+                        'epoch': epoch,
+                        **metadata,  # Include all original metadata
+                    }
+                    
+                    # Add top-k predictions if available
+                    if top_k_data is not None:
+                        sample_result.update({
+                            f'top_{ds_config.save_top_k}_predicted_tokens': top_k_data['tokens'][sample_start_idx:sample_end_idx],
+                            f'top_{ds_config.save_top_k}_predicted_logprobs': top_k_data['logprobs'][sample_start_idx:sample_end_idx],
+                            f'top_{ds_config.save_top_k}_predicted_token_ids': top_k_data['token_ids'][sample_start_idx:sample_end_idx],
+                        })
+                    
+                    # Add per-sample result
+                    results.append(sample_result)
+                    
+                    # Update seed prompt stats (existing logic)
                     if seed_prompt_type not in seed_prompt_stats:
                         seed_prompt_stats[seed_prompt_type] = {"total_loss": 0.0, "total_tokens": 0, "count": 0}
                     
-                    # Distribute batch loss/tokens equally among samples in batch
-                    sample_loss = batch_loss / len(batch.metadata)
-                    sample_tokens = batch_num_tokens // len(batch.metadata)
-                    
-                    seed_prompt_stats[seed_prompt_type]["total_loss"] += sample_loss
-                    seed_prompt_stats[seed_prompt_type]["total_tokens"] += sample_tokens
+                    seed_prompt_stats[seed_prompt_type]["total_loss"] += sample_ce_loss
+                    seed_prompt_stats[seed_prompt_type]["total_tokens"] += sample_num_tokens
                     seed_prompt_stats[seed_prompt_type]["count"] += 1
 
                 epoch_loss += (ce_by_token.sum())
@@ -681,6 +754,54 @@ def evaluate_perplexity(
                 log_dict[f"{prefix}/seed_prompt_{seed_prompt_type}/loss"] = avg_loss
                 log_dict[f"{prefix}/seed_prompt_{seed_prompt_type}/perplexity"] = avg_perplexity
                 log_dict[f"{prefix}/seed_prompt_{seed_prompt_type}/count"] = stats["count"]
+        
+        # Create DataFrame from per-sample results (similar to evaluate_generation)
+        if results:
+            import pandas as pd
+            df = pd.DataFrame(results)
+            
+            # Calculate summary statistics from the full DataFrame
+            summary_stats = {
+                f"{prefix}/sample_mean_loss": df['loss'].mean(),
+                f"{prefix}/sample_mean_perplexity": df['perplexity'].mean(),
+                f"{prefix}/sample_median_perplexity": df['perplexity'].median(),
+                f"{prefix}/sample_std_perplexity": df['perplexity'].std(),
+                f"{prefix}/num_samples": len(df),
+                f"{prefix}/total_target_tokens": df['num_target_tokens'].sum(),
+                f"{prefix}/mean_tokens_per_sample": df['num_target_tokens'].mean(),
+            }
+            
+            # Add per-seed_prompt_type sample-level summary stats
+            if 'seed_prompt_type' in df.columns:
+                for seed_type in df['seed_prompt_type'].unique():
+                    subset = df[df['seed_prompt_type'] == seed_type]
+                    summary_stats.update({
+                        f"{prefix}/seed_prompt_{seed_type}/sample_mean_perplexity": subset['perplexity'].mean(),
+                        f"{prefix}/seed_prompt_{seed_type}/sample_count": len(subset),
+                        f"{prefix}/seed_prompt_{seed_type}/sample_std_perplexity": subset['perplexity'].std(),
+                    })
+            
+            # Limit DataFrame size for wandb table (keep top N samples by loss per optimizer step)
+            max_table_rows = getattr(ds_config, 'max_table_rows', 64)
+            if len(df) > max_table_rows:
+                # Group by optimizer_step and take top N samples by loss within each step
+                df_for_table_list = []
+                total_original = len(df)
+                for step, step_group in df.groupby('optimizer_step'):
+                    if len(step_group) > max_table_rows:
+                        top_samples = step_group.nlargest(max_table_rows, 'loss')
+                    else:
+                        top_samples = step_group
+                    df_for_table_list.append(top_samples)
+                
+                df_for_table = pd.concat(df_for_table_list, ignore_index=True) if df_for_table_list else pd.DataFrame()
+                summary_stats[f"{prefix}/table_note"] = f"Showing top {max_table_rows} samples by loss per optimizer step (out of {total_original} total)"
+            else:
+                df_for_table = df
+            
+            # Add the DataFrame as a wandb table and summary statistics
+            log_dict.update(summary_stats)
+            log_dict[f"{prefix}/table"] = df_for_table
 
         wandb.log(log_dict, step=optimizer_step)
 
