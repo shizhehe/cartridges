@@ -644,6 +644,9 @@ def evaluate_perplexity(
                     # metadata_list is a list containing the actual metadata dict
                     metadata = metadata_list[0] if metadata_list else {}
                     seed_prompt_type = metadata.get("seed_prompt_type", "unknown")
+                    query = metadata.get("query", "")
+                    target = metadata.get("target", "")
+                    print("metadata", metadata.keys())
                     
                     # Calculate per-sample token ranges (assuming equal distribution)
                     tokens_per_sample = batch_num_tokens // len(batch.metadata) if len(batch.metadata) > 0 else batch_num_tokens
@@ -659,7 +662,10 @@ def evaluate_perplexity(
                     
                     # Extract per-sample top-k data if available
                     sample_result = {
-                        'conversation_id': metadata.get('conversation_id', f'sample_{len(results)}'),
+                        'optimizer_step': optimizer_step,
+                        'epoch': epoch,
+                        'prompt': query,
+                        'target': target,
                         'seed_prompt_type': seed_prompt_type,
                         'target_tokens_list': sample_tokens,
                         'predicted_logprobs': sample_pred_logprobs,
@@ -669,9 +675,6 @@ def evaluate_perplexity(
                         'num_target_tokens': sample_num_tokens,
                         'mean_predicted_logprob': sum(sample_pred_logprobs) / len(sample_pred_logprobs) if sample_pred_logprobs else 0.0,
                         'mean_true_logprob': sum(sample_true_logprobs) / len(sample_true_logprobs) if sample_true_logprobs else 0.0,
-                        'optimizer_step': optimizer_step,
-                        'epoch': epoch,
-                        **metadata,  # Include all original metadata
                     }
                     
                     # Add top-k predictions if available

@@ -440,11 +440,23 @@ class LossEvalDataset(TrainDataset):
             else:
                 messages = row.messages
 
+            # Enhance metadata with query and target information
+            enhanced_metadata = dict(row.metadata) if row.metadata else {}
+            
+            # Extract query (typically first user message) and target (typically first assistant message)
+            user_messages = [msg for msg in row.messages if msg.role == "user"]
+            assistant_messages = [msg for msg in row.messages if msg.role == "assistant"]
+            
+            if user_messages:
+                enhanced_metadata["query"] = user_messages[0].content
+            if assistant_messages:
+                enhanced_metadata["target"] = assistant_messages[0].content
+            
             elements.append(self.model_helper.messages_to_element(
                 messages,
                 retokenize=self.config.targets == "tokens",
                 tokenizer=self.tokenizer,
-                metadata=row.metadata,
+                metadata=enhanced_metadata,
             ))
         
         return elements
