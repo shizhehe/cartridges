@@ -870,6 +870,53 @@ def evaluate_generations(
             logger.info(f"PEFT active adapters: {model.active_adapters}")
     elif not is_peft:
         logger.info("Not using PEFT - model type is expected to be base model")
+    
+    # LoRA Debugging: Check initialization values
+    if is_peft and isinstance(model, PeftModel):
+        logger.info("=== LoRA Initialization Debug ===")
+        for name, param in model.named_parameters():
+            if 'lora_B' in name:
+                max_val = param.abs().max().item()
+                logger.info(f"{name}: max_abs_value = {max_val:.6f}")  # Should be ~0
+        
+        # Test base model vs LoRA model generation on simple prompt
+        logger.info("=== Base Model vs LoRA Comparison ===")
+        test_prompt = "The capital of France is"
+        test_input_ids = tokenizer.encode(test_prompt, return_tensors="pt").to(local_rank)
+        
+        # Test base model
+        base_model = model.get_base_model()
+        base_model.eval()
+        with torch.no_grad():
+            base_outputs = base_model.generate(
+                test_input_ids, 
+                max_new_tokens=5, 
+                temperature=0.0, 
+                do_sample=False,
+                pad_token_id=tokenizer.pad_token_id
+            )
+        base_result = tokenizer.decode(base_outputs[0], skip_special_tokens=True)
+        logger.info(f"Base model output: '{base_result}'")
+        
+        # Test LoRA model
+        model.eval()
+        with torch.no_grad():
+            lora_outputs = model.generate(
+                test_input_ids,
+                max_new_tokens=5,
+                temperature=0.0,
+                do_sample=False,
+                pad_token_id=tokenizer.pad_token_id
+            )
+        lora_result = tokenizer.decode(lora_outputs[0], skip_special_tokens=True)
+        logger.info(f"LoRA model output: '{lora_result}'")
+        
+        if base_result != lora_result:
+            logger.warning(f"⚠️  LoRA model output differs from base model even before training!")
+            logger.warning(f"Base: {base_result}")
+            logger.warning(f"LoRA: {lora_result}")
+        else:
+            logger.info("✅ LoRA model matches base model output")
 
     logger.info(
         f"Generating `{config.name_for_wandb}` (n={len(dataset)}, {len(dataset) // world_size} per device)"
