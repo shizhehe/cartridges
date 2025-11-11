@@ -375,6 +375,12 @@ def train(config: TrainConfig):
                 and (config.generate_before_training or iter_idx > 0)
             ):
                 do_evaluate_generations(step=iter_idx)
+
+            # NOTE: remove later, debugging generations for LoRA
+            # kill process
+            print("Done with generations, killing process.")
+            import os
+            os.kill(os.getpid(), signal.SIGKILL)
             
 
             # SE (05/02): We are careful to only reduce the loss across processes
@@ -916,6 +922,13 @@ def evaluate_generations(
             position_ids = torch.cat(
                 [torch.arange(elem.input_ids.shape[1], device=local_rank) for _, elem in elements]
             )
+            
+            # Log input tokens
+            logger.info(f"DEBUG: Input tokens shape: {input_ids.shape}")
+            logger.info(f"DEBUG: Input tokens: {input_ids.tolist()}")
+            input_text = tokenizer.decode(input_ids, skip_special_tokens=True)
+            logger.info(f"DEBUG: Input text: {repr(input_text)}")
+            
             pred_ids: Dict[int, List[int]] = flex_generate(
                 input_ids=input_ids,
                 seq_ids=seq_ids,
@@ -933,6 +946,13 @@ def evaluate_generations(
                 is_peft=is_peft,
                 max_repetitions=config.max_repetitions,
             )
+            
+            # Log generated output
+            logger.info(f"DEBUG: Generated pred_ids keys: {list(pred_ids.keys())}")
+            for seq_id, curr_pred_ids in pred_ids.items():
+                logger.info(f"DEBUG: Generated tokens for seq_id {seq_id}: {curr_pred_ids}")
+                pred_text = tokenizer.decode(curr_pred_ids, skip_special_tokens=True)
+                logger.info(f"DEBUG: Generated text for seq_id {seq_id}: {repr(pred_text)}")
             
             pred = tokenizer.batch_decode(pred_ids, skip_special_tokens=True)
 
@@ -971,6 +991,8 @@ def evaluate_generations(
                         **extras,
                     }
                 )
+                break
+            break
     logger.info(f"Generated {len(results)} samples")
 
     batch_score = None
