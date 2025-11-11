@@ -49,13 +49,15 @@ def create_block_mask_w_cache(
         # Use tensor operations instead of data-dependent control flow
         # Check if we're in the non-cache region and apply padding mask
         is_non_cache = kv_idx >= cache_len
-        padding_blocked = False
+        padding_blocked = torch.tensor(False, dtype=torch.bool, device=seq_ids.device)
+        
         if key_padding_mask is not None:
             k_local = kv_idx - cache_len
             # Use where to avoid data-dependent control flow
-            k_local_safe = torch.where(is_non_cache, k_local, 0)  # safe index when is_non_cache=False
+            k_local_safe = torch.where(is_non_cache, k_local, torch.tensor(0, device=seq_ids.device))
             # Only apply padding mask when in non-cache region
-            padding_blocked = is_non_cache & (k_local_safe < key_padding_mask.size(0)) & key_padding_mask[k_local_safe]
+            valid_index = k_local_safe < key_padding_mask.size(0)
+            padding_blocked = is_non_cache & valid_index & key_padding_mask[k_local_safe]
         
         # Original segmentation + causal rule.
         base_mask = (kv_seq_ids[kv_idx] == -1) | (
