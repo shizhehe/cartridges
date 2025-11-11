@@ -881,6 +881,17 @@ def evaluate_generations(
                 max_val = param.abs().max().item()
                 logger.info(f"{name}: max_abs_value = {max_val:.6f}")  # Should be ~0
         
+        # Check LoRA A matrices
+        logger.info("=== LoRA A Matrix Debug ===")
+        for name, param in model.named_parameters():
+            if 'lora_A' in name:
+                mean_val = param.mean().item()
+                std_val = param.std().item()
+                logger.info(f"{name}: mean={mean_val:.6f}, std={std_val:.6f}")
+                # Only show first few to avoid spam
+                if 'layers.0.' in name:  # Only show layer 0 for brevity
+                    break
+        
         # Test base model vs LoRA model generation on simple prompt
         logger.info("=== Base Model vs LoRA Comparison ===")
         test_prompt = "The capital of France is"
@@ -925,10 +936,36 @@ def evaluate_generations(
         lora_result = test_prompt + tokenizer.decode(lora_tokens, skip_special_tokens=True)
         logger.info(f"LoRA model output: '{lora_result}'")
         
+        # Test with LoRA disabled
+        logger.info("=== LoRA Disabled Test ===")
+        with model.disable_adapter():
+            with torch.no_grad():
+                disabled_pred_ids = flex_generate(
+                    model=model,
+                    tokenizer=tokenizer,
+                    input_ids=test_input_ids[0],
+                    seq_ids=seq_ids,
+                    position_ids=position_ids,
+                    max_new_tokens=5,
+                    temperature=0.0,
+                    is_peft=True  # Still PEFT model, but adapters disabled
+                )
+        disabled_tokens = disabled_pred_ids.get(0, [])
+        disabled_result = test_prompt + tokenizer.decode(disabled_tokens, skip_special_tokens=True)
+        logger.info(f"LoRA disabled output: '{disabled_result}'")
+        
+        # Compare all three outputs
         if base_result != lora_result:
             logger.warning(f"⚠️  LoRA model output differs from base model even before training!")
             logger.warning(f"Base: {base_result}")
             logger.warning(f"LoRA: {lora_result}")
+            
+            if disabled_result == base_result:
+                logger.info("✅ LoRA disabled matches base model - confirms LoRA is the issue")
+            elif disabled_result == lora_result:
+                logger.warning("⚠️  LoRA disabled still differs - PEFT wrapper issue")
+            else:
+                logger.error("❌ All three outputs differ - complex integration issue")
         else:
             logger.info("✅ LoRA model matches base model output")
 
