@@ -89,10 +89,18 @@ def flex_generate(
     for step in progress_range:
         # Forward pass - update cache with current seq_ids before the forward pass
         with torch.no_grad():
+            # Create causal attention mask for generation
+            attention_mask = torch.ones(
+                (1, current_input_ids.size(0)), 
+                dtype=torch.bool, 
+                device=device
+            )
+            
             outputs = model(
                 input_ids=current_input_ids,
                 seq_ids=current_seq_ids,
                 position_ids=current_position_ids,
+                attention_mask=attention_mask,
                 past_key_values=cache if not is_peft else None,
                 use_cache=True if not is_peft else False,
                 mode="generate",

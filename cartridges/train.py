@@ -646,7 +646,6 @@ def evaluate_perplexity(
                     seed_prompt_type = metadata.get("seed_prompt_type", "unknown")
                     query = metadata.get("query", "")
                     target = metadata.get("target", "")
-                    print("metadata", metadata.keys())
                     
                     # Calculate per-sample token ranges (assuming equal distribution)
                     tokens_per_sample = batch_num_tokens // len(batch.metadata) if len(batch.metadata) > 0 else batch_num_tokens
@@ -656,11 +655,11 @@ def evaluate_perplexity(
                     # Extract per-sample data
                     sample_tokens = target_tokens_text[sample_start_idx:sample_end_idx]
                     sample_pred_logprobs = topk_pred_logprobs[sample_start_idx:sample_end_idx].cpu().tolist()
-                    sample_true_logprobs = batch.topk_logprobs[sample_start_idx:sample_end_idx].cpu().tolist()
                     sample_ce_loss = ce_by_token[sample_start_idx:sample_end_idx].sum().item()
                     sample_num_tokens = len(sample_tokens)
                     
                     # Extract per-sample top-k data if available
+                    print("sample_tokens", sample_tokens)
                     sample_result = {
                         'optimizer_step': optimizer_step,
                         'epoch': epoch,
@@ -669,12 +668,9 @@ def evaluate_perplexity(
                         'seed_prompt_type': seed_prompt_type,
                         'target_tokens_list': sample_tokens,
                         'predicted_logprobs': sample_pred_logprobs,
-                        'true_logprobs': sample_true_logprobs,
                         'loss': sample_ce_loss,
                         'perplexity': math.exp(sample_ce_loss / sample_num_tokens) if sample_num_tokens > 0 else float('inf'),
                         'num_target_tokens': sample_num_tokens,
-                        'mean_predicted_logprob': sum(sample_pred_logprobs) / len(sample_pred_logprobs) if sample_pred_logprobs else 0.0,
-                        'mean_true_logprob': sum(sample_true_logprobs) / len(sample_true_logprobs) if sample_true_logprobs else 0.0,
                     }
                     
                     # Add top-k predictions if available
