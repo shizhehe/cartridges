@@ -7,6 +7,7 @@ from math import cos, pi
 import os
 from pathlib import Path
 import re
+import signal
 import time
 from typing import Dict, List, Literal, Optional
 
@@ -379,7 +380,6 @@ def train(config: TrainConfig):
             # NOTE: remove later, debugging generations for LoRA
             # kill process
             print("Done with generations, killing process.")
-            import os
             os.kill(os.getpid(), signal.SIGKILL)
             
 
