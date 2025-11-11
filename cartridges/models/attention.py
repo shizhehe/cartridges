@@ -45,35 +45,35 @@ def create_block_mask_w_cache(
     if cache_len > 0:
         kv_seq_ids = torch.cat([cache.seq_ids(), kv_seq_ids])
 
-    def mask_func(_, _h, q_idx, kv_idx):
-        # Use tensor operations instead of data-dependent control flow
-        # Check if we're in the non-cache region and apply padding mask
+    def mask_func(_b, _h, q_idx: int, kv_idx: int) -> bool:
         is_non_cache = kv_idx >= cache_len
-        padding_blocked = torch.tensor(False, dtype=torch.bool, device=seq_ids.device)
-        
-        if key_padding_mask is not None:
-            k_local = kv_idx - cache_len
-            # Use where to avoid data-dependent control flow
-            k_local_safe = torch.where(is_non_cache, k_local, torch.tensor(0, device=seq_ids.device))
-            # Only apply padding mask when in non-cache region
-            valid_index = k_local_safe < key_padding_mask.size(0)
-            padding_blocked = is_non_cache & valid_index & key_padding_mask[k_local_safe]
-        
-        # Original segmentation + causal rule.
-        base_mask = (kv_seq_ids[kv_idx] == -1) | (
-            (seq_ids[q_idx] == kv_seq_ids[kv_idx]) & (q_idx + cache_len >= kv_idx)
-        )
-        
-        # Block if padding says so
-        return base_mask & (~padding_blocked)
 
+        # padding
+        if key_padding_mask is not None and is_non_cache:
+            k_local = kv_idx - cache_len
+            if 0 <= k_local < key_padding_mask.numel():
+                if bool(key_padding_mask[k_local]):  # True = PAD => block
+                    return False
+
+        # segmentation + causal rule
+        kv_sid = int(kv_seq_ids[kv_idx])
+        q_sid  = int(seq_ids[q_idx])
+
+        # allow cached prefix if it is marked with -1 (global prefix)
+        if kv_sid == -1:
+            return True
+
+        # same segment + causal within the non-cache region
+        return (q_sid == kv_sid) and (q_idx + cache_len >= kv_idx)
     
-    block_mask = create_block_mask(
-        mask_func, B=1, H=1, Q_LEN=len(seq_ids), KV_LEN=len(seq_ids) + cache_len, 
+    return create_block_mask(
+        mask_func, 
+        B=1, H=1, 
+        Q_LEN=len(seq_ids), 
+        KV_LEN=len(seq_ids) + cache_len, 
         device=device,
         # _compile=True
     )
-    return block_mask
     # --- end build block mask ---
 
 
@@ -117,16 +117,6 @@ def flex_attention_forward(
     # layer's query does not require grad.
     if key.requires_grad and not query.requires_grad:
         query.requires_grad = True
-
-    def _localize(x):
-        if isinstance(x, DTensor):
-            x = x.redistribute(x.device_mesh, placements=[Replicate()])
-            return x.to_local()
-        return x
-    
-    q = _localize(query)
-    k = _localize(key)
-    v = _localize(value)
 
     attn_output = attn(
         query,
