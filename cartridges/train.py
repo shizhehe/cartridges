@@ -323,19 +323,25 @@ def train(config: TrainConfig):
     # Test base model with simple forward pass
     logger.info("Testing base model logits...")
     test_input = "Hello, I am"
-    test_tokens = tokenizer.encode(test_input, return_tensors="pt").to(local_rank)
+    test_tokens = tokenizer.encode(test_input, return_tensors="pt").to(local_rank).flatten()
+    
+    # Create seq_ids and position_ids for FlexQwen3
+    seq_length = len(test_tokens)
+    test_seq_ids = torch.zeros(seq_length, dtype=torch.long, device=local_rank)  # All tokens belong to sequence 0
+    test_position_ids = torch.arange(seq_length, dtype=torch.long, device=local_rank)  # 0, 1, 2, ...
+    
     with torch.no_grad():
         # Test base model logits
         wrapped_model.module.disable_adapter()
-        base_output = wrapped_model.module(test_tokens)
-        base_logits = base_output.logits[0, -1, :]
+        base_output = wrapped_model.module(test_tokens, seq_ids=test_seq_ids, position_ids=test_position_ids)
+        base_logits = base_output.logits[-1, :]  # Last token logits
         base_top_token = torch.argmax(base_logits).item()
         base_next_word = tokenizer.decode(base_top_token)
         
         # Test LoRA model logits  
         wrapped_model.module.enable_adapter()
-        lora_output = wrapped_model.module(test_tokens)
-        lora_logits = lora_output.logits[0, -1, :]
+        lora_output = wrapped_model.module(test_tokens, seq_ids=test_seq_ids, position_ids=test_position_ids)
+        lora_logits = lora_output.logits[-1, :]  # Last token logits
         lora_top_token = torch.argmax(lora_logits).item()
         lora_next_word = tokenizer.decode(lora_top_token)
         
