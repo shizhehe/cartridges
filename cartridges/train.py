@@ -936,6 +936,31 @@ def evaluate_generations(
         lora_result = test_prompt + tokenizer.decode(lora_tokens, skip_special_tokens=True)
         logger.info(f"LoRA model output: '{lora_result}'")
         
+        # Test LoRA model with inference_mode=True
+        logger.info("=== LoRA Inference Mode Test ===")
+        # Temporarily set inference mode
+        original_inference_mode = model.peft_config['default'].inference_mode
+        model.peft_config['default'].inference_mode = True
+        
+        model.eval()
+        with torch.no_grad():
+            inference_pred_ids = flex_generate(
+                model=model,
+                tokenizer=tokenizer,
+                input_ids=test_input_ids[0],
+                seq_ids=seq_ids,
+                position_ids=position_ids,
+                max_new_tokens=5,
+                temperature=0.0,
+                is_peft=True
+            )
+        inference_tokens = inference_pred_ids.get(0, [])
+        inference_result = test_prompt + tokenizer.decode(inference_tokens, skip_special_tokens=True)
+        logger.info(f"LoRA inference mode output: '{inference_result}'")
+        
+        # Restore original inference mode
+        model.peft_config['default'].inference_mode = original_inference_mode
+        
         # Test with LoRA disabled
         logger.info("=== LoRA Disabled Test ===")
         with model.disable_adapter():
@@ -954,18 +979,24 @@ def evaluate_generations(
         disabled_result = test_prompt + tokenizer.decode(disabled_tokens, skip_special_tokens=True)
         logger.info(f"LoRA disabled output: '{disabled_result}'")
         
-        # Compare all three outputs
+        # Compare all four outputs
+        logger.info("=== Final Comparison ===")
+        logger.info(f"Base model:        '{base_result}'")
+        logger.info(f"LoRA normal:       '{lora_result}'")
+        logger.info(f"LoRA inference:    '{inference_result}'")
+        logger.info(f"LoRA disabled:     '{disabled_result}'")
+        
         if base_result != lora_result:
             logger.warning(f"⚠️  LoRA model output differs from base model even before training!")
-            logger.warning(f"Base: {base_result}")
-            logger.warning(f"LoRA: {lora_result}")
             
-            if disabled_result == base_result:
+            if inference_result == base_result:
+                logger.info("✅ LoRA inference mode matches base model - USE INFERENCE MODE!")
+            elif disabled_result == base_result:
                 logger.info("✅ LoRA disabled matches base model - confirms LoRA is the issue")
             elif disabled_result == lora_result:
                 logger.warning("⚠️  LoRA disabled still differs - PEFT wrapper issue")
             else:
-                logger.error("❌ All three outputs differ - complex integration issue")
+                logger.error("❌ All outputs differ - complex integration issue")
         else:
             logger.info("✅ LoRA model matches base model output")
 
