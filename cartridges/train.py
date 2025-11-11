@@ -320,38 +320,31 @@ def train(config: TrainConfig):
                     non_zero_count += 1
     logger.info(f"Non-zero LoRA B matrices: {non_zero_count}")
     
-    # Test base model generation without LoRA
-    logger.info("Testing base model generation...")
+    # Test base model with simple forward pass
+    logger.info("Testing base model logits...")
     test_input = "Hello, I am"
     test_tokens = tokenizer.encode(test_input, return_tensors="pt").to(local_rank)
     with torch.no_grad():
-        # Temporarily disable LoRA adapters
+        # Test base model logits
         wrapped_model.module.disable_adapter()
-        test_output = wrapped_model.module.generate(
-            test_tokens, 
-            max_new_tokens=5, 
-            do_sample=False,
-            temperature=0.0,
-            pad_token_id=tokenizer.eos_token_id
-        )
-        # Re-enable LoRA adapters
+        base_output = wrapped_model.module(test_tokens)
+        base_logits = base_output.logits[0, -1, :]
+        base_top_token = torch.argmax(base_logits).item()
+        base_next_word = tokenizer.decode(base_top_token)
+        
+        # Test LoRA model logits  
         wrapped_model.module.enable_adapter()
+        lora_output = wrapped_model.module(test_tokens)
+        lora_logits = lora_output.logits[0, -1, :]
+        lora_top_token = torch.argmax(lora_logits).item()
+        lora_next_word = tokenizer.decode(lora_top_token)
         
-    test_text = tokenizer.decode(test_output[0], skip_special_tokens=True)
-    logger.info(f"Base model test generation: {repr(test_text)}")
+    logger.info(f"Base model next token: {base_top_token} ({repr(base_next_word)})")
+    logger.info(f"LoRA model next token: {lora_top_token} ({repr(lora_next_word)})")
+    logger.info(f"Logits difference: {(lora_logits - base_logits).abs().max():.6f}")
     
-    # Test with LoRA enabled
-    with torch.no_grad():
-        test_output_lora = wrapped_model.module.generate(
-            test_tokens, 
-            max_new_tokens=5, 
-            do_sample=False,
-            temperature=0.0,
-            pad_token_id=tokenizer.eos_token_id
-        )
-        
-    test_text_lora = tokenizer.decode(test_output_lora[0], skip_special_tokens=True)
-    logger.info(f"LoRA model test generation: {repr(test_text_lora)}")
+    if (lora_logits - base_logits).abs().max() > 1e-6:
+        logger.warning("LoRA is affecting logits even with zero B matrices!")
 
     def do_evaluation():
         for ds_config, dataset in ppl_evals:
