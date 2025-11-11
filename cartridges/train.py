@@ -319,6 +319,39 @@ def train(config: TrainConfig):
                     print(f"WARNING: LoRA B matrix {name} is not zero-initialized!")
                     non_zero_count += 1
     logger.info(f"Non-zero LoRA B matrices: {non_zero_count}")
+    
+    # Test base model generation without LoRA
+    logger.info("Testing base model generation...")
+    test_input = "Hello, I am"
+    test_tokens = tokenizer.encode(test_input, return_tensors="pt").to(local_rank)
+    with torch.no_grad():
+        # Temporarily disable LoRA adapters
+        wrapped_model.module.disable_adapter()
+        test_output = wrapped_model.module.generate(
+            test_tokens, 
+            max_new_tokens=5, 
+            do_sample=False,
+            temperature=0.0,
+            pad_token_id=tokenizer.eos_token_id
+        )
+        # Re-enable LoRA adapters
+        wrapped_model.module.enable_adapter()
+        
+    test_text = tokenizer.decode(test_output[0], skip_special_tokens=True)
+    logger.info(f"Base model test generation: {repr(test_text)}")
+    
+    # Test with LoRA enabled
+    with torch.no_grad():
+        test_output_lora = wrapped_model.module.generate(
+            test_tokens, 
+            max_new_tokens=5, 
+            do_sample=False,
+            temperature=0.0,
+            pad_token_id=tokenizer.eos_token_id
+        )
+        
+    test_text_lora = tokenizer.decode(test_output_lora[0], skip_special_tokens=True)
+    logger.info(f"LoRA model test generation: {repr(test_text_lora)}")
 
     def do_evaluation():
         for ds_config, dataset in ppl_evals:
