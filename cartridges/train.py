@@ -647,10 +647,14 @@ def evaluate_perplexity(
                     query = metadata.get("query", "")
                     target = metadata.get("target", "")
                     
-                    # Calculate per-sample token ranges (assuming equal distribution)
-                    tokens_per_sample = batch_num_tokens // len(batch.metadata) if len(batch.metadata) > 0 else batch_num_tokens
-                    sample_start_idx = i * tokens_per_sample
-                    sample_end_idx = min((i + 1) * tokens_per_sample, batch_num_tokens)
+                    # Use actual token ranges from batch instead of equal division
+                    if batch.sample_token_ranges and i < len(batch.sample_token_ranges):
+                        sample_start_idx, sample_end_idx = batch.sample_token_ranges[i]
+                    else:
+                        # Fallback to old behavior if sample_token_ranges not available
+                        tokens_per_sample = batch_num_tokens // len(batch.metadata) if len(batch.metadata) > 0 else batch_num_tokens
+                        sample_start_idx = i * tokens_per_sample
+                        sample_end_idx = min((i + 1) * tokens_per_sample, batch_num_tokens)
                     
                     # Extract per-sample data
                     sample_tokens = target_tokens_text[sample_start_idx:sample_end_idx]
@@ -659,7 +663,6 @@ def evaluate_perplexity(
                     sample_num_tokens = len(sample_tokens)
                     
                     # Extract per-sample top-k data if available
-                    print("sample_tokens", sample_tokens)
                     sample_result = {
                         'optimizer_step': optimizer_step,
                         'epoch': epoch,

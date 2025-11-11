@@ -179,6 +179,9 @@ class DatasetBatch:
     topk_logprobs: Optional[torch.Tensor] = None
     topk_token_ids: Optional[torch.Tensor] = None
     topk_token_idxs: Optional[torch.Tensor] = None
+    
+    # Track token ranges for each sample in the batch
+    sample_token_ranges: Optional[list[tuple[int, int]]] = None
 
 
 def msg(content, role: Literal["user"] | Literal["assistant"] | Literal["system"]):
@@ -353,7 +356,9 @@ class TrainDataset(Dataset):
         topk_token_ids, topk_logprobs, topk_token_idxs = [], [], []
         metadatas = []
         token_counts = TokenCounts()
+        sample_token_ranges = []
         curr_token_idx = 0
+        curr_target_token_idx = 0
         for element_id, element in enumerate(batch):
             input_ids.append(element.input_ids)
             element_ids.append(torch.full_like(element.input_ids, element_id, dtype=torch.long))
@@ -363,7 +368,14 @@ class TrainDataset(Dataset):
             topk_token_idxs.append(element.topk_token_idxs + curr_token_idx)
             metadatas.append(element.metadata)
             token_counts += element.token_counts
+            
+            # Track the range of target tokens for this sample
+            target_start = curr_target_token_idx
+            target_end = curr_target_token_idx + len(element.topk_token_ids)
+            sample_token_ranges.append((target_start, target_end))
+            
             curr_token_idx += len(element.input_ids)
+            curr_target_token_idx += len(element.topk_token_ids)
         
         input_ids = torch.cat(input_ids, dim=0)
         element_ids = torch.cat(element_ids, dim=0)
@@ -404,6 +416,7 @@ class TrainDataset(Dataset):
             topk_token_idxs=topk_token_idxs,
             metadata=metadatas,
             token_counts=token_counts,
+            sample_token_ranges=sample_token_ranges,
         )
 
 class LossEvalDataset(TrainDataset):

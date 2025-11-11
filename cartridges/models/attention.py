@@ -46,15 +46,24 @@ def create_block_mask_w_cache(
         kv_seq_ids = torch.cat([cache.seq_ids(), kv_seq_ids])
 
     def mask_func(_, _h, q_idx, kv_idx):
-        # Disallow padded keys in the *current* (non-cache) KV region.
-        if key_padding_mask is not None and kv_idx >= cache_len:
+        # Use tensor operations instead of data-dependent control flow
+        # Check if we're in the non-cache region and apply padding mask
+        is_non_cache = kv_idx >= cache_len
+        padding_blocked = False
+        if key_padding_mask is not None:
             k_local = kv_idx - cache_len
-            if bool(key_padding_mask[k_local]):  # True = pad -> block it
-                return False
+            # Use where to avoid data-dependent control flow
+            k_local_safe = torch.where(is_non_cache, k_local, 0)  # safe index when is_non_cache=False
+            # Only apply padding mask when in non-cache region
+            padding_blocked = is_non_cache & (k_local_safe < key_padding_mask.size(0)) & key_padding_mask[k_local_safe]
+        
         # Original segmentation + causal rule.
-        return (kv_seq_ids[kv_idx] == -1) | (
+        base_mask = (kv_seq_ids[kv_idx] == -1) | (
             (seq_ids[q_idx] == kv_seq_ids[kv_idx]) & (q_idx + cache_len >= kv_idx)
         )
+        
+        # Block if padding says so
+        return base_mask & (~padding_blocked)
 
     
     block_mask = create_block_mask(
