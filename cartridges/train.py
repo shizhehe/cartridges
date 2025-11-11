@@ -332,14 +332,14 @@ def train(config: TrainConfig):
     
     with torch.no_grad():
         # Test base model logits
-        wrapped_model.module.disable_adapter()
+        wrapped_model.module.disable_adapters()
         base_output = wrapped_model.module(test_tokens, seq_ids=test_seq_ids, position_ids=test_position_ids)
         base_logits = base_output.logits[-1, :]  # Last token logits
         base_top_token = torch.argmax(base_logits).item()
         base_next_word = tokenizer.decode(base_top_token)
         
         # Test LoRA model logits  
-        wrapped_model.module.enable_adapter()
+        wrapped_model.module.enable_adapters()
         lora_output = wrapped_model.module(test_tokens, seq_ids=test_seq_ids, position_ids=test_position_ids)
         lora_logits = lora_output.logits[-1, :]  # Last token logits
         lora_top_token = torch.argmax(lora_logits).item()
