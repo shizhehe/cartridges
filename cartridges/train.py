@@ -307,7 +307,18 @@ def train(config: TrainConfig):
                 for i, baseline in enumerate(generate_dataset.baselines):
                     for metric, value in baseline.items():
                         wandb.summary[eval_config.name_for_wandb + f"_baseline_{metric}"] = value
-
+    
+    # Check LoRA B matrix initialization
+    logger.info("Checking LoRA B matrix initialization")
+    non_zero_count = 0
+    if hasattr(wrapped_model.module, 'base_model'):
+        for name, param in wrapped_model.module.named_parameters():
+            if 'lora_B' in name and param.requires_grad:
+                print(f"LoRA B weight {name}: max={param.data.abs().max():.6f}, norm={param.data.norm():.6f}")
+                if param.data.abs().max() > 1e-6:
+                    print(f"WARNING: LoRA B matrix {name} is not zero-initialized!")
+                    non_zero_count += 1
+    logger.info(f"Non-zero LoRA B matrices: {non_zero_count}")
 
     def do_evaluation():
         for ds_config, dataset in ppl_evals:
@@ -955,6 +966,8 @@ def evaluate_generations(
                 logger.info(f"DEBUG: Generated text for seq_id {seq_id}: {repr(pred_text)}")
             
             pred = tokenizer.batch_decode(pred_ids, skip_special_tokens=True)
+
+            logger.info(f"DEBUG: Pred text: {repr(pred)}")
 
             elements = {seq_id: elem for seq_id, elem in elements}
 
