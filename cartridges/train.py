@@ -873,6 +873,8 @@ def evaluate_generations(
     
     # LoRA Debugging: Check initialization values
     if is_peft and isinstance(model, PeftModel):
+        from cartridges.generation import flex_generate
+        
         logger.info("=== LoRA Initialization Debug ===")
         for name, param in model.named_parameters():
             if 'lora_B' in name:
@@ -884,31 +886,43 @@ def evaluate_generations(
         test_prompt = "The capital of France is"
         test_input_ids = tokenizer.encode(test_prompt, return_tensors="pt").to(local_rank)
         
-        # Test base model
+        # Create test inputs for flex_generate
+        seq_ids = torch.zeros_like(test_input_ids[0])
+        position_ids = torch.arange(test_input_ids.size(1), device=local_rank)
+        
+        # Test base model using flex_generate
         base_model = model.get_base_model()
         base_model.eval()
         with torch.no_grad():
-            base_outputs = base_model.generate(
-                test_input_ids, 
-                max_new_tokens=5, 
-                temperature=0.0, 
-                do_sample=False,
-                pad_token_id=tokenizer.pad_token_id
-            )
-        base_result = tokenizer.decode(base_outputs[0], skip_special_tokens=True)
-        logger.info(f"Base model output: '{base_result}'")
-        
-        # Test LoRA model
-        model.eval()
-        with torch.no_grad():
-            lora_outputs = model.generate(
-                test_input_ids,
+            base_pred_ids = flex_generate(
+                model=base_model,
+                tokenizer=tokenizer,
+                input_ids=test_input_ids[0],
+                seq_ids=seq_ids,
+                position_ids=position_ids,
                 max_new_tokens=5,
                 temperature=0.0,
-                do_sample=False,
-                pad_token_id=tokenizer.pad_token_id
+                is_peft=False
             )
-        lora_result = tokenizer.decode(lora_outputs[0], skip_special_tokens=True)
+        base_tokens = base_pred_ids.get(0, [])
+        base_result = test_prompt + tokenizer.decode(base_tokens, skip_special_tokens=True)
+        logger.info(f"Base model output: '{base_result}'")
+        
+        # Test LoRA model using flex_generate  
+        model.eval()
+        with torch.no_grad():
+            lora_pred_ids = flex_generate(
+                model=model,
+                tokenizer=tokenizer,
+                input_ids=test_input_ids[0],
+                seq_ids=seq_ids,
+                position_ids=position_ids,
+                max_new_tokens=5,
+                temperature=0.0,
+                is_peft=True
+            )
+        lora_tokens = lora_pred_ids.get(0, [])
+        lora_result = test_prompt + tokenizer.decode(lora_tokens, skip_special_tokens=True)
         logger.info(f"LoRA model output: '{lora_result}'")
         
         if base_result != lora_result:
