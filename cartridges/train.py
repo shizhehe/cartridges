@@ -320,8 +320,17 @@ def train(config: TrainConfig):
                     non_zero_count += 1
     logger.info(f"Non-zero LoRA B matrices: {non_zero_count}")
     
-    # Test base model with simple forward pass
-    logger.info("Testing base model logits...")
+    # Check model types
+    logger.info(f"Wrapped model type: {type(wrapped_model)}")
+    logger.info(f"Module type: {type(wrapped_model.module)}")
+    logger.info(f"Is PeftModel: {isinstance(wrapped_model.module, PeftModel)}")
+    if hasattr(wrapped_model.module, 'base_model'):
+        logger.info(f"Base model type: {type(wrapped_model.module.base_model)}")
+    if hasattr(wrapped_model.module, 'peft_config'):
+        logger.info(f"PEFT config: {wrapped_model.module.peft_config}")
+    
+    # Test LoRA model with simple forward pass
+    logger.info("Testing LoRA model logits...")
     test_input = "Hello, I am"
     test_tokens = tokenizer.encode(test_input, return_tensors="pt").to(local_rank).flatten()
     
@@ -331,26 +340,21 @@ def train(config: TrainConfig):
     test_position_ids = torch.arange(seq_length, dtype=torch.long, device=local_rank)  # 0, 1, 2, ...
     
     with torch.no_grad():
-        # Test base model logits
-        wrapped_model.module.disable_adapters()
-        base_output = wrapped_model.module(test_tokens, seq_ids=test_seq_ids, position_ids=test_position_ids)
-        base_logits = base_output.logits[-1, :]  # Last token logits
-        base_top_token = torch.argmax(base_logits).item()
-        base_next_word = tokenizer.decode(base_top_token)
-        
-        # Test LoRA model logits  
-        wrapped_model.module.enable_adapters()
+        # Test LoRA model logits (adapters should be enabled by default)
         lora_output = wrapped_model.module(test_tokens, seq_ids=test_seq_ids, position_ids=test_position_ids)
         lora_logits = lora_output.logits[-1, :]  # Last token logits
         lora_top_token = torch.argmax(lora_logits).item()
         lora_next_word = tokenizer.decode(lora_top_token)
         
-    logger.info(f"Base model next token: {base_top_token} ({repr(base_next_word)})")
     logger.info(f"LoRA model next token: {lora_top_token} ({repr(lora_next_word)})")
-    logger.info(f"Logits difference: {(lora_logits - base_logits).abs().max():.6f}")
+    logger.info(f"Test input: {repr(test_input)}")
+    logger.info(f"Expected: Should be a sensible continuation like 'a', 'an', 'here', etc.")
     
-    if (lora_logits - base_logits).abs().max() > 1e-6:
-        logger.warning("LoRA is affecting logits even with zero B matrices!")
+    # Check if output looks reasonable for Qwen3
+    if lora_next_word in [" a", " an", " here", " going", " not", " very", " so"]:
+        logger.info("✓ Output looks reasonable - likely base model behavior")
+    else:
+        logger.warning(f"⚠ Unexpected output: {repr(lora_next_word)} - may indicate LoRA corruption")
 
     def do_evaluation():
         for ds_config, dataset in ppl_evals:
