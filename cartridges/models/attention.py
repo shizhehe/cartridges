@@ -45,26 +45,34 @@ def create_block_mask_w_cache(
     if cache_len > 0:
         kv_seq_ids = torch.cat([cache.seq_ids(), kv_seq_ids])
 
-    def mask_func(_b, _h, q_idx: int, kv_idx: int) -> bool:
+    # mask_func must be tensor-friendly (works under vmap)
+    def mask_func(_b, _h, q_idx, kv_idx):
+        # q_idx, kv_idx are tensors (possibly batched scalars under vmap)
+        # All comparisons below are elementwise tensor ops.
         is_non_cache = kv_idx >= cache_len
+        kv_sid = kv_seq_ids[kv_idx]        # tensor gather
+        q_sid  = seq_ids[q_idx]            # tensor gather
 
-        # padding
-        if key_padding_mask is not None and is_non_cache:
-            k_local = kv_idx - cache_len
-            if 0 <= k_local < key_padding_mask.numel():
-                if bool(key_padding_mask[k_local]):  # True = PAD => block
-                    return False
+        # Allow global prefix tokens (kv_sid == -1)
+        allow_prefix = kv_sid.eq(-1)
 
-        # segmentation + causal rule
-        kv_sid = int(kv_seq_ids[kv_idx])
-        q_sid  = int(seq_ids[q_idx])
+        # Causal within same segment: same seq_id and (q_idx + cache_len >= kv_idx)
+        causal_ok = q_sid.eq(kv_sid) & ((q_idx + cache_len) >= kv_idx)
 
-        # allow cached prefix if it is marked with -1 (global prefix)
-        if kv_sid == -1:
-            return True
+        # Optional: block padded keys in the non-cache region
+        if key_padding_mask is not None:
+            K = key_padding_mask.shape[0]
+            k_local = kv_idx - cache_len                      # index into non-cache keys
+            valid   = is_non_cache & (k_local >= 0) & (k_local < K)
+            # fetch pad flags where valid; elsewhere treat as not padded
+            # clamp only to keep index in range, then gate with `valid`
+            pad_flags = key_padding_mask[k_local.clamp(min=0, max=max(K-1, 0))]
+            pad_block = valid & pad_flags
+        else:
+            pad_block = torch.zeros_like(is_non_cache, dtype=torch.bool)
 
-        # same segment + causal within the non-cache region
-        return (q_sid == kv_sid) and (q_idx + cache_len >= kv_idx)
+        # Final: allowed if prefix OR (same segment & causal), and not padded
+        return (allow_prefix | causal_ok) & (~pad_block)
     
     return create_block_mask(
         mask_func, 
