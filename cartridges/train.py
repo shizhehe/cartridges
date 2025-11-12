@@ -352,8 +352,8 @@ def train(config: TrainConfig):
         logger.info(f"Input tokens length: {len(test_tokens)}")
         logger.info(f"Expected: [{len(test_tokens)}, vocab_size]")
         
-        # Get last token logits correctly  
-        lora_logits = lora_output.logits[-1, :]  # Last position in sequence, all vocab
+        # Get last token logits correctly - shape is [batch, seq_len, vocab_size]
+        lora_logits = lora_output.logits[0, -1, :]  # First batch, last position, all vocab
         logger.info(f"Last token logits shape: {lora_logits.shape}")
         
         # Also check vocab size mismatch

@@ -84,6 +84,8 @@ def flex_generate(
     current_input_ids = input_ids
     current_seq_ids = seq_ids
     current_position_ids = position_ids
+
+    past_key_values = None
     
     progress_range = tqdm(range(max_new_tokens), desc="Generating", disable=not show_progress, leave=False)
     for step in progress_range:
@@ -101,10 +103,12 @@ def flex_generate(
                 seq_ids=current_seq_ids,
                 position_ids=current_position_ids,
                 attention_mask=attention_mask,
-                past_key_values=cache if not is_peft else None,
-                use_cache=True if not is_peft else False,
+                past_key_values=cache if not is_peft else past_key_values,
+                use_cache=True,
                 mode="generate",
             )
+
+            past_key_values = outputs.past_key_values
         
         # Get logits for the last token of each sequence
         logits = outputs.logits  # (1, seq_len, vocab_size)
