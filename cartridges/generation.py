@@ -116,52 +116,44 @@ def flex_generate(
         next_seq_ids = []
         next_position_ids = []
         
-        # Group tokens by sequence
-        seq_groups = {}
-        for i, seq_id in enumerate(current_seq_ids):
-            if seq_id.item() not in seq_groups:
-                seq_groups[seq_id.item()] = []
-            seq_groups[seq_id.item()].append(i)
+        # Simplified: Process only the first sequence for debugging
+        # Assume all tokens belong to sequence 0 for single sample generation
+        if len(torch.unique(current_seq_ids)) > 1:
+            logger.warning("Multiple sequences detected, but processing only sequence 0 for debugging")
         
-        active_sequences = []
+        # Get the last token's logits (use last token in sequence)
+        token_logits = last_logits[-1]  # Last token in the batch
         
-        for seq_id, token_indices in seq_groups.items():
-            # Get the last token's logits for this sequence
-            last_token_idx = token_indices[-1]
-            token_logits = last_logits[last_token_idx]
-            
-            # Apply temperature
-            if temperature > 0:
-                token_logits = token_logits / temperature
-                next_token = torch.multinomial(torch.softmax(token_logits, dim=-1), 1).item()
-            else:
-                next_token = token_logits.argmax().item()
-            
-            # Check for repetition
-            seq_id_int = seq_id.item() if hasattr(seq_id, 'item') else seq_id
-            if last_tokens[seq_id_int] == next_token:
-                repetition_counts[seq_id_int] += 1
-            else:
-                repetition_counts[seq_id_int] = 0
-                last_tokens[seq_id_int] = next_token
-            
-            # Check if this sequence should continue (stop tokens or max repetitions)
-            should_stop = (next_token in stop_token_ids or 
-                          repetition_counts[seq_id_int] >= max_repetitions)
-            
-            if not should_stop:
-                next_tokens.append(next_token)
-                next_seq_ids.append(seq_id)
-                next_position_ids.append(current_position_ids[last_token_idx] + 1)
-                generated_tokens[seq_id_int].append(next_token)
-                active_sequences.append(seq_id)
-            elif repetition_counts[seq_id_int] >= max_repetitions:
+        # Apply temperature
+        if temperature > 0:
+            token_logits = token_logits / temperature
+            next_token = torch.multinomial(torch.softmax(token_logits, dim=-1), 1).item()
+        else:
+            next_token = token_logits.argmax().item()
+        
+        # Check for repetition (use sequence 0)
+        seq_id_int = 0
+        if last_tokens[seq_id_int] == next_token:
+            repetition_counts[seq_id_int] += 1
+        else:
+            repetition_counts[seq_id_int] = 0
+            last_tokens[seq_id_int] = next_token
+        
+        # Check if sequence should continue
+        should_stop = (next_token in stop_token_ids or 
+                      repetition_counts[seq_id_int] >= max_repetitions)
+        
+        if should_stop:
+            if repetition_counts[seq_id_int] >= max_repetitions:
                 logger.info(f"Stopping sequence {seq_id_int} due to {max_repetitions} consecutive repetitions of token {next_token} ({tokenizer.decode([next_token])})")
-        
-        # If no sequences are active, break
-        if not next_tokens:
             progress_range.close()
             break
+        
+        # Continue generation
+        next_tokens = [next_token]
+        next_seq_ids = [0]  # Always sequence 0
+        next_position_ids = [current_position_ids[-1] + 1]  # Increment last position
+        generated_tokens[seq_id_int].append(next_token)
         
         # Prepare inputs for next iteration
         current_input_ids = torch.tensor(next_tokens, device=device, dtype=torch.long)
