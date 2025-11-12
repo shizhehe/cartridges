@@ -99,7 +99,7 @@ def flex_generate(
     logger.info(f"Input text: {repr(tokenizer.decode(input_ids, skip_special_tokens=True))}")
     
     # Test with a simple known input for comparison
-    test_text = "The capital of France is "
+    test_text = "Hi, what is your "
     test_tokens = tokenizer.encode(test_text, return_tensors="pt").to(device).flatten()
     test_seq_ids = torch.zeros(len(test_tokens), dtype=torch.long, device=device)
     test_position_ids = torch.arange(len(test_tokens), dtype=torch.long, device=device)
@@ -155,6 +155,26 @@ def flex_generate(
         test_next_token = test_logits.argmax().item()
         test_next_word = tokenizer.decode(test_next_token)
         logger.info(f"Test input next token prediction: {test_next_token} ({repr(test_next_word)})")
+
+        # with attention mask
+        attention_mask = torch.ones(
+            (1, current_input_ids.size(0)), 
+            dtype=torch.bool, 
+            device=device
+        )
+        actual_output = model(
+            input_ids=input_ids,
+            seq_ids=seq_ids,
+            position_ids=position_ids,
+            attention_mask=attention_mask,
+            past_key_values=None,
+            use_cache=True,
+            mode="generate",
+        )
+        test_logits = test_output.logits[0, -1, :]
+        test_next_token = test_logits.argmax().item()
+        test_next_word = tokenizer.decode(test_next_token)
+        logger.info(f"Test input next token prediction with attention mask: {test_next_token} ({repr(test_next_word)})")
         
         # Test on actual input
         actual_output = model(
@@ -191,7 +211,12 @@ def flex_generate(
         with torch.no_grad():
             # FlexQwen3 handles causal masking via FlexAttention and seq_ids
             # No need for explicit attention mask since we don't have padded tokens
-            attention_mask = None
+            #attention_mask = None
+            attention_mask = torch.ones(
+                (1, current_input_ids.size(0)), 
+                dtype=torch.bool, 
+                device=device
+            )
             
             outputs = model(
                 input_ids=current_input_ids,
@@ -214,42 +239,52 @@ def flex_generate(
         next_seq_ids = []
         next_position_ids = []
         
-        # Process single sequence (already filtered in training script)
-        # Get the last token's logits (use last token in sequence)
-        token_logits = last_logits[-1]  # Last token in the batch
+        # Group tokens by sequence
+        seq_groups = {}
+        for i, seq_id in enumerate(current_seq_ids):
+            if seq_id.item() not in seq_groups:
+                seq_groups[seq_id.item()] = []
+            seq_groups[seq_id.item()].append(i)
         
-        # Apply temperature
-        if temperature > 0:
-            token_logits = token_logits / temperature
-            next_token = torch.multinomial(torch.softmax(token_logits, dim=-1), 1).item()
-        else:
-            next_token = token_logits.argmax().item()
+        active_sequences = []
         
-        # Use the actual sequence ID from input
-        seq_id_int = current_seq_ids[0].item()
-        
-        # Check for repetition
-        if last_tokens[seq_id_int] == next_token:
-            repetition_counts[seq_id_int] += 1
-        else:
-            repetition_counts[seq_id_int] = 0
-            last_tokens[seq_id_int] = next_token
-        
-        # Check if sequence should continue
-        should_stop = (next_token in stop_token_ids or 
-                      repetition_counts[seq_id_int] >= max_repetitions)
-        
-        if should_stop:
-            if repetition_counts[seq_id_int] >= max_repetitions:
+        for seq_id, token_indices in seq_groups.items():
+            # Get the last token's logits for this sequence
+            last_token_idx = token_indices[-1]
+            token_logits = last_logits[last_token_idx]
+            
+            # Apply temperature
+            if temperature > 0:
+                token_logits = token_logits / temperature
+                next_token = torch.multinomial(torch.softmax(token_logits, dim=-1), 1).item()
+            else:
+                next_token = token_logits.argmax().item()
+            
+            # Check for repetition
+            seq_id_int = seq_id.item() if hasattr(seq_id, 'item') else seq_id
+            if last_tokens[seq_id_int] == next_token:
+                repetition_counts[seq_id_int] += 1
+            else:
+                repetition_counts[seq_id_int] = 0
+                last_tokens[seq_id_int] = next_token
+            
+            # Check if this sequence should continue (stop tokens or max repetitions)
+            should_stop = (next_token in stop_token_ids or 
+                          repetition_counts[seq_id_int] >= max_repetitions)
+            
+            if not should_stop:
+                next_tokens.append(next_token)
+                next_seq_ids.append(seq_id)
+                next_position_ids.append(current_position_ids[last_token_idx] + 1)
+                generated_tokens[seq_id_int].append(next_token)
+                active_sequences.append(seq_id)
+            elif repetition_counts[seq_id_int] >= max_repetitions:
                 logger.info(f"Stopping sequence {seq_id_int} due to {max_repetitions} consecutive repetitions of token {next_token} ({tokenizer.decode([next_token])})")
+        
+        # If no sequences are active, break
+        if not next_tokens:
             progress_range.close()
             break
-        
-        # Continue generation
-        next_tokens = [next_token]
-        next_seq_ids = [seq_id_int]  # Use actual sequence ID
-        next_position_ids = [current_position_ids[-1] + 1]  # Increment last position
-        generated_tokens[seq_id_int].append(next_token)
         
         # Prepare inputs for next iteration
         current_input_ids = torch.tensor(next_tokens, device=device, dtype=torch.long)

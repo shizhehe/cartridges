@@ -308,18 +308,6 @@ def train(config: TrainConfig):
                     for metric, value in baseline.items():
                         wandb.summary[eval_config.name_for_wandb + f"_baseline_{metric}"] = value
     
-    # Check LoRA B matrix initialization
-    logger.info("Checking LoRA B matrix initialization")
-    non_zero_count = 0
-    if hasattr(wrapped_model.module, 'base_model'):
-        for name, param in wrapped_model.module.named_parameters():
-            if 'lora_B' in name and param.requires_grad:
-                print(f"LoRA B weight {name}: max={param.data.abs().max():.6f}, norm={param.data.norm():.6f}")
-                if param.data.abs().max() > 1e-6:
-                    print(f"WARNING: LoRA B matrix {name} is not zero-initialized!")
-                    non_zero_count += 1
-    logger.info(f"Non-zero LoRA B matrices: {non_zero_count}")
-    
     # Check model types
     logger.info(f"Wrapped model type: {type(wrapped_model)}")
     logger.info(f"Module type: {type(wrapped_model.module)}")
@@ -383,33 +371,62 @@ def train(config: TrainConfig):
     logger.info(f"Tokenizer vocab size: {len(tokenizer)}")
     logger.info(f"Expected: Should be a sensible continuation like 'a', 'an', 'here', etc.")
     
-    # Test base model directly (bypass LoRA)
-    logger.info("Testing base model...")
+    # Test base model vs LoRA model generation on simple prompt
+    logger.info("=== Base Model vs LoRA Comparison ===")
+    test_prompt = "The capital of France is"
+    test_input_ids = tokenizer.encode(test_prompt, return_tensors="pt").to(local_rank)
+    
+    # Create test inputs for flex_generate
+    seq_ids_test = torch.zeros_like(test_input_ids[0])
+    position_ids_test = torch.arange(test_input_ids.size(1), device=local_rank)
+    
     try:
-        # Get the actual base FlexQwen3 model
+        # Test base model using flex_generate
         base_model = wrapped_model.module.base_model.model  # DDP -> PeftModel -> LoraModel -> FlexQwen3ForCausalLM
-        logger.info(f"Base model type: {type(base_model)}")
-        
+        base_model.eval()
         with torch.no_grad():
-            # Direct forward pass with base FlexQwen3 model
-            base_output = base_model(test_tokens, seq_ids=test_seq_ids, position_ids=test_position_ids)
-            base_logits = base_output.logits[0, -1, :]  # First batch, last position, all vocab
-            base_top_token = torch.argmax(base_logits).item()
-            base_next_word = tokenizer.decode(base_top_token)
+            from cartridges.generation import flex_generate
+            base_pred_ids = flex_generate(
+                model=base_model,
+                tokenizer=tokenizer,
+                input_ids=test_input_ids[0],
+                seq_ids=seq_ids_test,
+                position_ids=position_ids_test,
+                max_new_tokens=5,
+                temperature=0.0,
+                is_peft=False
+            )
+        base_tokens = base_pred_ids.get(0, [])
+        base_result = test_prompt + tokenizer.decode(base_tokens, skip_special_tokens=True)
+        logger.info(f"Base model output: '{base_result}'")
+        
+        # Test LoRA model using flex_generate  
+        wrapped_model.module.eval()
+        with torch.no_grad():
+            lora_pred_ids = flex_generate(
+                model=wrapped_model.module,
+                tokenizer=tokenizer,
+                input_ids=test_input_ids[0],
+                seq_ids=seq_ids_test,
+                position_ids=position_ids_test,
+                max_new_tokens=5,
+                temperature=0.0,
+                is_peft=True
+            )
+        lora_tokens = lora_pred_ids.get(0, [])
+        lora_result = test_prompt + tokenizer.decode(lora_tokens, skip_special_tokens=True)
+        logger.info(f"LoRA model output: '{lora_result}'")
+        
+        # Compare results
+        if base_result == lora_result:
+            logger.info("✓ Base and LoRA models produce identical outputs (expected with zero B matrices)")
+        else:
+            logger.warning(f"⚠ Base and LoRA models produce different outputs:")
+            logger.warning(f"  Base:  '{base_result}'")
+            logger.warning(f"  LoRA:  '{lora_result}'")
             
-            logger.info(f"Base model next token: {base_top_token} ({repr(base_next_word)})")
-            
-            # Compare logits
-            logits_diff = (lora_logits - base_logits).abs().max().item()
-            logger.info(f"Max logits difference (LoRA vs Base): {logits_diff:.6f}")
-            
-            if logits_diff < 1e-6:
-                logger.info("✓ LoRA and Base models produce identical logits (as expected with zero B matrices)")
-            else:
-                logger.warning(f"⚠ LoRA and Base models produce different logits (unexpected with zero B matrices)")
-                
     except Exception as e:
-        logger.error(f"Base model test failed: {e}")
+        logger.error(f"Base vs LoRA comparison failed: {e}")
 
     def do_evaluation():
         for ds_config, dataset in ppl_evals:
