@@ -73,6 +73,21 @@ def flex_generate(
             ),
         )
         
+    # Simplified: Extract only the first sequence for debugging
+    unique_seq_ids = torch.unique(seq_ids)
+    if len(unique_seq_ids) > 1:
+        logger.warning(f"Multiple sequences detected ({len(unique_seq_ids)}), processing only first sequence for debugging")
+        # Extract only tokens belonging to first sequence
+        first_seq_id = unique_seq_ids[0].item()
+        seq_mask = (seq_ids == first_seq_id)
+        input_ids = input_ids[seq_mask]
+        seq_ids = seq_ids[seq_mask] 
+        position_ids = position_ids[seq_mask]
+        # Reset seq_ids to 0 for simplicity
+        seq_ids = torch.zeros_like(seq_ids)
+    
+    logger.info(f"Processing single sequence with {len(input_ids)} tokens")
+    
     # Initialize generated sequences
     generated_tokens: Dict[int, List[int]] = defaultdict(list)
     
