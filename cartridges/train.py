@@ -347,6 +347,12 @@ def train(config: TrainConfig):
         # Test LoRA model logits (adapters should be enabled by default)
         lora_output = wrapped_model.module(test_tokens, seq_ids=test_seq_ids, position_ids=test_position_ids)
         lora_logits = lora_output.logits[-1, :]  # Last token logits
+        
+        # Debug logits
+        logger.info(f"Logits shape: {lora_logits.shape}")
+        logger.info(f"Logits min/max: {lora_logits.min().item():.3f} / {lora_logits.max().item():.3f}")
+        logger.info(f"Expected vocab size: {len(tokenizer)}")
+        
         lora_top_token = torch.argmax(lora_logits).item()
         lora_next_word = tokenizer.decode(lora_top_token)
         
