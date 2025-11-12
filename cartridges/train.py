@@ -383,15 +383,33 @@ def train(config: TrainConfig):
     logger.info(f"Tokenizer vocab size: {len(tokenizer)}")
     logger.info(f"Expected: Should be a sensible continuation like 'a', 'an', 'here', etc.")
     
-    # Debug token 306648
-    if lora_top_token >= len(tokenizer):
-        logger.error(f"Token ID {lora_top_token} is out of vocab range! Vocab size: {len(tokenizer)}")
-    
-    # Check if output looks reasonable for Qwen3
-    if lora_next_word in [" a", " an", " here", " going", " not", " very", " so"]:
-        logger.info("✓ Output looks reasonable - likely base model behavior")
-    else:
-        logger.warning(f"⚠ Unexpected output: {repr(lora_next_word)} - may indicate LoRA corruption")
+    # Test base model directly (bypass LoRA)
+    logger.info("Testing base model...")
+    try:
+        # Get the actual base FlexQwen3 model
+        base_model = wrapped_model.module.base_model.model  # DDP -> PeftModel -> LoraModel -> FlexQwen3ForCausalLM
+        logger.info(f"Base model type: {type(base_model)}")
+        
+        with torch.no_grad():
+            # Direct forward pass with base FlexQwen3 model
+            base_output = base_model(test_tokens, seq_ids=test_seq_ids, position_ids=test_position_ids)
+            base_logits = base_output.logits[0, -1, :]  # First batch, last position, all vocab
+            base_top_token = torch.argmax(base_logits).item()
+            base_next_word = tokenizer.decode(base_top_token)
+            
+            logger.info(f"Base model next token: {base_top_token} ({repr(base_next_word)})")
+            
+            # Compare logits
+            logits_diff = (lora_logits - base_logits).abs().max().item()
+            logger.info(f"Max logits difference (LoRA vs Base): {logits_diff:.6f}")
+            
+            if logits_diff < 1e-6:
+                logger.info("✓ LoRA and Base models produce identical logits (as expected with zero B matrices)")
+            else:
+                logger.warning(f"⚠ LoRA and Base models produce different logits (unexpected with zero B matrices)")
+                
+    except Exception as e:
+        logger.error(f"Base model test failed: {e}")
 
     def do_evaluation():
         for ds_config, dataset in ppl_evals:
