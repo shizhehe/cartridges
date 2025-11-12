@@ -461,12 +461,6 @@ def train(config: TrainConfig):
             ):
                 do_evaluate_generations(step=iter_idx)
 
-            # NOTE: remove later, debugging generations for LoRA
-            # kill process
-            print("Done with generations, killing process.")
-            os.kill(os.getpid(), signal.SIGKILL)
-            
-
             # SE (05/02): We are careful to only reduce the loss across processes
             # when we are on the last batch of gradient accumulation before the optimizer
             # step. See here:
@@ -1006,6 +1000,11 @@ def evaluate_generations(
             position_ids = torch.cat(
                 [torch.arange(elem.input_ids.shape[1], device=local_rank) for _, elem in elements]
             )
+
+            # only generate for the first sequence
+            input_ids = input_ids[:1]
+            seq_ids = seq_ids[:1]
+            position_ids = position_ids[:1]
             
             # Log input tokens
             logger.info(f"DEBUG: Input tokens shape: {input_ids.shape}")
@@ -1042,6 +1041,9 @@ def evaluate_generations(
 
             logger.info(f"DEBUG: Pred text: {repr(pred)}")
 
+            print("Done with a generation, killing process.")
+            os.kill(os.getpid(), signal.SIGKILL)
+
             elements = {seq_id: elem for seq_id, elem in elements}
 
             for  (seq_id, curr_pred_ids) in pred_ids.items():
@@ -1077,8 +1079,7 @@ def evaluate_generations(
                         **extras,
                     }
                 )
-                break
-            break
+                
     logger.info(f"Generated {len(results)} samples")
 
     batch_score = None

@@ -94,20 +94,7 @@ def flex_generate(
             ),
         )
         
-    # Simplified: Extract only the first sequence for debugging
-    unique_seq_ids = torch.unique(seq_ids)
-    if len(unique_seq_ids) > 1:
-        logger.warning(f"Multiple sequences detected ({len(unique_seq_ids)}), processing only first sequence for debugging")
-        # Extract only tokens belonging to first sequence
-        first_seq_id = unique_seq_ids[0].item()
-        seq_mask = (seq_ids == first_seq_id)
-        input_ids = input_ids[seq_mask]
-        seq_ids = seq_ids[seq_mask] 
-        position_ids = position_ids[seq_mask]
-        # Reset seq_ids to 0 for simplicity
-        seq_ids = torch.zeros_like(seq_ids)
-    
-    logger.info(f"Processing single sequence with {len(input_ids)} tokens")
+    logger.info(f"Processing sequence with {len(input_ids)} tokens")
     logger.info(f"Input tokens: {input_ids.tolist()}")
     logger.info(f"Input text: {repr(tokenizer.decode(input_ids, skip_special_tokens=True))}")
     
@@ -119,6 +106,44 @@ def flex_generate(
     
     logger.info(f"Test comparison - '{test_text}': {test_tokens.tolist()}")
     logger.info(f"Test comparison decoded: {repr(tokenizer.decode(test_tokens, skip_special_tokens=True))}")
+    
+    # Test with base model directly (bypass LoRA and flex_generate)
+    if is_peft:
+        logger.info("Testing base model directly...")
+        try:
+            # Get the actual base FlexQwen3 model
+            base_model = model.base_model.model  # PeftModel -> LoraModel -> FlexQwen3ForCausalLM
+            logger.info(f"Base model type: {type(base_model)}")
+            
+            with torch.no_grad():
+                # Test with standard HF generation (if available)
+                try:
+                    # Disable LoRA temporarily
+                    model.disable_adapters()
+                    
+                    # Simple forward pass with base model
+                    base_output = base_model(
+                        input_ids=test_tokens,
+                        seq_ids=test_seq_ids,
+                        position_ids=test_position_ids,
+                        attention_mask=None,
+                        past_key_values=None,
+                        use_cache=True,
+                        mode="generate",
+                    )
+                    base_logits = base_output.logits[0, -1, :]
+                    base_next_token = base_logits.argmax().item()
+                    base_next_word = tokenizer.decode(base_next_token)
+                    logger.info(f"Base model (LoRA disabled) prediction: {base_next_token} ({repr(base_next_word)})")
+                    
+                    # Re-enable LoRA
+                    model.enable_adapters()
+                    
+                except Exception as e:
+                    logger.error(f"Base model test failed: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Could not access base model: {e}")
     
     # Quick test generation on both inputs
     with torch.no_grad():
@@ -195,11 +220,7 @@ def flex_generate(
         next_seq_ids = []
         next_position_ids = []
         
-        # Simplified: Process only the first sequence for debugging
-        # Assume all tokens belong to sequence 0 for single sample generation
-        if len(torch.unique(current_seq_ids)) > 1:
-            logger.warning("Multiple sequences detected, but processing only sequence 0 for debugging")
-        
+        # Process single sequence (already filtered in training script)
         # Get the last token's logits (use last token in sequence)
         token_logits = last_logits[-1]  # Last token in the batch
         
@@ -210,8 +231,10 @@ def flex_generate(
         else:
             next_token = token_logits.argmax().item()
         
-        # Check for repetition (use sequence 0)
-        seq_id_int = 0
+        # Use the actual sequence ID from input
+        seq_id_int = current_seq_ids[0].item()
+        
+        # Check for repetition
         if last_tokens[seq_id_int] == next_token:
             repetition_counts[seq_id_int] += 1
         else:
@@ -230,7 +253,7 @@ def flex_generate(
         
         # Continue generation
         next_tokens = [next_token]
-        next_seq_ids = [0]  # Always sequence 0
+        next_seq_ids = [seq_id_int]  # Use actual sequence ID
         next_position_ids = [current_position_ids[-1] + 1]  # Increment last position
         generated_tokens[seq_id_int].append(next_token)
         
