@@ -87,6 +87,8 @@ def flex_generate(
         seq_ids = torch.zeros_like(seq_ids)
     
     logger.info(f"Processing single sequence with {len(input_ids)} tokens")
+    logger.info(f"Input tokens: {input_ids.tolist()}")
+    logger.info(f"Input text: {repr(tokenizer.decode(input_ids, skip_special_tokens=True))}")
     
     # Initialize generated sequences
     generated_tokens: Dict[int, List[int]] = defaultdict(list)
@@ -98,7 +100,7 @@ def flex_generate(
     # Current state
     current_input_ids = input_ids
     current_seq_ids = seq_ids
-    current_position_ids = position_ids
+    current_position_ids = position_ids, 
 
     past_key_values = None
     
