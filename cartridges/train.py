@@ -346,7 +346,28 @@ def train(config: TrainConfig):
     with torch.no_grad():
         # Test LoRA model logits (adapters should be enabled by default)
         lora_output = wrapped_model.module(test_tokens, seq_ids=test_seq_ids, position_ids=test_position_ids)
-        lora_logits = lora_output.logits[-1, :]  # Last token logits
+        
+        # Debug full output shape
+        logger.info(f"Full output logits shape: {lora_output.logits.shape}")
+        logger.info(f"Input tokens length: {len(test_tokens)}")
+        logger.info(f"Expected: [{len(test_tokens)}, vocab_size]")
+        
+        # Get last token logits correctly  
+        lora_logits = lora_output.logits[-1, :]  # Last position in sequence, all vocab
+        logger.info(f"Last token logits shape: {lora_logits.shape}")
+        
+        # Also check vocab size mismatch
+        model_vocab_size = lora_logits.shape[0]
+        tokenizer_vocab_size = len(tokenizer)
+        logger.info(f"Model vocab size: {model_vocab_size}")
+        logger.info(f"Tokenizer vocab size: {tokenizer_vocab_size}")
+        if model_vocab_size != tokenizer_vocab_size:
+            logger.error(f"VOCAB SIZE MISMATCH: Model has {model_vocab_size}, tokenizer has {tokenizer_vocab_size}")
+            
+        # Clip logits to tokenizer vocab size to prevent out-of-range tokens
+        if model_vocab_size > tokenizer_vocab_size:
+            logger.warning(f"Clipping logits from {model_vocab_size} to {tokenizer_vocab_size}")
+            lora_logits = lora_logits[:tokenizer_vocab_size]
         
         # Debug logits
         logger.info(f"Logits shape: {lora_logits.shape}")
