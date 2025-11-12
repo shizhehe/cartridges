@@ -90,6 +90,47 @@ def flex_generate(
     logger.info(f"Input tokens: {input_ids.tolist()}")
     logger.info(f"Input text: {repr(tokenizer.decode(input_ids, skip_special_tokens=True))}")
     
+    # Test with a simple known input for comparison
+    test_text = "The capital of France is "
+    test_tokens = tokenizer.encode(test_text, return_tensors="pt").to(device).flatten()
+    test_seq_ids = torch.zeros(len(test_tokens), dtype=torch.long, device=device)
+    test_position_ids = torch.arange(len(test_tokens), dtype=torch.long, device=device)
+    
+    logger.info(f"Test comparison - '{test_text}': {test_tokens.tolist()}")
+    logger.info(f"Test comparison decoded: {repr(tokenizer.decode(test_tokens, skip_special_tokens=True))}")
+    
+    # Quick test generation on both inputs
+    with torch.no_grad():
+        # Test on simple input
+        test_output = model(
+            input_ids=test_tokens,
+            seq_ids=test_seq_ids,
+            position_ids=test_position_ids,
+            attention_mask=None,
+            past_key_values=None,
+            use_cache=True,
+            mode="generate",
+        )
+        test_logits = test_output.logits[0, -1, :]
+        test_next_token = test_logits.argmax().item()
+        test_next_word = tokenizer.decode(test_next_token)
+        logger.info(f"Test input next token prediction: {test_next_token} ({repr(test_next_word)})")
+        
+        # Test on actual input
+        actual_output = model(
+            input_ids=input_ids,
+            seq_ids=seq_ids,
+            position_ids=position_ids,
+            attention_mask=None,
+            past_key_values=None,
+            use_cache=True,
+            mode="generate",
+        )
+        actual_logits = actual_output.logits[0, -1, :]
+        actual_next_token = actual_logits.argmax().item()
+        actual_next_word = tokenizer.decode(actual_next_token)
+        logger.info(f"Actual input next token prediction: {actual_next_token} ({repr(actual_next_word)})")
+    
     # Initialize generated sequences
     generated_tokens: Dict[int, List[int]] = defaultdict(list)
     
@@ -100,7 +141,7 @@ def flex_generate(
     # Current state
     current_input_ids = input_ids
     current_seq_ids = seq_ids
-    current_position_ids = position_ids, 
+    current_position_ids = position_ids 
 
     past_key_values = None
     
