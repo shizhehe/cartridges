@@ -91,19 +91,16 @@ def flex_generate(
     for step in progress_range:
         # Forward pass - update cache with current seq_ids before the forward pass
         with torch.no_grad():
-            # Create causal attention mask for generation
-            attention_mask = torch.ones(
-                (1, current_input_ids.size(0)), 
-                dtype=torch.bool, 
-                device=device
-            )
+            # FlexQwen3 handles causal masking via FlexAttention and seq_ids
+            # No need for explicit attention mask since we don't have padded tokens
+            attention_mask = None
             
             outputs = model(
                 input_ids=current_input_ids,
                 seq_ids=current_seq_ids,
                 position_ids=current_position_ids,
                 attention_mask=attention_mask,
-                past_key_values=cache if not is_peft else past_key_values,
+                past_key_values=past_key_values if is_peft else cache,
                 use_cache=True,
                 mode="generate",
             )
