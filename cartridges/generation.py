@@ -116,12 +116,9 @@ def flex_generate(
             logger.info(f"Base model type: {type(base_model)}")
             
             with torch.no_grad():
-                # Test with standard HF generation (if available)
+                # Test with direct base model access (bypass PEFT entirely)
                 try:
-                    # Disable LoRA temporarily
-                    model.disable_adapters()
-                    
-                    # Simple forward pass with base model
+                    # Direct forward pass with base FlexQwen3 model
                     base_output = base_model(
                         input_ids=test_tokens,
                         seq_ids=test_seq_ids,
@@ -134,10 +131,7 @@ def flex_generate(
                     base_logits = base_output.logits[0, -1, :]
                     base_next_token = base_logits.argmax().item()
                     base_next_word = tokenizer.decode(base_next_token)
-                    logger.info(f"Base model (LoRA disabled) prediction: {base_next_token} ({repr(base_next_word)})")
-                    
-                    # Re-enable LoRA
-                    model.enable_adapters()
+                    logger.info(f"Base model (direct access) prediction: {base_next_token} ({repr(base_next_word)})")
                     
                 except Exception as e:
                     logger.error(f"Base model test failed: {e}")

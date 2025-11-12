@@ -335,7 +335,7 @@ def train(config: TrainConfig):
     
     # Test LoRA model with simple forward pass
     logger.info("Testing LoRA model logits...")
-    test_input = "Hello, I am"
+    test_input = "The capital of France is "
     test_tokens = tokenizer.encode(test_input, return_tensors="pt").to(local_rank).flatten()
     
     # Create seq_ids and position_ids for FlexQwen3
@@ -1002,9 +1002,10 @@ def evaluate_generations(
             )
 
             # only generate for the first sequence
-            input_ids = input_ids[:1]
-            seq_ids = seq_ids[:1]
-            position_ids = position_ids[:1]
+            first_seq_mask = (seq_ids == seq_ids[0])  # mask for first sequence ID
+            input_ids = input_ids[first_seq_mask]  # first sequence tokens
+            seq_ids = seq_ids[first_seq_mask]  # corresponding seq_ids
+            position_ids = position_ids[first_seq_mask]  # corresponding position_ids
             
             # Log input tokens
             logger.info(f"DEBUG: Input tokens shape: {input_ids.shape}")
