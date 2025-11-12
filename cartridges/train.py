@@ -326,6 +326,10 @@ def train(config: TrainConfig):
     logger.info(f"Is PeftModel: {isinstance(wrapped_model.module, PeftModel)}")
     if hasattr(wrapped_model.module, 'base_model'):
         logger.info(f"Base model type: {type(wrapped_model.module.base_model)}")
+        if hasattr(wrapped_model.module.base_model, 'model'):
+            logger.info(f"Base model.model type: {type(wrapped_model.module.base_model.model)}")
+        if hasattr(wrapped_model.module.base_model, 'base_model'):
+            logger.info(f"Base model.base_model type: {type(wrapped_model.module.base_model.base_model)}")
     if hasattr(wrapped_model.module, 'peft_config'):
         logger.info(f"PEFT config: {wrapped_model.module.peft_config}")
     
@@ -348,7 +352,13 @@ def train(config: TrainConfig):
         
     logger.info(f"LoRA model next token: {lora_top_token} ({repr(lora_next_word)})")
     logger.info(f"Test input: {repr(test_input)}")
+    logger.info(f"Test tokens: {test_tokens.tolist()}")
+    logger.info(f"Tokenizer vocab size: {len(tokenizer)}")
     logger.info(f"Expected: Should be a sensible continuation like 'a', 'an', 'here', etc.")
+    
+    # Debug token 306648
+    if lora_top_token >= len(tokenizer):
+        logger.error(f"Token ID {lora_top_token} is out of vocab range! Vocab size: {len(tokenizer)}")
     
     # Check if output looks reasonable for Qwen3
     if lora_next_word in [" a", " an", " here", " going", " not", " very", " so"]:
