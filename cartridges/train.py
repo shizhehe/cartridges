@@ -888,7 +888,7 @@ def evaluate_generations(
     if is_peft and isinstance(model, PeftModel):        
         # Test base model vs LoRA model generation on simple prompt
         logger.info("=== Base Model vs LoRA Comparison ===")
-        test_prompt = "The capital of France is"
+        test_prompt = "user\nQuestion: According to the “Annual Compliance Meeting” email, when and where is the meeting scheduled, what time does it start, and to whom should attendees RSVP?\nAnswer:\nassistant\n<think>\n\n</think>\n\n"
         test_input_ids = tokenizer.encode(test_prompt, return_tensors="pt").to(local_rank)
         
         # Create test inputs for flex_generate

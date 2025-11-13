@@ -385,6 +385,9 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
 
         cartridge_len = past_key_values.num_cartridge_tokens() if past_key_values is not None else 0
         position_ids = position_ids + cartridge_len
+
+        if use_cache and past_key_values is None:
+            past_key_values = DynamicCache()
         
         # Build the block mask
         # Normalize attention_mask to a 1D bool "key is padded" mask (True = padded)

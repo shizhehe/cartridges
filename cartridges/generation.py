@@ -58,28 +58,7 @@ def flex_generate(
             logger.info(f"PEFT active adapters: {model.active_adapters}")
         if hasattr(model, 'peft_config'):
             logger.info(f"PEFT config: {model.peft_config}")
-            
-        # Check LoRA B matrix initialization right before generation
-        logger.info("Checking LoRA B matrix weights before generation...")
-        non_zero_count = 0
-        total_b_matrices = 0
-        for name, param in model.named_parameters():
-            if 'lora_B' in name and param.requires_grad:
-                max_val = param.data.abs().max().item()
-                norm_val = param.data.norm().item()
-                total_b_matrices += 1
-                if max_val > 1e-6:
-                    logger.warning(f"NON-ZERO LoRA B matrix {name}: max={max_val:.6f}, norm={norm_val:.6f}")
-                    non_zero_count += 1
-                else:
-                    logger.debug(f"Zero LoRA B matrix {name}: max={max_val:.6f}, norm={norm_val:.6f}")
-        
-        logger.info(f"LoRA B matrices: {non_zero_count}/{total_b_matrices} are non-zero")
-        if non_zero_count == 0:
-            logger.info("✓ All LoRA B matrices are zero - adapter should behave like base model")
-        else:
-            logger.warning(f"⚠ {non_zero_count} LoRA B matrices are non-zero - adapter may affect generation")
-            
+                        
     device = input_ids.device
     model.eval()
     if stop_token_ids is None:
@@ -175,6 +154,10 @@ def flex_generate(
         actual_next_word = tokenizer.decode(actual_next_token)
         logger.info(f"Actual input next token prediction: {actual_next_token} ({repr(actual_next_word)})")
     
+    if base_next_word != actual_next_word:
+        logger.error(f"Base model and LoRA model predictions differ: {base_next_word} != {actual_next_word}")
+        raise ValueError(f"Base model and LoRA model predictions differ: {base_next_word} != {actual_next_word}")
+
     # Initialize generated sequences
     generated_tokens: Dict[int, List[int]] = defaultdict(list)
     
@@ -187,7 +170,8 @@ def flex_generate(
     current_seq_ids = seq_ids
     current_position_ids = position_ids
 
-    past_key_values = None
+    if is_peft:
+        past_key_values = 
     
     progress_range = tqdm(range(max_new_tokens), desc="Generating", disable=not show_progress, leave=False)
     for step in progress_range:
