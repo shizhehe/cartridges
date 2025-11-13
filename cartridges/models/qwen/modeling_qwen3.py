@@ -23,7 +23,7 @@ import torch.nn.functional as F
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention, BlockMask
 
 from transformers.activations import ACT2FN
-from transformers.cache_utils import Cache, DynamicCache, TrainableCache
+from transformers.cache_utils import Cache, DynamicCache
 from transformers.generation import GenerationMixin
 from transformers.integrations import use_kernel_forward_from_hub
 from transformers.modeling_layers import GradientCheckpointingLayer
@@ -34,7 +34,6 @@ from transformers.utils import auto_docstring, can_return_tuple, logging
 
 from .configuration_qwen3 import Qwen3Config
 from cartridges.models.attention import create_block_mask_w_cache, flex_attention_forward, repeat_kv
-from cartridges.models.config import AttnConfig
 
 
 logger = logging.get_logger(__name__)
