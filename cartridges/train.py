@@ -321,113 +321,7 @@ def train(config: TrainConfig):
     if hasattr(wrapped_model.module, 'peft_config'):
         logger.info(f"PEFT config: {wrapped_model.module.peft_config}")
     
-    # Test LoRA model with simple forward pass
-    logger.info("Testing LoRA model logits...")
-    test_input = "The capital of France is "
-    test_tokens = tokenizer.encode(test_input, return_tensors="pt").to(local_rank).flatten()
-    
-    # Create seq_ids and position_ids for FlexQwen3
-    seq_length = len(test_tokens)
-    test_seq_ids = torch.zeros(seq_length, dtype=torch.long, device=local_rank)  # All tokens belong to sequence 0
-    test_position_ids = torch.arange(seq_length, dtype=torch.long, device=local_rank)  # 0, 1, 2, ...
-    
-    with torch.no_grad():
-        # Test LoRA model logits (adapters should be enabled by default)
-        lora_output = wrapped_model.module(test_tokens, seq_ids=test_seq_ids, position_ids=test_position_ids)
         
-        # Debug full output shape
-        logger.info(f"Full output logits shape: {lora_output.logits.shape}")
-        logger.info(f"Input tokens length: {len(test_tokens)}")
-        logger.info(f"Expected: [{len(test_tokens)}, vocab_size]")
-        
-        # Get last token logits correctly - shape is [batch, seq_len, vocab_size]
-        lora_logits = lora_output.logits[0, -1, :]  # First batch, last position, all vocab
-        logger.info(f"Last token logits shape: {lora_logits.shape}")
-        
-        # Also check vocab size mismatch
-        model_vocab_size = lora_logits.shape[0]
-        tokenizer_vocab_size = len(tokenizer)
-        logger.info(f"Model vocab size: {model_vocab_size}")
-        logger.info(f"Tokenizer vocab size: {tokenizer_vocab_size}")
-        if model_vocab_size != tokenizer_vocab_size:
-            logger.error(f"VOCAB SIZE MISMATCH: Model has {model_vocab_size}, tokenizer has {tokenizer_vocab_size}")
-            
-        # Clip logits to tokenizer vocab size to prevent out-of-range tokens
-        if model_vocab_size > tokenizer_vocab_size:
-            logger.warning(f"Clipping logits from {model_vocab_size} to {tokenizer_vocab_size}")
-            lora_logits = lora_logits[:tokenizer_vocab_size]
-        
-        # Debug logits
-        logger.info(f"Logits shape: {lora_logits.shape}")
-        logger.info(f"Logits min/max: {lora_logits.min().item():.3f} / {lora_logits.max().item():.3f}")
-        logger.info(f"Expected vocab size: {len(tokenizer)}")
-        
-        lora_top_token = torch.argmax(lora_logits).item()
-        lora_next_word = tokenizer.decode(lora_top_token)
-        
-    logger.info(f"LoRA model next token: {lora_top_token} ({repr(lora_next_word)})")
-    logger.info(f"Test input: {repr(test_input)}")
-    logger.info(f"Test tokens: {test_tokens.tolist()}")
-    logger.info(f"Tokenizer vocab size: {len(tokenizer)}")
-    logger.info(f"Expected: Should be a sensible continuation like 'a', 'an', 'here', etc.")
-    
-    # Test base model vs LoRA model generation on simple prompt
-    logger.info("=== Base Model vs LoRA Comparison ===")
-    test_prompt = "The capital of France is"
-    test_input_ids = tokenizer.encode(test_prompt, return_tensors="pt").to(local_rank)
-    
-    # Create test inputs for flex_generate
-    seq_ids_test = torch.zeros_like(test_input_ids[0])
-    position_ids_test = torch.arange(test_input_ids.size(1), device=local_rank)
-    
-    try:
-        # Test base model using flex_generate
-        base_model = wrapped_model.module.base_model.model  # DDP -> PeftModel -> LoraModel -> FlexQwen3ForCausalLM
-        base_model.eval()
-        with torch.no_grad():
-            from cartridges.generation import flex_generate
-            base_pred_ids = flex_generate(
-                model=base_model,
-                tokenizer=tokenizer,
-                input_ids=test_input_ids[0],
-                seq_ids=seq_ids_test,
-                position_ids=position_ids_test,
-                max_new_tokens=5,
-                temperature=0.0,
-                is_peft=False
-            )
-        base_tokens = base_pred_ids.get(0, [])
-        base_result = test_prompt + tokenizer.decode(base_tokens, skip_special_tokens=True)
-        logger.info(f"Base model output: '{base_result}'")
-        
-        # Test LoRA model using flex_generate  
-        wrapped_model.module.eval()
-        with torch.no_grad():
-            lora_pred_ids = flex_generate(
-                model=wrapped_model.module,
-                tokenizer=tokenizer,
-                input_ids=test_input_ids[0],
-                seq_ids=seq_ids_test,
-                position_ids=position_ids_test,
-                max_new_tokens=5,
-                temperature=0.0,
-                is_peft=True
-            )
-        lora_tokens = lora_pred_ids.get(0, [])
-        lora_result = test_prompt + tokenizer.decode(lora_tokens, skip_special_tokens=True)
-        logger.info(f"LoRA model output: '{lora_result}'")
-        
-        # Compare results
-        if base_result == lora_result:
-            logger.info("✓ Base and LoRA models produce identical outputs (expected with zero B matrices)")
-        else:
-            logger.warning(f"⚠ Base and LoRA models produce different outputs:")
-            logger.warning(f"  Base:  '{base_result}'")
-            logger.warning(f"  LoRA:  '{lora_result}'")
-            
-    except Exception as e:
-        logger.error(f"Base vs LoRA comparison failed: {e}")
-
     def do_evaluation():
         for ds_config, dataset in ppl_evals:
             evaluate_perplexity(
@@ -989,6 +883,59 @@ def evaluate_generations(
             logger.info(f"PEFT active adapters: {model.active_adapters}")
     elif not is_peft:
         logger.info("Not using PEFT - model type is expected to be base model")
+
+    # LoRA Debugging: Check initialization values
+    if is_peft and isinstance(model, PeftModel):        
+        # Test base model vs LoRA model generation on simple prompt
+        logger.info("=== Base Model vs LoRA Comparison ===")
+        test_prompt = "The capital of France is"
+        test_input_ids = tokenizer.encode(test_prompt, return_tensors="pt").to(local_rank)
+        
+        # Create test inputs for flex_generate
+        seq_ids = torch.zeros_like(test_input_ids[0])
+        position_ids = torch.arange(test_input_ids.size(1), device=local_rank)
+        
+        # Test base model using flex_generate
+        base_model = model.get_base_model()
+        base_model.eval()
+        with torch.no_grad():
+            base_pred_ids = flex_generate(
+                model=base_model,
+                tokenizer=tokenizer,
+                input_ids=test_input_ids[0],
+                seq_ids=seq_ids,
+                position_ids=position_ids,
+                max_new_tokens=5,
+                temperature=0.0,
+                is_peft=False
+            )
+        base_tokens = base_pred_ids.get(0, [])
+        base_result = test_prompt + tokenizer.decode(base_tokens, skip_special_tokens=True)
+        logger.info(f"Base model output: '{base_result}'")
+        
+        # Test LoRA model using flex_generate  
+        model.eval()
+        with torch.no_grad():
+            lora_pred_ids = flex_generate(
+                model=model,
+                tokenizer=tokenizer,
+                input_ids=test_input_ids[0],
+                seq_ids=seq_ids,
+                position_ids=position_ids,
+                max_new_tokens=5,
+                temperature=0.0,
+                is_peft=True
+            )
+        lora_tokens = lora_pred_ids.get(0, [])
+        lora_result = test_prompt + tokenizer.decode(lora_tokens, skip_special_tokens=True)
+        logger.info(f"LoRA model output: '{lora_result}'")
+        
+        if base_result != lora_result:
+            logger.warning(f"⚠️  LoRA model output differs from base model even before training!")
+            logger.warning(f"Base: {base_result}")
+            logger.warning(f"LoRA: {lora_result}")
+        else:
+            logger.info("✅ LoRA model matches base model output")
 
     logger.info(
         f"Generating `{config.name_for_wandb}` (n={len(dataset)}, {len(dataset) // world_size} per device)"

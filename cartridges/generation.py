@@ -99,14 +99,13 @@ def flex_generate(
     logger.info(f"Input text: {repr(tokenizer.decode(input_ids, skip_special_tokens=True))}")
     
     # Test with a simple known input for comparison
-    test_text = "Hi, what is your "
+    test_text = "The capital of France is"
     test_tokens = tokenizer.encode(test_text, return_tensors="pt").to(device).flatten()
     test_seq_ids = torch.zeros(len(test_tokens), dtype=torch.long, device=device)
     test_position_ids = torch.arange(len(test_tokens), dtype=torch.long, device=device)
-    
+
     logger.info(f"Test comparison - '{test_text}': {test_tokens.tolist()}")
-    logger.info(f"Test comparison decoded: {repr(tokenizer.decode(test_tokens, skip_special_tokens=True))}")
-    
+        
     # Test with base model directly (bypass LoRA and flex_generate)
     if is_peft:
         logger.info("Testing base model directly...")
@@ -118,14 +117,19 @@ def flex_generate(
             with torch.no_grad():
                 # Test with direct base model access (bypass PEFT entirely)
                 try:
+                    attention_mask = torch.ones(
+                        (1, test_tokens.size(0)), 
+                        dtype=torch.bool, 
+                        device=device
+                    )
                     # Direct forward pass with base FlexQwen3 model
                     base_output = base_model(
                         input_ids=test_tokens,
                         seq_ids=test_seq_ids,
                         position_ids=test_position_ids,
-                        attention_mask=None,
+                        attention_mask=attention_mask,
                         past_key_values=None,
-                        use_cache=True,
+                        use_cache=True if not is_peft else False,
                         mode="generate",
                     )
                     base_logits = base_output.logits[0, -1, :]
@@ -154,27 +158,7 @@ def flex_generate(
         test_logits = test_output.logits[0, -1, :]
         test_next_token = test_logits.argmax().item()
         test_next_word = tokenizer.decode(test_next_token)
-        logger.info(f"Test input next token prediction: {test_next_token} ({repr(test_next_word)})")
-
-        # with attention mask
-        attention_mask = torch.ones(
-            (1, current_input_ids.size(0)), 
-            dtype=torch.bool, 
-            device=device
-        )
-        actual_output = model(
-            input_ids=input_ids,
-            seq_ids=seq_ids,
-            position_ids=position_ids,
-            attention_mask=attention_mask,
-            past_key_values=None,
-            use_cache=True,
-            mode="generate",
-        )
-        test_logits = test_output.logits[0, -1, :]
-        test_next_token = test_logits.argmax().item()
-        test_next_word = tokenizer.decode(test_next_token)
-        logger.info(f"Test input next token prediction with attention mask: {test_next_token} ({repr(test_next_word)})")
+        logger.info(f"LoRA test input next token prediction: {test_next_token} ({repr(test_next_word)})")
         
         # Test on actual input
         actual_output = model(
@@ -201,7 +185,7 @@ def flex_generate(
     # Current state
     current_input_ids = input_ids
     current_seq_ids = seq_ids
-    current_position_ids = position_ids 
+    current_position_ids = position_ids
 
     past_key_values = None
     
@@ -211,12 +195,12 @@ def flex_generate(
         with torch.no_grad():
             # FlexQwen3 handles causal masking via FlexAttention and seq_ids
             # No need for explicit attention mask since we don't have padded tokens
-            #attention_mask = None
-            attention_mask = torch.ones(
-                (1, current_input_ids.size(0)), 
-                dtype=torch.bool, 
-                device=device
-            )
+            attention_mask = None
+            # attention_mask = torch.ones(
+            #     (1, current_input_ids.size(0)), 
+            #     dtype=torch.bool, 
+            #     device=device
+            # )
             
             outputs = model(
                 input_ids=current_input_ids,
