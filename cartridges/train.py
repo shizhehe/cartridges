@@ -306,21 +306,7 @@ def train(config: TrainConfig):
             if hasattr(generate_dataset, 'baselines') and generate_dataset.baselines and config.wandb is not None and is_rank_zero:
                 for i, baseline in enumerate(generate_dataset.baselines):
                     for metric, value in baseline.items():
-                        wandb.summary[eval_config.name_for_wandb + f"_baseline_{metric}"] = value
-    
-    # Check model types
-    logger.info(f"Wrapped model type: {type(wrapped_model)}")
-    logger.info(f"Module type: {type(wrapped_model.module)}")
-    logger.info(f"Is PeftModel: {isinstance(wrapped_model.module, PeftModel)}")
-    if hasattr(wrapped_model.module, 'base_model'):
-        logger.info(f"Base model type: {type(wrapped_model.module.base_model)}")
-        if hasattr(wrapped_model.module.base_model, 'model'):
-            logger.info(f"Base model.model type: {type(wrapped_model.module.base_model.model)}")
-        if hasattr(wrapped_model.module.base_model, 'base_model'):
-            logger.info(f"Base model.base_model type: {type(wrapped_model.module.base_model.base_model)}")
-    if hasattr(wrapped_model.module, 'peft_config'):
-        logger.info(f"PEFT config: {wrapped_model.module.peft_config}")
-    
+                        wandb.summary[eval_config.name_for_wandb + f"_baseline_{metric}"] = value    
         
     def do_evaluation():
         for ds_config, dataset in ppl_evals:
