@@ -64,7 +64,7 @@ def flex_generate(
     if stop_token_ids is None:
         stop_token_ids = [tokenizer.eos_token_id] if tokenizer.eos_token_id is not None else []
     
-    if cache is None and not is_peft:
+    if cache is None: # and not is_peft:
         cache = TrainableCache(
             config=AttnConfig(
                 n_layers=model.config.num_hidden_layers,
@@ -107,8 +107,8 @@ def flex_generate(
                         seq_ids=test_seq_ids,
                         position_ids=test_position_ids,
                         attention_mask=attention_mask,
-                        past_key_values=None,
-                        use_cache=True if not is_peft else False,
+                        past_key_values=cache,
+                        use_cache=True,
                         mode="generate",
                     )
                     base_logits = base_output.logits[0, -1, :]
@@ -130,7 +130,7 @@ def flex_generate(
             seq_ids=test_seq_ids,
             position_ids=test_position_ids,
             attention_mask=None,
-            past_key_values=None,
+            past_key_values=cache,
             use_cache=True,
             mode="generate",
         )
@@ -145,7 +145,7 @@ def flex_generate(
             seq_ids=seq_ids,
             position_ids=position_ids,
             attention_mask=None,
-            past_key_values=None,
+            past_key_values=cache,
             use_cache=True,
             mode="generate",
         )
@@ -169,9 +169,8 @@ def flex_generate(
     current_input_ids = input_ids
     current_seq_ids = seq_ids
     current_position_ids = position_ids
-
-    if is_peft:
-        past_key_values = 
+    
+    past_key_values = cache
     
     progress_range = tqdm(range(max_new_tokens), desc="Generating", disable=not show_progress, leave=False)
     for step in progress_range:
@@ -191,7 +190,7 @@ def flex_generate(
                 seq_ids=current_seq_ids,
                 position_ids=current_position_ids,
                 attention_mask=attention_mask,
-                past_key_values=past_key_values if is_peft else cache,
+                past_key_values=past_key_values,
                 use_cache=True,
                 mode="generate",
             )

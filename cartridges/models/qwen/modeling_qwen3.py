@@ -23,7 +23,7 @@ import torch.nn.functional as F
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention, BlockMask
 
 from transformers.activations import ACT2FN
-from transformers.cache_utils import Cache, DynamicCache
+from transformers.cache_utils import Cache, DynamicCache, TrainableCache
 from transformers.generation import GenerationMixin
 from transformers.integrations import use_kernel_forward_from_hub
 from transformers.modeling_layers import GradientCheckpointingLayer
@@ -34,6 +34,7 @@ from transformers.utils import auto_docstring, can_return_tuple, logging
 
 from .configuration_qwen3 import Qwen3Config
 from cartridges.models.attention import create_block_mask_w_cache, flex_attention_forward, repeat_kv
+from cartridges.models.config import AttnConfig
 
 
 logger = logging.get_logger(__name__)
@@ -385,9 +386,6 @@ class FlexQwen3Model(FlexQwen3PreTrainedModel):
 
         cartridge_len = past_key_values.num_cartridge_tokens() if past_key_values is not None else 0
         position_ids = position_ids + cartridge_len
-
-        if use_cache and past_key_values is None:
-            past_key_values = DynamicCache()
         
         # Build the block mask
         # Normalize attention_mask to a 1D bool "key is padded" mask (True = padded)
