@@ -44,14 +44,7 @@ def flex_generate(
     This implementation relies on the PackedCache above.
     """
     print(tokenizer.decode(input_ids))
-    
-    # Debug: Check model state in generation function
-    logger.info(f"flex_generate called with model type: {type(model)}")
-    logger.info(f"is_peft flag: {is_peft}")
-    logger.info(f"cache provided: {cache is not None}")
-    logger.info(f"temperature: {temperature}")
-    logger.info(f"max_new_tokens: {max_new_tokens}")
-    
+        
     if is_peft:
         from peft import PeftModel
         logger.info(f"Using PEFT model: {isinstance(model, PeftModel)}")
@@ -74,95 +67,6 @@ def flex_generate(
             ),
         )
         
-    logger.info(f"Processing sequence with {len(input_ids)} tokens")
-    logger.info(f"Input tokens: {input_ids.tolist()}")
-    logger.info(f"Input text: {repr(tokenizer.decode(input_ids, skip_special_tokens=True))}")
-    
-    # Test with a simple known input for comparison
-    test_text = "The capital of France is"
-    test_tokens = tokenizer.encode(test_text, return_tensors="pt").to(device).flatten()
-    test_seq_ids = torch.zeros(len(test_tokens), dtype=torch.long, device=device)
-    test_position_ids = torch.arange(len(test_tokens), dtype=torch.long, device=device)
-
-    logger.info(f"Test comparison - '{test_text}': {test_tokens.tolist()}")
-
-    base_next_word = None
-        
-    # Test with base model directly (bypass LoRA and flex_generate)
-    if is_peft:
-        logger.info("Testing base model directly...")
-        try:
-            # Get the actual base FlexQwen3 model
-            base_model = model.base_model.model  # PeftModel -> LoraModel -> FlexQwen3ForCausalLM
-            logger.info(f"Base model type: {type(base_model)}")
-            
-            with torch.no_grad():
-                # Test with direct base model access (bypass PEFT entirely)
-                try:
-                    attention_mask = None
-                    # attention_mask = torch.ones(
-                    #     (1, test_tokens.size(0)), 
-                    #     dtype=torch.bool, 
-                    #     device=device
-                    # )
-                    # Direct forward pass with base FlexQwen3 model
-                    base_output = base_model(
-                        input_ids=test_tokens,
-                        seq_ids=test_seq_ids,
-                        position_ids=test_position_ids,
-                        attention_mask=attention_mask,
-                        past_key_values=cache,
-                        use_cache=True,
-                        mode="generate",
-                    )
-                    base_logits = base_output.logits[0, -1, :]
-                    base_next_token = base_logits.argmax().item()
-                    base_next_word = tokenizer.decode(base_next_token)
-                    logger.info(f"Base model (direct access) prediction: {base_next_token} ({repr(base_next_word)})")
-                    
-                except Exception as e:
-                    traceback.print_exc()
-                    logger.error(f"Base model test failed: {e}")
-                    
-        except Exception as e:
-            traceback.print_exc()
-            logger.error(f"Could not access base model: {e}")
-    
-    # Quick test generation on both inputs
-    with torch.no_grad():
-        # Test on simple input
-        test_output = model(
-            input_ids=test_tokens,
-            seq_ids=test_seq_ids,
-            position_ids=test_position_ids,
-            attention_mask=None,
-            past_key_values=cache,
-            use_cache=True,
-            mode="generate",
-        )
-        test_logits = test_output.logits[0, -1, :]
-        test_next_token = test_logits.argmax().item()
-        test_next_word = tokenizer.decode(test_next_token)
-        logger.info(f"LoRA test input next token prediction: {test_next_token} ({repr(test_next_word)})")
-        
-        # Test on actual input
-        actual_output = model(
-            input_ids=input_ids,
-            seq_ids=seq_ids,
-            position_ids=position_ids,
-            attention_mask=None,
-            past_key_values=cache,
-            use_cache=True,
-            mode="generate",
-        )
-        actual_logits = actual_output.logits[0, -1, :]
-        actual_next_token = actual_logits.argmax().item()
-        actual_next_word = tokenizer.decode(actual_next_token)
-        logger.info(f"Actual input next token prediction: {actual_next_token} ({repr(actual_next_word)})")
-    
-    if base_next_word != actual_next_word:
-        logger.error(f"Base model and LoRA model predictions differ: {base_next_word} != {actual_next_word}")
-
     # Initialize generated sequences
     generated_tokens: Dict[int, List[int]] = defaultdict(list)
     
@@ -184,11 +88,6 @@ def flex_generate(
             # FlexQwen3 handles causal masking via FlexAttention and seq_ids
             # No need for explicit attention mask since we don't have padded tokens
             attention_mask = None
-            # attention_mask = torch.ones(
-            #     (1, current_input_ids.size(0)), 
-            #     dtype=torch.bool, 
-            #     device=device
-            # )
             
             outputs = model(
                 input_ids=current_input_ids,

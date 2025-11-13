@@ -869,73 +869,6 @@ def evaluate_generations(
     logger.info(f"Model type after unwrapping: {type(model)}")
     logger.info(f"Is PEFT model: {isinstance(model, PeftModel)}")
     logger.info(f"is_peft flag: {is_peft}")
-    
-    # Verify PEFT model is preserved when expected
-    if is_peft and not isinstance(model, PeftModel):
-        logger.error("PEFT model was unwrapped incorrectly!")
-        logger.error(f"Expected PeftModel, got {type(model)}")
-    elif is_peft and isinstance(model, PeftModel):
-        logger.info("PEFT model correctly preserved")
-        if hasattr(model, 'print_trainable_parameters'):
-            logger.info("PEFT trainable parameters:")
-            model.print_trainable_parameters()
-        if hasattr(model, 'active_adapters'):
-            logger.info(f"PEFT active adapters: {model.active_adapters}")
-    elif not is_peft:
-        logger.info("Not using PEFT - model type is expected to be base model")
-
-    # LoRA Debugging: Check initialization values
-    if is_peft and isinstance(model, PeftModel):        
-        # Test base model vs LoRA model generation on simple prompt
-        logger.info("=== Base Model vs LoRA Comparison ===")
-        test_prompt = "user\nQuestion: According to the “Annual Compliance Meeting” email, when and where is the meeting scheduled, what time does it start, and to whom should attendees RSVP?\nAnswer:\nassistant\n<think>\n\n</think>\n\n"
-        test_input_ids = tokenizer.encode(test_prompt, return_tensors="pt").to(local_rank)
-        
-        # Create test inputs for flex_generate
-        seq_ids = torch.zeros_like(test_input_ids[0])
-        position_ids = torch.arange(test_input_ids.size(1), device=local_rank)
-        
-        # Test base model using flex_generate
-        base_model = model.get_base_model()
-        base_model.eval()
-        with torch.no_grad():
-            base_pred_ids = flex_generate(
-                model=base_model,
-                tokenizer=tokenizer,
-                input_ids=test_input_ids[0],
-                seq_ids=seq_ids,
-                position_ids=position_ids,
-                max_new_tokens=5,
-                temperature=0.0,
-                is_peft=False
-            )
-        base_tokens = base_pred_ids.get(0, [])
-        base_result = test_prompt + tokenizer.decode(base_tokens, skip_special_tokens=True)
-        logger.info(f"Base model output: '{base_result}'")
-        
-        # Test LoRA model using flex_generate  
-        model.eval()
-        with torch.no_grad():
-            lora_pred_ids = flex_generate(
-                model=model,
-                tokenizer=tokenizer,
-                input_ids=test_input_ids[0],
-                seq_ids=seq_ids,
-                position_ids=position_ids,
-                max_new_tokens=5,
-                temperature=0.0,
-                is_peft=True
-            )
-        lora_tokens = lora_pred_ids.get(0, [])
-        lora_result = test_prompt + tokenizer.decode(lora_tokens, skip_special_tokens=True)
-        logger.info(f"LoRA model output: '{lora_result}'")
-        
-        if base_result != lora_result:
-            logger.warning(f"⚠️  LoRA model output differs from base model even before training!")
-            logger.warning(f"Base: {base_result}")
-            logger.warning(f"LoRA: {lora_result}")
-        else:
-            logger.info("✅ LoRA model matches base model output")
 
     logger.info(
         f"Generating `{config.name_for_wandb}` (n={len(dataset)}, {len(dataset) // world_size} per device)"
@@ -988,13 +921,7 @@ def evaluate_generations(
             input_ids = input_ids[first_seq_mask]  # first sequence tokens
             seq_ids = seq_ids[first_seq_mask]  # corresponding seq_ids
             position_ids = position_ids[first_seq_mask]  # corresponding position_ids
-            
-            # Log input tokens
-            logger.info(f"DEBUG: Input tokens shape: {input_ids.shape}")
-            logger.info(f"DEBUG: Input tokens: {input_ids.tolist()}")
-            input_text = tokenizer.decode(input_ids, skip_special_tokens=True)
-            logger.info(f"DEBUG: Input text: {repr(input_text)}")
-            
+                        
             pred_ids: Dict[int, List[int]] = flex_generate(
                 input_ids=input_ids,
                 seq_ids=seq_ids,
@@ -1012,20 +939,8 @@ def evaluate_generations(
                 is_peft=is_peft,
                 max_repetitions=config.max_repetitions,
             )
-            
-            # Log generated output
-            logger.info(f"DEBUG: Generated pred_ids keys: {list(pred_ids.keys())}")
-            for seq_id, curr_pred_ids in pred_ids.items():
-                logger.info(f"DEBUG: Generated tokens for seq_id {seq_id}: {curr_pred_ids}")
-                pred_text = tokenizer.decode(curr_pred_ids, skip_special_tokens=True)
-                logger.info(f"DEBUG: Generated text for seq_id {seq_id}: {repr(pred_text)}")
-            
+                        
             pred = tokenizer.batch_decode(pred_ids, skip_special_tokens=True)
-
-            logger.info(f"DEBUG: Pred text: {repr(pred)}")
-
-            print("Done with a generation, killing process.")
-            os.kill(os.getpid(), signal.SIGKILL)
 
             elements = {seq_id: elem for seq_id, elem in elements}
 
