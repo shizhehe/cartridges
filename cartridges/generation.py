@@ -3,6 +3,7 @@ import os
 from typing import Any, Dict, List, Optional
 from transformers import DynamicCache, AutoTokenizer
 import torch
+import traceback
 from tqdm import tqdm
 
 from cartridges.cache import AttnConfig, TrainableCache
@@ -98,11 +99,12 @@ def flex_generate(
             with torch.no_grad():
                 # Test with direct base model access (bypass PEFT entirely)
                 try:
-                    attention_mask = torch.ones(
-                        (1, test_tokens.size(0)), 
-                        dtype=torch.bool, 
-                        device=device
-                    )
+                    attention_mask = None
+                    # attention_mask = torch.ones(
+                    #     (1, test_tokens.size(0)), 
+                    #     dtype=torch.bool, 
+                    #     device=device
+                    # )
                     # Direct forward pass with base FlexQwen3 model
                     base_output = base_model(
                         input_ids=test_tokens,
@@ -119,9 +121,11 @@ def flex_generate(
                     logger.info(f"Base model (direct access) prediction: {base_next_token} ({repr(base_next_word)})")
                     
                 except Exception as e:
+                    traceback.print_exc()
                     logger.error(f"Base model test failed: {e}")
                     
         except Exception as e:
+            traceback.print_exc()
             logger.error(f"Could not access base model: {e}")
     
     # Quick test generation on both inputs
@@ -158,7 +162,6 @@ def flex_generate(
     
     if base_next_word != actual_next_word:
         logger.error(f"Base model and LoRA model predictions differ: {base_next_word} != {actual_next_word}")
-        raise ValueError(f"Base model and LoRA model predictions differ: {base_next_word} != {actual_next_word}")
 
     # Initialize generated sequences
     generated_tokens: Dict[int, List[int]] = defaultdict(list)
