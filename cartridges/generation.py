@@ -84,6 +84,8 @@ def flex_generate(
     test_position_ids = torch.arange(len(test_tokens), dtype=torch.long, device=device)
 
     logger.info(f"Test comparison - '{test_text}': {test_tokens.tolist()}")
+
+    base_next_word = None
         
     # Test with base model directly (bypass LoRA and flex_generate)
     if is_peft:
