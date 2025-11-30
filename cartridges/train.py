@@ -766,8 +766,6 @@ def evaluate_perplexity(
             summary_stats = {
                 f"{prefix}/sample_mean_loss": df['loss'].mean(),
                 f"{prefix}/sample_mean_perplexity": df['perplexity'].mean(),
-                f"{prefix}/sample_median_perplexity": df['perplexity'].median(),
-                f"{prefix}/sample_std_perplexity": df['perplexity'].std(),
                 f"{prefix}/num_samples": len(df),
                 f"{prefix}/total_target_tokens": df['num_target_tokens'].sum(),
                 f"{prefix}/mean_tokens_per_sample": df['num_target_tokens'].mean(),

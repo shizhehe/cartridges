@@ -240,6 +240,17 @@ class EnronStreamQAResource(Resource):
         if not self.config.synthesize_all_batches:
             return [self]
         
+        # If target_batch_id is specified, only return that batch
+        if self.config.target_batch_id is not None:
+            if self.config.target_batch_id >= len(self.batch_contexts):
+                raise ValueError(f"Target batch {self.config.target_batch_id} does not exist. Available batches: 0-{len(self.batch_contexts)-1}")
+            
+            batch_resource = EnronStreamQAResource(self.config)
+            batch_resource.set_batch_id(self.config.target_batch_id)
+            # Add batch suffix to show which specific batch was targeted
+            batch_resource._batch_suffix = f"_batch_{self.config.target_batch_id}"
+            return [batch_resource]
+        
         variants = []
         for batch_id in range(len(self.batch_contexts)):
             # Create a copy of the resource for this batch

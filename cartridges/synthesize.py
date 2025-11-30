@@ -171,9 +171,18 @@ class SynthesizeConfig(RunConfig):
             temp_resource = EnronStreamResource(enron_resource_config)
         num_batches = temp_resource.get_num_batches()
         
-        logger.info(f"Running synthesis for {num_batches} batches separately")
+        # Check if target_batch_id is specified
+        if hasattr(enron_resource_config, 'target_batch_id') and enron_resource_config.target_batch_id is not None:
+            target_batch = enron_resource_config.target_batch_id
+            if target_batch >= num_batches:
+                raise ValueError(f"Target batch {target_batch} does not exist. Available batches: 0-{num_batches-1}")
+            batch_ids = [target_batch]
+            logger.info(f"Running synthesis for target batch {target_batch} only")
+        else:
+            batch_ids = list(range(num_batches))
+            logger.info(f"Running synthesis for {num_batches} batches separately")
         
-        for batch_id in range(num_batches):
+        for batch_id in batch_ids:
             logger.info(f"Synthesizing batch {batch_id}")
             
             # Create a copy of the resource config for this batch

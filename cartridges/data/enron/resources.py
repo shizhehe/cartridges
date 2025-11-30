@@ -62,14 +62,17 @@ class EnronStreamResource(Resource):
         # New config option to enable multi-batch synthesis
         synthesize_all_batches: bool = True  # If True, creates separate datasets for each batch
         batch_output_dir: Optional[str] = None  # Base directory for batch outputs
+        target_batch_id: Optional[int] = None  # If set, only generate for this specific batch
         
     def __init__(self, config: Config):
         self.config = config
         self.chunkers = {}  # Store chunkers for each batch
 
         # Check if a specific batch ID was set for this instance
-        if hasattr(config, '_target_batch_id'):
-            self._current_batch_id = config._target_batch_id
+        if self.config.target_batch_id is not None:
+            self._current_batch_id = self.config.target_batch_id
+        else:
+            self._current_batch_id = 0
 
         # Load folder name mappings if selected_users_file is provided
         self.folder_name_mapping = {}
@@ -277,6 +280,17 @@ class EnronStreamResource(Resource):
         """Return a list of resource variants for multi-batch synthesis."""
         if not self.config.synthesize_all_batches:
             return [self]
+        
+        # If target_batch_id is specified, only return that batch
+        if self.config.target_batch_id is not None:
+            if self.config.target_batch_id >= len(self.batches):
+                raise ValueError(f"Target batch {self.config.target_batch_id} does not exist. Available batches: 0-{len(self.batches)-1}")
+            
+            batch_resource = EnronStreamResource(self.config)
+            batch_resource.set_batch_id(self.config.target_batch_id)
+            # Add batch suffix to show which specific batch was targeted
+            batch_resource._batch_suffix = f"_batch_{self.config.target_batch_id}"
+            return [batch_resource]
         
         variants = []
         for batch_id in range(len(self.batches)):

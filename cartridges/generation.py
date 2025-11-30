@@ -50,7 +50,7 @@ def flex_generate(
     if stop_token_ids is None:
         stop_token_ids = [tokenizer.eos_token_id] if tokenizer.eos_token_id is not None else []
     
-    if cache is None: # and not is_peft:
+    if cache is None:
         cache = TrainableCache(
             config=AttnConfig(
                 n_layers=model.config.num_hidden_layers,
