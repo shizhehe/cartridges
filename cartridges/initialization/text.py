@@ -55,4 +55,5 @@ class KVFromText(KVCacheFactory):
                 init_keys=init_cache._keys,
                 init_values=init_cache._values,
                 num_frozen_tokens=self.config.num_frozen_tokens,
+                freeze_ranges=self.config.freeze_ranges,
             )

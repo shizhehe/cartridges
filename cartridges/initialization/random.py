@@ -30,4 +30,5 @@ class KVFromRandomVectors(KVCacheFactory):
             init_keys=rand_vectors(),
             init_values=rand_vectors(),
             num_frozen_tokens=self.config.num_frozen_tokens,
+            freeze_ranges=self.config.freeze_ranges,
         )
